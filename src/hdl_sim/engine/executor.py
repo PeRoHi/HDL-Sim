@@ -73,7 +73,12 @@ class ProcessState:
                 on_update=self.context.on_net_update,
             )
             return
-        self.context.nba.schedule_lvalue(target, value, eval_fn=self.context.evaluator.eval)
+        self.context.nba.schedule_lvalue(
+            target,
+            value,
+            eval_fn=self.context.evaluator.eval,
+            locals=self.context.nets,
+        )
 
     def _require_net(self, name: str) -> SimNet:
         try:
@@ -107,12 +112,12 @@ class StatementRunner:
                     on_update=self._ctx.on_net_update,
                 )
             else:
-                value = self._ctx.evaluator.eval(stmt.expr)
-                self._state.assign_lvalue(
+                state = self._ctx.evaluator.eval_logic(stmt.expr)
+                self._ctx.nba.schedule_lvalue_logic(
                     stmt.target,
-                    value,
-                    blocking=False,
-                    time=self._now(),
+                    state,
+                    eval_fn=self._ctx.evaluator.eval,
+                    locals=self._ctx.nets,
                 )
             if on_complete is not None:
                 on_complete()

@@ -83,8 +83,9 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        top: str | None = None,
     ) -> Simulator:
-        return cls(parse_design(source), timescale=timescale, vcd_path=vcd_path)
+        return cls(parse_design(source), timescale=timescale, vcd_path=vcd_path, top=top)
 
     @classmethod
     def from_file(
@@ -93,8 +94,14 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        top: str | None = None,
     ) -> Simulator:
-        return cls.from_source(path.read_text(encoding="utf-8"), timescale=timescale, vcd_path=vcd_path)
+        return cls.from_source(
+            path.read_text(encoding="utf-8"),
+            timescale=timescale,
+            vcd_path=vcd_path,
+            top=top,
+        )
 
     def _ensure_vcd(self) -> None:
         if self._vcd is None:
@@ -109,12 +116,11 @@ class Simulator:
             evaluator = ExpressionEvaluator(assign.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
 
             def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> bool:
-                value = evaluator.eval(scoped.expr)
+                from hdl_sim.engine.net_state import apply_four_state
+
+                state = evaluator.eval_logic(scoped.expr)
                 net = self._nets[scoped.target]
-                if net.update(value, time=time):
-                    self._record_net(net, time)
-                    return True
-                return False
+                return apply_four_state(net, state, time=time, on_update=self._record_net)
 
             self._delta.add_continuous(recompute)
             recompute(0)
