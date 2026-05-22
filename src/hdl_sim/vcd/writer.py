@@ -68,16 +68,22 @@ class VCDWriter:
         for net in targets:
             self.change(net, time)
 
+    def _nets_for_render(self) -> dict[str, SimNet]:
+        if self._active_nets is None:
+            return self.nets
+        return {name: self.nets[name] for name in self._active_nets if name in self.nets}
+
     def render(self) -> str:
+        nets = self._nets_for_render()
         lines = [
             f"$date {datetime.now(tz=UTC).isoformat()} $end",
             "$version HDL-Sim 0.2.0 $end",
             f"$timescale {self.timescale} $end",
         ]
-        _emit_scope(lines, self._scope_root, self.nets, self._codes)
+        _emit_scope(lines, self._scope_root, nets, self._codes)
         lines.extend(["$enddefinitions $end", "$dumpvars", "#0"])
-        for name in sorted(self.nets):
-            net = self.nets[name]
+        for name in sorted(nets):
+            net = nets[name]
             lines.append(f"{net.vcd_value()}{self._codes[name]}")
         lines.append("$end")
 
@@ -119,6 +125,8 @@ def _emit_scope(
     for child in sorted(node.children.values(), key=lambda item: item.name):
         _emit_scope(lines, child, nets, codes)
     for net_name in sorted(node.nets):
+        if net_name not in nets:
+            continue
         net = nets[net_name]
         code = codes[net_name]
         lines.append(f"$var wire {net.width} {code} {net_name.split('.')[-1]} $end")

@@ -30,6 +30,7 @@ from hdl_sim.parser.ast import (
     UnaryExpr,
     WhileStmt,
     ForStmt,
+    ForkJoin,
     TaskEnable,
 )
 
@@ -160,6 +161,11 @@ class StatementRunner:
                 on_complete()
             return
 
+        if isinstance(stmt, ForkJoin):
+            self._execute_fork_join(stmt, on_complete=on_complete)
+            return
+
+
         if isinstance(stmt, EventControl):
             self._execute_event_control(stmt)
             return
@@ -194,6 +200,40 @@ class StatementRunner:
             return
         if on_complete is not None:
             on_complete()
+
+    def _execute_fork_join(self, stmt: ForkJoin, *, on_complete: ContinueCallback | None = None) -> None:
+        if not isinstance(stmt.body, Block):
+            self.execute(stmt.body, on_complete=on_complete)
+            return
+
+        branches = stmt.body.statements
+        if stmt.join_mode == "join_none":
+            for branch in branches:
+                self.execute(branch)
+            if on_complete is not None:
+                on_complete()
+            return
+
+        finished = [False]
+        remaining = [len(branches)]
+
+        def branch_done() -> None:
+            if finished[0]:
+                return
+            if stmt.join_mode == "join_any":
+                finished[0] = True
+                if on_complete is not None:
+                    on_complete()
+                return
+            remaining[0] -= 1
+            if remaining[0] == 0:
+                finished[0] = True
+                if on_complete is not None:
+                    on_complete()
+
+        for branch in branches:
+            self.execute(branch, on_complete=branch_done)
+
 
     def _execute_case(self, stmt: CaseStmt, *, on_complete: ContinueCallback | None = None) -> None:
         from hdl_sim.engine.four_state import case_match, eval_four_state

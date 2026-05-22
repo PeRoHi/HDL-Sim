@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from hdl_sim.engine.nets import SimNet
+from hdl_sim.engine.generate import expand_module_generates
 from hdl_sim.engine.params import ParameterEvaluator
 from hdl_sim.parser.ast import (
     FunctionDef,
@@ -98,13 +99,19 @@ def _elaborate_module(
     local: dict[str, SimNet] = {}
     param_evaluator = ParameterEvaluator(param_env)
     param_evaluator.resolve_module_params(module.parameters)
+    module = expand_module_generates(module, param_evaluator)
 
     for port in module.ports:
         if port_bindings and port.name in port_bindings:
             net = port_bindings[port.name]
         else:
             full_name = _scoped_name(prefix, port.name)
-            kind = DeclKind.WIRE if port.direction is PortDirection.INPUT else DeclKind.REG
+            if port.direction is PortDirection.INPUT:
+                kind = DeclKind.WIRE
+            elif port.direction is PortDirection.INOUT:
+                kind = DeclKind.WIRE
+            else:
+                kind = DeclKind.REG
             net = SimNet.from_declaration(full_name, kind, param_evaluator.resolve_range(port.range))
             global_nets[full_name] = net
         local[port.name] = net
@@ -119,7 +126,9 @@ def _elaborate_module(
 
     for assign in module.continuous_assigns:
         target = _scoped_name(prefix, assign.target)
-        if target not in global_nets:
+        if assign.target in local:
+            global_nets[target] = local[assign.target]
+        elif target not in global_nets:
             global_nets[target] = SimNet(name=target, width=1, kind=DeclKind.WIRE)
             local[assign.target] = global_nets[target]
         continuous.append(

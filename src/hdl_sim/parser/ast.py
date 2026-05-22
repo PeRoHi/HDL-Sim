@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Any
 
 
 class DeclKind(Enum):
@@ -15,6 +16,7 @@ class DeclKind(Enum):
 class PortDirection(Enum):
     INPUT = auto()
     OUTPUT = auto()
+    INOUT = auto()
 
 
 class EdgeKind(Enum):
@@ -137,6 +139,34 @@ class ConcatExpr(Expr):
 
 class Stmt:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class GenerateFor:
+    genvar: str
+    init: Expr
+    condition: Expr
+    step: BlockingAssign
+    body: tuple[Any, ...]
+    label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GenerateIf:
+    condition: Expr
+    then_items: tuple[Any, ...]
+    else_items: tuple[Any, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class GenerateBlock:
+    items: tuple[Any, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ForkJoin(Stmt):
+    body: Stmt
+    join_mode: str = "join"
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +347,7 @@ class Module:
     instances: tuple[ModuleInstance, ...] = ()
     functions: tuple[FunctionDef, ...] = ()
     tasks: tuple[TaskDef, ...] = ()
+    generate_blocks: tuple[GenerateBlock, ...] = ()
     loc: SourceLocation | None = None
 
 

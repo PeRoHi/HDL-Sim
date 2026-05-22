@@ -166,20 +166,39 @@ class Simulator:
             self._tracer.log(f"#{time} $dumpvars ({len(active)} nets)")
 
     def _resolve_dump_nets(self, args: tuple[DisplayArg, ...]) -> frozenset[str]:
-        from hdl_sim.parser.ast import IdentRef
+        from hdl_sim.parser.ast import BitSelect, IdentRef, PartSelect
+
+        if not args:
+            return frozenset(self._nets)
+
+        evaluator = ExpressionEvaluator(self._nets)
+        explicit: list[str] = []
+        for arg in args:
+            if arg.expr is None:
+                continue
+            if isinstance(arg.expr, IdentRef):
+                name = arg.expr.name
+                if name in self._nets:
+                    explicit.append(name)
+                else:
+                    explicit.extend(n for n in self._nets if n.endswith(f".{name}") or n == name)
+            elif isinstance(arg.expr, (BitSelect, PartSelect)):
+                signal = arg.expr.signal
+                if signal in self._nets:
+                    explicit.append(signal)
+        if explicit:
+            return frozenset(dict.fromkeys(explicit))
 
         level = 0
         scope: str | None = None
-        if args:
-            evaluator = ExpressionEvaluator(self._nets)
-            if args[0].expr is not None:
-                level = evaluator.eval(args[0].expr)
-            if len(args) > 1:
-                second = args[1]
-                if second.text is not None:
-                    scope = second.text.strip('"')
-                elif isinstance(second.expr, IdentRef):
-                    scope = second.expr.name
+        if args[0].expr is not None:
+            level = evaluator.eval(args[0].expr)
+        if len(args) > 1:
+            second = args[1]
+            if second.text is not None:
+                scope = second.text.strip('"')
+            elif isinstance(second.expr, IdentRef):
+                scope = second.expr.name
         selected: list[str] = []
         for name in self._nets:
             if scope is not None and not (name == scope or name.startswith(f"{scope}.")):

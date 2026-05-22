@@ -62,6 +62,33 @@ class ExpressionEvaluator:
             on_net_update=self._on_net_update or (lambda *_: None),
         )
 
+    def eval_four_state(self, expr: Expr):
+        from hdl_sim.engine.four_state import (
+            FourStateValue,
+            bitwise_and,
+            bitwise_not,
+            bitwise_or,
+            bitwise_xor,
+            to_int,
+        )
+        from hdl_sim.parser.ast import IntLiteral
+
+        if isinstance(expr, IntLiteral):
+            return FourStateValue.from_literal(expr)
+        if isinstance(expr, IdentRef):
+            return FourStateValue.from_int(self._nets[expr.name].value, width=self._nets[expr.name].width)
+        if isinstance(expr, UnaryExpr) and expr.op == "~":
+            return bitwise_not(self.eval_four_state(expr.operand))
+        if isinstance(expr, BinaryExpr) and expr.op in {"&", "|", "^"}:
+            left = self.eval_four_state(expr.left)
+            right = self.eval_four_state(expr.right)
+            if expr.op == "&":
+                return bitwise_and(left, right)
+            if expr.op == "|":
+                return bitwise_or(left, right)
+            return bitwise_xor(left, right)
+        return FourStateValue.from_int(self.eval(expr))
+
     def eval(self, expr: Expr) -> int:
         if isinstance(expr, FunctionCall):
             args = tuple(self.eval(arg) for arg in expr.args)
@@ -110,6 +137,10 @@ class ExpressionEvaluator:
             msg = f"unsupported unary operator: {expr.op}"
             raise EvaluationError(msg)
         if isinstance(expr, BinaryExpr):
+            if expr.op in {"&", "|", "^"} and self._expr_has_unknown(expr):
+                from hdl_sim.engine.four_state import to_int
+
+                return to_int(self.eval_four_state(expr))
             if expr.op == "?:":
                 condition, branches = expr.left, expr.right
                 cond_value = self.eval(condition)
@@ -165,6 +196,17 @@ class ExpressionEvaluator:
             return value
         msg = f"unsupported expression node: {type(expr).__name__}"
         raise EvaluationError(msg)
+
+    def _expr_has_unknown(self, expr: Expr) -> bool:
+        from hdl_sim.parser.ast import BinaryExpr, IntLiteral, UnaryExpr
+
+        if isinstance(expr, IntLiteral):
+            return bool(expr.x_mask or expr.z_mask)
+        if isinstance(expr, BinaryExpr):
+            return self._expr_has_unknown(expr.left) or self._expr_has_unknown(expr.right)
+        if isinstance(expr, UnaryExpr):
+            return self._expr_has_unknown(expr.operand)
+        return False
 
     def _operand_net(self, expr: Expr) -> SimNet | None:
         if isinstance(expr, IdentRef):

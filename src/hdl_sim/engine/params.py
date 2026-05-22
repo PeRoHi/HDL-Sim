@@ -59,6 +59,18 @@ class ParameterEvaluator:
                 return left << right
             if expr.op == ">>":
                 return left >> right
+            if expr.op == "==":
+                return 1 if left == right else 0
+            if expr.op == "!=":
+                return 1 if left != right else 0
+            if expr.op == "<":
+                return 1 if left < right else 0
+            if expr.op == "<=":
+                return 1 if left <= right else 0
+            if expr.op == ">":
+                return 1 if left > right else 0
+            if expr.op == ">=":
+                return 1 if left >= right else 0
             msg = f"unsupported binary operator in parameter: {expr.op}"
             raise ParameterEvaluationError(msg)
         msg = f"unsupported parameter expression: {type(expr).__name__}"

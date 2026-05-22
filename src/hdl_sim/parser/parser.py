@@ -54,6 +54,10 @@ from hdl_sim.parser.ast import (
     ValueRange,
     Repeat,
     ForStmt,
+    ForkJoin,
+    GenerateIf,
+    GenerateFor,
+    GenerateBlock,
     ConcatExpr,
     UnaryExpr,
     WhileStmt,
@@ -177,6 +181,50 @@ class VerilogTransformer(Transformer):
             return self.transform(value)
         return value
 
+    def _normalize_generate_if(self, genif: GenerateIf) -> GenerateIf:
+        return GenerateIf(
+            condition=genif.condition,
+            then_items=tuple(self._resolve_generate_item(i) for i in _flatten(genif.then_items)),
+            else_items=tuple(self._resolve_generate_item(i) for i in _flatten(genif.else_items)),
+        )
+
+    def _resolve_generate_item(self, item: Any) -> Any:
+        if isinstance(item, Tree):
+            if item.data == "generate_item" and item.children:
+                return self._resolve_generate_item(item.children[0])
+            item = self.transform(item)
+        if isinstance(item, GenerateIf):
+            return self._normalize_generate_if(item)
+        if isinstance(item, GenerateFor):
+            return GenerateFor(
+                genvar=item.genvar,
+                init=item.init,
+                condition=item.condition,
+                step=item.step,
+                body=tuple(self._resolve_generate_item(i) for i in _flatten(item.body)),
+                label=item.label,
+            )
+        if isinstance(item, tuple):
+            return self._resolve_generate_items(item)
+        return item
+
+    def _resolve_generate_items(self, items: Any) -> tuple[Any, ...]:
+        if isinstance(items, tuple):
+            raw = list(items)
+        elif isinstance(items, list):
+            raw = items
+        else:
+            raw = [items]
+        resolved: list[Any] = []
+        for item in _flatten(raw):
+            if isinstance(item, Tree):
+                item = self.transform(item)
+            if isinstance(item, tuple):
+                resolved.extend(item)
+            else:
+                resolved.append(item)
+        return tuple(resolved)
+
     def design(self, modules: list[Module]) -> Design:
         return Design(modules=tuple(modules))
 
@@ -194,6 +242,7 @@ class VerilogTransformer(Transformer):
         instances: list[ModuleInstance] = []
         functions: list[FunctionDef] = []
         tasks: list[TaskDef] = []
+        generate_blocks: list[GenerateBlock] = []
 
         index = 1
         if index < len(items) and isinstance(items[index], list) and items[index]:
@@ -222,6 +271,8 @@ class VerilogTransformer(Transformer):
                     functions.append(candidate)
                 elif isinstance(candidate, TaskDef):
                     tasks.append(candidate)
+                elif isinstance(candidate, GenerateBlock):
+                    generate_blocks.append(candidate)
                 elif isinstance(candidate, ModuleInstance):
                     instances.append(candidate)
 
@@ -236,6 +287,7 @@ class VerilogTransformer(Transformer):
             instances=tuple(instances),
             functions=tuple(functions),
             tasks=tuple(tasks),
+            generate_blocks=tuple(generate_blocks),
         )
 
     def port_list(self, ports: list[Port]) -> list[Port]:
@@ -243,7 +295,13 @@ class VerilogTransformer(Transformer):
 
     @v_args(inline=True)
     def port_decl(self, direction: Token, *rest: Any) -> Port:
-        port_dir = PortDirection.INPUT if str(direction).lower() == "input" else PortDirection.OUTPUT
+        dir_text = str(direction).lower()
+        if dir_text == "input":
+            port_dir = PortDirection.INPUT
+        elif dir_text == "inout":
+            port_dir = PortDirection.INOUT
+        else:
+            port_dir = PortDirection.OUTPUT
         if len(rest) == 2:
             value_range, name = rest
             return Port(direction=port_dir, name=str(name), range=value_range)
@@ -443,6 +501,51 @@ class VerilogTransformer(Transformer):
         value = count.value if isinstance(count, IntLiteral) else _int(count)
         return Repeat(count=value, body=body)
 
+
+
+    def generate_block(self, items: list[Any]) -> GenerateBlock:
+        return GenerateBlock(items=tuple(self._resolve_generate_item(i) for i in _flatten(items)))
+
+    def gen_begin(self, items: list[Any]) -> tuple[Any, ...]:
+        return self._resolve_generate_items(items)
+
+    def gen_single(self, item: Any) -> tuple[Any, ...]:
+        return self._resolve_generate_items(item)
+
+    @v_args(inline=True)
+    def genvar_init(self, *items: Any) -> tuple[str, Expr]:
+        if len(items) == 3:
+            return str(items[1]), items[2]
+        return str(items[0]), items[1]
+
+    def gen_for(self, *children: Any) -> GenerateFor:
+        flat = self._child_args(children)
+        genvar, init = flat[0]
+        condition = flat[1]
+        step = flat[2]
+        body = self._resolve_generate_items(flat[3])
+        return GenerateFor(genvar=genvar, init=init, condition=condition, step=step, body=body)
+
+    def gen_if(self, *children: Any) -> GenerateIf:
+        flat = self._child_args(children)
+        condition = flat[0]
+        then_items = self._resolve_generate_items(flat[1])
+        else_items: tuple[Any, ...] = ()
+        if len(flat) > 2:
+            else_items = self._resolve_generate_items(flat[2])
+        return self._normalize_generate_if(GenerateIf(condition=condition, then_items=then_items, else_items=else_items))
+
+    @v_args(inline=True)
+    def fork_join(self, body: Stmt) -> ForkJoin:
+        return ForkJoin(body=body, join_mode="join")
+
+    @v_args(inline=True)
+    def fork_join_any(self, body: Stmt) -> ForkJoin:
+        return ForkJoin(body=body, join_mode="join_any")
+
+    @v_args(inline=True)
+    def fork_join_none(self, body: Stmt) -> ForkJoin:
+        return ForkJoin(body=body, join_mode="join_none")
 
 
     def task_decl(self, children: list[Any]) -> TaskDef:

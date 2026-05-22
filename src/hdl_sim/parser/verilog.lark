@@ -19,7 +19,7 @@ port_list: "(" port_decl ("," port_decl)* ")"
 
 port_decl: PORT_DIR range? IDENT
 
-PORT_DIR: "input"i | "output"i
+PORT_DIR: "input"i | "output"i | "inout"i
 
 decl_or_stmt: declaration
              | parameter_decl_stmt
@@ -28,9 +28,11 @@ decl_or_stmt: declaration
              | always_block
              | function_decl
              | task_decl
+             | generate_block
              | module_instance
 
 declaration: REG range? IDENT ";"
+          | genvar_decl
           | WIRE range? IDENT ";"
           | INTEGER range? IDENT ";"
 
@@ -41,11 +43,32 @@ REG: "reg"i
 WIRE: "wire"i
 INTEGER: "integer"i
 
+genvar_decl: "genvar"i IDENT ";"
+
 range: "[" expr ":" expr "]"
 
 function_decl: "function" range? IDENT ";" function_item+ "endfunction" [";"]
 
 task_decl: "task" IDENT ";" task_item+ "endtask" [";"]
+
+generate_block: "generate" generate_item+ "endgenerate" [";"]
+
+generate_item: generate_for
+             | generate_if
+             | declaration
+             | continuous_assign
+             | module_instance
+             | initial_block
+             | always_block
+
+generate_for: "for" "(" genvar_init ";" expr ";" for_step ")" generate_body -> gen_for
+
+genvar_init: "genvar"i? IDENT "=" expr
+
+generate_body: "begin" generate_item+ "end" -> gen_begin
+              | generate_item -> gen_single
+
+generate_if: "if" "(" expr ")" generate_body ["else" generate_body] -> gen_if
 
 task_item: "input" range? IDENT ";" -> task_input
          | "output" range? IDENT ";" -> task_output
@@ -93,6 +116,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | if_stmt
      | case_stmt
      | task_enable
+     | fork_stmt
      | event_control
 
 begin_end_block: "begin" stmt_list "end"
@@ -130,6 +154,10 @@ for_step: lvalue "=" expr
 for_stmt: "for" "(" for_init? ";" expr? ";" for_step? ")" stmt
 
 if_stmt: "if" "(" expr ")" stmt ["else" stmt]
+
+fork_stmt: "fork" begin_end_block "join" -> fork_join
+          | "fork" begin_end_block "join_any" -> fork_join_any
+          | "fork" begin_end_block "join_none" -> fork_join_none
 
 task_enable: IDENT "(" expr ("," expr)* ")" ";" -> task_call
           | IDENT "(" ")" ";" -> task_call_empty

@@ -73,3 +73,57 @@ def eval_four_state(expr: Expr, eval_int: callable[[Expr], int]) -> FourStateVal
     if isinstance(expr, IntLiteral):
         return FourStateValue.from_literal(expr)
     return FourStateValue.from_int(eval_int(expr))
+
+
+def _align(a: FourStateValue, b: FourStateValue) -> tuple[int, int, int, int, int]:
+    width = max(a.width, b.width)
+    mask = (1 << width) - 1
+    return (
+        width,
+        mask,
+        a.value & mask,
+        b.value & mask,
+        (a.x_mask | a.z_mask) & mask,
+    )
+
+
+def bitwise_and(a: FourStateValue, b: FourStateValue) -> FourStateValue:
+    width, mask, av, bv, _ = _align(a, b)
+    ax, az = a.x_mask & mask, a.z_mask & mask
+    bx, bz = b.x_mask & mask, b.z_mask & mask
+    result_x = (ax | bx | az | bz) & mask
+    return FourStateValue(value=av & bv, width=width, x_mask=result_x, z_mask=(az | bz) & mask)
+
+
+def bitwise_or(a: FourStateValue, b: FourStateValue) -> FourStateValue:
+    width, mask, av, bv, _ = _align(a, b)
+    ax, az = a.x_mask & mask, a.z_mask & mask
+    bx, bz = b.x_mask & mask, b.z_mask & mask
+    known_mask = (~(ax | bx | az | bz)) & mask
+    value = (av | bv) & known_mask
+    result_x = ((ax | bx) & ~(av | bv)) & mask
+    return FourStateValue(value=value, width=width, x_mask=result_x | ((ax | bx) & mask), z_mask=(az | bz) & mask)
+
+
+def bitwise_xor(a: FourStateValue, b: FourStateValue) -> FourStateValue:
+    width, mask, av, bv, _ = _align(a, b)
+    ax, az = a.x_mask & mask, a.z_mask & mask
+    bx, bz = b.x_mask & mask, b.z_mask & mask
+    if (ax | bx | az | bz) & mask:
+        return FourStateValue(value=0, width=width, x_mask=mask, z_mask=0)
+    return FourStateValue(value=(av ^ bv) & mask, width=width)
+
+
+def bitwise_not(a: FourStateValue) -> FourStateValue:
+    mask = (1 << a.width) - 1
+    known = (~(a.x_mask | a.z_mask)) & mask
+    return FourStateValue(
+        value=(~a.value) & known,
+        width=a.width,
+        x_mask=a.x_mask | (a.x_mask & ~known),
+        z_mask=a.z_mask,
+    )
+
+
+def to_int(value: FourStateValue) -> int:
+    return value.value
