@@ -63,3 +63,26 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 ## ロードマップ
 
 - UI は最後。現状は VCD・`--verbose` / `--trace`・pytest で検証
+
+## Web UI（Silos 風）
+
+ブラウザで **編集・階層確認・実行・波形・コンソール** を一体で操作できます。
+
+```bash
+pip install fastapi uvicorn lark pytest
+PYTHONPATH=src python3 -m hdl_sim.web
+# または
+PYTHONPATH=src hdl-sim-ui
+```
+
+ブラウザで http://127.0.0.1:8765 を開いてください。
+
+| 操作 | 説明 |
+|------|------|
+| **▶ 実行** | エディタの Verilog をシミュレーション（F5） |
+| **階層を更新** | パース・エラボレーションのみ |
+| **例** | `examples/` のサンプルを読み込み |
+| **波形** | 実行後に VCD から自動描画 |
+| **コンソール** | `$display` 出力 |
+
+UI の静的ファイルは `ui/`、API は `src/hdl_sim/web/` にあります。

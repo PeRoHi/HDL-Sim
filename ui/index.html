@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HDL-Sim — Silos風シミュレータ UI</title>
+  <link rel="stylesheet" href="/assets/css/app.css" />
+</head>
+<body>
+  <header class="toolbar" role="banner">
+    <div class="toolbar-brand">
+      <span class="logo">HDL-Sim</span>
+      <span class="tagline">イベント駆動 Verilog シミュレータ</span>
+    </div>
+    <div class="toolbar-actions">
+      <button type="button" id="btn-run" class="btn primary" title="実行 (F5)">▶ 実行</button>
+      <button type="button" id="btn-elab" class="btn" title="構造チェック">階層を更新</button>
+      <label class="field">
+        <span>トップ</span>
+        <input type="text" id="input-top" placeholder="自動" />
+      </label>
+      <label class="field">
+        <span>終了時刻</span>
+        <input type="number" id="input-until" value="50" min="0" />
+      </label>
+      <label class="field">
+        <span>最大イベント</span>
+        <input type="number" id="input-max-events" value="500" min="1" />
+      </label>
+      <label class="field">
+        <span>例</span>
+        <select id="select-example">
+          <option value="">— 読み込み —</option>
+        </select>
+      </label>
+    </div>
+    <div class="toolbar-status" id="status-bar" aria-live="polite">準備完了</div>
+  </header>
+
+  <main class="workspace">
+    <aside class="panel panel-left" aria-label="階層">
+      <div class="panel-header">
+        <h2>階層</h2>
+        <span class="hint">モジュール・ポート・信号</span>
+      </div>
+      <div id="hierarchy-tree" class="tree" tabindex="0"></div>
+      <div class="panel-header panel-header-sub">
+        <h2>信号一覧</h2>
+      </div>
+      <ul id="signal-list" class="signal-list"></ul>
+    </aside>
+
+    <section class="panel panel-center" aria-label="エディタ">
+      <div class="panel-header">
+        <h2>ソース</h2>
+        <span class="hint">ここで Verilog を編集して実行できます（Silos と同様）</span>
+      </div>
+      <div class="editor-tabs">
+        <span class="tab active" data-path="design.v">design.v</span>
+      </div>
+      <div id="editor" class="editor-host"></div>
+    </section>
+
+    <aside class="panel panel-right" aria-label="波形">
+      <div class="panel-header">
+        <h2>波形</h2>
+        <span class="hint">実行後に VCD から表示</span>
+      </div>
+      <div class="wave-toolbar">
+        <button type="button" id="btn-wave-fit" class="btn small">全体表示</button>
+        <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> 自動スクロール</label>
+      </div>
+      <div id="waveform-wrap" class="waveform-wrap">
+        <canvas id="waveform-canvas"></canvas>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="panel panel-console" aria-label="コンソール">
+    <div class="panel-header">
+      <h2>コンソール</h2>
+      <span class="hint">$display やシミュレータメッセージ</span>
+      <button type="button" id="btn-clear-console" class="btn small">クリア</button>
+    </div>
+    <pre id="console-output" class="console-output"></pre>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+  <script src="/assets/js/vcd-viewer.js"></script>
+  <script src="/assets/js/app.js" type="module"></script>
+</body>
+</html>
