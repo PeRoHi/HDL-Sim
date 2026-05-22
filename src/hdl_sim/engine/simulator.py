@@ -14,7 +14,7 @@ from hdl_sim.engine.expr_deps import identifiers_in_expr, identifiers_in_stmt
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import AlwaysBlock, Design, EdgeKind, Module
-from hdl_sim.parser.loader import load_design
+from hdl_sim.parser.loader import load_design, load_design_with_meta
 from hdl_sim.parser.parser import parse_design, parse_module
 from hdl_sim.engine.trace import SimulationTracer
 from hdl_sim.vcd.writer import VCDWriter
@@ -38,11 +38,12 @@ class Simulator:
         timescale: str = "1ns",
         vcd_path: Path | None = None,
         tracer: SimulationTracer | None = None,
+        top: str | None = None,
     ) -> None:
         if isinstance(design, Module):
             design = Design(modules=(design,))
         if isinstance(design, Design):
-            elaborated = elaborate(design)
+            elaborated = elaborate(design, top=top)
         else:
             elaborated = design
 
@@ -61,6 +62,7 @@ class Simulator:
         )
         self._vcd_path = vcd_path
         self._tracer = tracer
+        self._monitors: list[tuple[tuple[DisplayArg, ...], dict[str, SimNet]]] = []
 
     @classmethod
     def from_source(
@@ -100,6 +102,32 @@ class Simulator:
                     )
             recompute(0)
 
+
+    def _register_monitor(self, args: tuple[DisplayArg, ...], locals: dict[str, SimNet]) -> None:
+        self._monitors.append((args, locals))
+
+    def _check_monitors(self) -> None:
+        for args, locals in self._monitors:
+            evaluator = ExpressionEvaluator(locals)
+            parts: list[str] = []
+            values: list[int] = []
+            for arg in args:
+                if arg.text is not None:
+                    parts.append(arg.text)
+                elif arg.expr is not None:
+                    values.append(evaluator.eval(arg.expr))
+            if parts and values:
+                message = parts[0] % tuple(values)
+            elif parts:
+                message = "".join(parts)
+            elif values:
+                message = " ".join(str(value) for value in values)
+            else:
+                message = ""
+            print(message, flush=True)
+            if self._tracer is not None:
+                self._tracer.log(f"#{self._queue.now} $monitor {message}")
+
     def _on_display(self, message: str, time: SimTime) -> None:
         if self._tracer is not None:
             self._tracer.log(f"#{time} $display {message}")
@@ -107,6 +135,7 @@ class Simulator:
     def _record_net(self, net: SimNet, time: SimTime) -> None:
         if net.previous is not None and self._tracer is not None:
             self._tracer.on_net_change(net, net.previous, net.value, time)
+        self._check_monitors()
         if self._vcd is not None:
             self._vcd.change(net, time)
 
@@ -126,6 +155,7 @@ class Simulator:
                 on_net_update=self._record_net,
                 on_display=self._on_display,
                 on_finish=on_finish,
+                on_monitor=lambda args, loc=process.locals: self._register_monitor(args, loc),
             )
             ProcessState(context).run(process.body)
 
@@ -162,6 +192,7 @@ class Simulator:
                 on_net_update=self._record_net,
                 on_display=self._on_display,
                 on_finish=on_finish,
+                on_monitor=lambda args, loc=local_nets: self._register_monitor(args, loc),
             )
             ProcessState(context).run(block.body)
 
@@ -238,31 +269,37 @@ class Simulator:
 def simulate_design(
     design: Design,
     *,
+    top: str | None = None,
     vcd_path: Path | None = None,
     until: SimTime | None = None,
     max_events: int | None = None,
     timescale: str = "1ns",
     tracer: SimulationTracer | None = None,
 ) -> SimulationResult:
-    simulator = Simulator(design, timescale=timescale, vcd_path=vcd_path, tracer=tracer)
+    simulator = Simulator(design, timescale=timescale, vcd_path=vcd_path, tracer=tracer, top=top)
     return simulator.run(until=until, max_events=max_events)
 
 
 def simulate_files(
     paths: list[Path],
     *,
+    top: str | None = None,
+    defines: dict[str, str] | None = None,
+    include_paths: list[Path] | None = None,
     vcd_path: Path | None = None,
     until: SimTime | None = None,
     max_events: int | None = None,
     timescale: str = "1ns",
     tracer: SimulationTracer | None = None,
 ) -> SimulationResult:
+    loaded = load_design_with_meta(paths, defines=defines, include_paths=include_paths)
     return simulate_design(
-        load_design(paths),
+        loaded.design,
+        top=top,
+        timescale=timescale if timescale != "1ns" else (loaded.timescale or timescale),
         vcd_path=vcd_path,
         until=until,
         max_events=max_events,
-        timescale=timescale,
         tracer=tracer,
     )
 

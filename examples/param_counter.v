@@ -1,4 +1,4 @@
-// Parameterized counter width (no port header)
+// Parameterized counter width
 module param_counter;
   parameter WIDTH = 4;
   reg clk;

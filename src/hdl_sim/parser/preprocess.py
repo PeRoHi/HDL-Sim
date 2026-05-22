@@ -53,5 +53,43 @@ def preprocess(source: str, *, extra_defines: dict[str, str] | None = None) -> P
     return PreprocessResult(source=cleaned.strip(), timescale=timescale, defines=defines)
 
 
+
+_INCLUDE = re.compile(r"`include\s+\"([^\"]+)\"", re.MULTILINE)
+
+
+def expand_includes(
+    source: str,
+    search_paths: list[Path],
+    *,
+    extra_defines: dict[str, str] | None = None,
+    _seen: set[Path] | None = None,
+) -> str:
+    """Expand `include "file.v"` directives recursively."""
+
+    seen = _seen or set()
+
+    def replace(match: re.Match[str]) -> str:
+        include_name = match.group(1)
+        for directory in search_paths:
+            candidate = (directory / include_name).resolve()
+            if not candidate.is_file():
+                continue
+            if candidate in seen:
+                return ""
+            seen.add(candidate)
+            nested = candidate.read_text(encoding="utf-8")
+            nested = preprocess(nested, extra_defines=extra_defines).source
+            nested = expand_includes(
+                nested,
+                search_paths,
+                extra_defines=extra_defines,
+                _seen=seen,
+            )
+            return nested + "\n"
+        msg = f"unable to find include file: {include_name}"
+        raise FileNotFoundError(msg)
+
+    return _INCLUDE.sub(replace, source)
+
 def normalize_source(source: str, *, extra_defines: dict[str, str] | None = None) -> str:
     return preprocess(source, extra_defines=extra_defines).source

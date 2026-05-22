@@ -46,6 +46,8 @@ from hdl_sim.parser.ast import (
     SystemTask,
     ValueRange,
     Repeat,
+    ForStmt,
+    ConcatExpr,
     UnaryExpr,
     WhileStmt,
 )
@@ -261,7 +263,7 @@ class VerilogTransformer(Transformer):
             if isinstance(decl_type, Token) and str(decl_type.type) == "REG":
                 kind = DeclKind.REG
             elif isinstance(decl_type, Token) and str(decl_type.type) == "INTEGER":
-                kind = DeclKind.REG
+                kind = DeclKind.INTEGER
             else:
                 kind = DeclKind.WIRE
             return Declaration(kind=kind, name=str(name), range=range_node)
@@ -269,7 +271,7 @@ class VerilogTransformer(Transformer):
         if isinstance(decl_type, Token) and str(decl_type.type) == "REG":
             kind = DeclKind.REG
         elif isinstance(decl_type, Token) and str(decl_type.type) == "INTEGER":
-            kind = DeclKind.REG
+            kind = DeclKind.INTEGER
         else:
             kind = DeclKind.WIRE
         return Declaration(kind=kind, name=str(name))
@@ -391,6 +393,38 @@ class VerilogTransformer(Transformer):
         value = count.value if isinstance(count, IntLiteral) else _int(count)
         return Repeat(count=value, body=body)
 
+
+    def concat_expr(self, children: list[Any]) -> ConcatExpr:
+        return ConcatExpr(parts=tuple(self._child_args(tuple(children))))
+
+    @v_args(inline=True)
+    def for_init(self, target: Lvalue, expr: Expr) -> BlockingAssign:
+        return BlockingAssign(target=target, expr=expr)
+
+    @v_args(inline=True)
+    def for_step(self, target: Lvalue, expr: Expr) -> BlockingAssign:
+        return BlockingAssign(target=target, expr=expr)
+
+    def for_stmt(self, children: list[Any]) -> ForStmt:
+        flat = self._child_args(tuple(children))
+        init: BlockingAssign | None = None
+        condition: Expr | None = None
+        step: BlockingAssign | None = None
+        body: Stmt = flat[-1]
+        index = 0
+        if index < len(flat) - 1 and isinstance(flat[index], BlockingAssign):
+            init = flat[index]
+            index += 1
+        if index < len(flat) - 1 and not isinstance(flat[index], BlockingAssign):
+            condition = flat[index]
+            index += 1
+        if index < len(flat) - 1 and isinstance(flat[index], BlockingAssign):
+            step = flat[index]
+        return ForStmt(init=init, condition=condition, step=step, body=body)
+
+    @v_args(inline=True)
+    def monitor(self, args: list[DisplayArg] | None = None) -> SystemTask:
+        return SystemTask(name="monitor", args=tuple(args or []))
     @v_args(inline=True)
     def while_stmt(self, condition: Expr, body: Stmt) -> WhileStmt:
         return WhileStmt(condition=condition, body=body)
@@ -493,7 +527,11 @@ class VerilogTransformer(Transformer):
         index = 1
         while index < len(resolved):
             op = str(resolved[index])
-            if op.startswith("OP_"):
+            if op in {"ADD_OP", "+"}:
+                op = "+"
+            elif op in {"SUB_OP", "-"}:
+                op = "-"
+            elif op.startswith("OP_"):
                 op = op[3:].lower()
                 if op == "lt":
                     op = "<"
@@ -529,7 +567,7 @@ class VerilogTransformer(Transformer):
             children = children[0]
         if len(children) == 1:
             return children[0]
-        if all(not isinstance(child, Token) for child in children):
+        if len(children) >= 3 and all(not isinstance(child, Token) for child in children):
             return _fold_binary("+", tuple(children))
         result = children[0]
         index = 1

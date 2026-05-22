@@ -22,12 +22,19 @@ from hdl_sim.parser.ast import (
     Stmt,
     UnaryExpr,
     WhileStmt,
+    ForStmt,
+    ConcatExpr,
 )
 
 
 def identifiers_in_expr(expr: Expr) -> set[str]:
     if isinstance(expr, IntLiteral):
         return set()
+    if isinstance(expr, ConcatExpr):
+        names: set[str] = set()
+        for part in expr.parts:
+            names |= identifiers_in_expr(part)
+        return names
     if isinstance(expr, IdentRef):
         return {expr.name}
     if isinstance(expr, BitSelect):
@@ -70,6 +77,15 @@ def identifiers_in_stmt(stmt: Stmt) -> set[str]:
         return identifiers_in_stmt(stmt.body)
     if isinstance(stmt, Repeat):
         return identifiers_in_stmt(stmt.body)
+    if isinstance(stmt, ForStmt):
+        names: set[str] = set()
+        if stmt.init is not None:
+            names |= identifiers_in_lvalue(stmt.init.target) | identifiers_in_expr(stmt.init.expr)
+        if stmt.condition is not None:
+            names |= identifiers_in_expr(stmt.condition)
+        if stmt.step is not None:
+            names |= identifiers_in_lvalue(stmt.step.target) | identifiers_in_expr(stmt.step.expr)
+        return names | identifiers_in_stmt(stmt.body)
     if isinstance(stmt, WhileStmt):
         return identifiers_in_expr(stmt.condition) | identifiers_in_stmt(stmt.body)
     if isinstance(stmt, IfStmt):

@@ -9,6 +9,7 @@ from enum import Enum, auto
 class DeclKind(Enum):
     REG = auto()
     WIRE = auto()
+    INTEGER = auto()
 
 
 class PortDirection(Enum):
@@ -215,6 +216,14 @@ class CaseStmt(Stmt):
     expression: Expr
     items: tuple[CaseItem, ...]
     case_style: str = "case"
+
+
+@dataclass(frozen=True, slots=True)
+class ForStmt(Stmt):
+    init: BlockingAssign | None
+    condition: Expr | None
+    step: BlockingAssign | None
+    body: Stmt
 
 
 @dataclass(frozen=True, slots=True)

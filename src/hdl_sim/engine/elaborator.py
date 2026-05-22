@@ -46,9 +46,9 @@ class ElaboratedDesign:
     always_blocks: tuple[tuple[AlwaysBlock, dict[str, SimNet]], ...]
 
 
-def elaborate(design: Design) -> ElaboratedDesign:
+def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
     modules = {module.name: module for module in design.modules}
-    top = design.top
+    top = design.module_by_name(top) if top else design.top
     global_nets: dict[str, SimNet] = {}
     continuous: list[ScopedContinuousAssign] = []
     initials: list[ScopedProcess] = []

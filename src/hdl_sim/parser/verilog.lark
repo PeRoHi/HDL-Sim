@@ -70,6 +70,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | forever_stmt
      | repeat_stmt
      | while_stmt
+     | for_stmt
      | if_stmt
      | case_stmt
      | event_control
@@ -101,6 +102,11 @@ forever_stmt: "forever" stmt
 repeat_stmt: "repeat" "(" NUMBER ")" stmt
 
 while_stmt: "while" "(" expr ")" stmt
+
+for_init: lvalue "=" expr
+for_step: lvalue "=" expr
+
+for_stmt: "for" "(" for_init? ";" expr? ";" for_step? ")" stmt
 
 if_stmt: "if" "(" expr ")" stmt ["else" stmt]
 
@@ -153,13 +159,13 @@ rel_expr: rel_expr OP_LT shift_expr
             | shift_expr OP_SHR add_expr
             | add_expr
 
-?add_expr: add_expr "+" mul_expr
-          | add_expr "-" mul_expr
+?add_expr: add_expr ADD_OP mul_expr
+          | add_expr SUB_OP mul_expr
           | mul_expr
 
-?mul_expr: mul_expr "*" unary_expr
-          | mul_expr "/" unary_expr
-          | mul_expr "%" unary_expr
+?mul_expr: mul_expr MUL_OP unary_expr
+          | mul_expr DIV_OP unary_expr
+          | mul_expr MOD_OP unary_expr
           | unary_expr
 
 ?unary_expr: "!" unary_expr -> not_
@@ -173,7 +179,10 @@ rel_expr: rel_expr OP_LT shift_expr
 ?primary: NUMBER
         | sized_number
         | signal_ref -> signal_expr
+        | concat_expr
         | "(" expr ")"
+
+concat_expr: "{" expr ("," expr)* "}"
 
 signal_ref: IDENT select?
 
@@ -192,6 +201,11 @@ OP_LE: "<="
 OP_GE: ">="
 OP_LT: "<"
 OP_GT: ">"
+ADD_OP: "+"
+SUB_OP: "-"
+MUL_OP: "*"
+DIV_OP: "/"
+MOD_OP: "%"
 
 %import common.WS
 %ignore WS

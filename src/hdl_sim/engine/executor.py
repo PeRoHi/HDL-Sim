@@ -29,6 +29,7 @@ from hdl_sim.parser.ast import (
     SystemTask,
     UnaryExpr,
     WhileStmt,
+    ForStmt,
 )
 
 
@@ -47,6 +48,7 @@ class ProcessContext:
     on_net_update: NetUpdateCallback
     on_display: Callable[[str, SimTime], None] | None = None
     on_finish: FinishCallback | None = None
+    on_monitor: Callable[[tuple[DisplayArg, ...]], None] | None = None
 
 
 @dataclass(slots=True)
@@ -120,6 +122,10 @@ class StatementRunner:
             self._execute_while(stmt, on_complete=on_complete)
             return
 
+        if isinstance(stmt, ForStmt):
+            self._execute_for(stmt, on_complete=on_complete)
+            return
+
         if isinstance(stmt, IfStmt):
             condition = self._ctx.evaluator.eval(stmt.condition)
             branch = stmt.then_branch if condition else stmt.else_branch
@@ -151,6 +157,27 @@ class StatementRunner:
 
         msg = f"unsupported statement: {type(stmt).__name__}"
         raise RuntimeError(msg)
+
+
+    def _execute_for(self, stmt: ForStmt, *, on_complete: ContinueCallback | None = None) -> None:
+        if stmt.init is not None:
+            value = self._ctx.evaluator.eval(stmt.init.expr)
+            self._state.assign_lvalue(stmt.init.target, value, blocking=True, time=self._now())
+
+        iterations = 0
+        while stmt.condition is None or self._ctx.evaluator.eval(stmt.condition):
+            iterations += 1
+            if iterations > 10_000:
+                msg = "for loop iteration limit exceeded"
+                raise RuntimeError(msg)
+            StatementRunner(self._state).execute(stmt.body)
+            if stmt.step is None:
+                break
+            value = self._ctx.evaluator.eval(stmt.step.expr)
+            self._state.assign_lvalue(stmt.step.target, value, blocking=True, time=self._now())
+
+        if on_complete is not None:
+            on_complete()
 
     def _execute_while(self, stmt: WhileStmt, *, on_complete: ContinueCallback | None = None) -> None:
         if self._ctx.evaluator.eval(stmt.condition):
@@ -191,6 +218,10 @@ class StatementRunner:
             return
         if stmt.name == "dumpfile":
             return
+        if stmt.name == "monitor":
+            if self._ctx.on_monitor is not None:
+                self._ctx.on_monitor(stmt.args)
+            return
         if stmt.name == "dumpvars":
             return
         msg = f"unsupported system task: {stmt.name}"
@@ -221,7 +252,7 @@ class StatementRunner:
             self._ctx.schedule(target_time, resume_after_delay)
             return
 
-        if isinstance(stmt, (BlockingAssign, NonBlockingAssign, IfStmt, WhileStmt, CaseStmt)):
+        if isinstance(stmt, (BlockingAssign, NonBlockingAssign, IfStmt, WhileStmt, ForStmt, CaseStmt)):
             self.execute(stmt)
             self._execute_statement_list(statements, index + 1, on_complete=on_complete)
             return

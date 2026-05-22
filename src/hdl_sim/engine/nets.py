@@ -33,7 +33,10 @@ class SimNet:
 
     @classmethod
     def from_declaration(cls, name: str, kind: DeclKind, value_range: Range | None) -> SimNet:
-        width = value_range.width if value_range is not None else 1
+        if kind is DeclKind.INTEGER:
+            width = value_range.width if value_range is not None else 32
+        else:
+            width = value_range.width if value_range is not None else 1
         return cls(name=name, width=width, kind=kind)
 
     def subscribe(self, observer: NetObserver) -> None:
