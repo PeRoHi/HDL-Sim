@@ -58,7 +58,7 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 
 - ANSI ポート（`input wire clk`）は未対応 → `input clk` 形式を使用
 - `#N;` の単体 delay は不可。`#N <文>` が必要（例: `#12 rst = 0;`）
-- UI / 波形ビューアは未実装（VCD + GTKWave 等を利用）
+- Web UI は `start_ui.py` / `start-ui.*` で起動可能。高度な波形解析は引き続き VCD + GTKWave も利用可能
 
 ## ロードマップ
 
@@ -68,14 +68,29 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 
 ブラウザで **編集・階層確認・実行・波形・コンソール** を一体で操作できます。
 
+### 一般向けの起動
+
+最初に一度だけ依存関係を入れます。
+
 ```bash
-pip install fastapi uvicorn lark pytest
-PYTHONPATH=src python3 -m hdl_sim.web
-# または
-PYTHONPATH=src hdl-sim-ui
+python3 -m pip install fastapi uvicorn lark pytest
 ```
 
-ブラウザで http://127.0.0.1:8765 を開いてください。
+その後は次のどれかを開くだけです。
+
+- macOS / Linux: `start-ui.command` をダブルクリック、または `./start-ui.sh`
+- Windows: `start-ui.bat` をダブルクリック
+- 共通: `python3 start_ui.py`
+
+起動するとブラウザが自動で開きます。詳しくは [docs/UI_QUICKSTART.md](docs/UI_QUICKSTART.md) を参照してください。
+
+### 開発者向け
+
+```bash
+python3 start_ui.py --no-open
+# または
+PYTHONPATH=src python3 -m hdl_sim.web --no-open
+```
 
 | 操作 | 説明 |
 |------|------|

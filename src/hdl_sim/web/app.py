@@ -314,16 +314,9 @@ def create_app() -> FastAPI:
 
 
 def main() -> int:
-    import uvicorn
+    from hdl_sim.web.launcher import main as launcher_main
 
-    uvicorn.run(
-        "hdl_sim.web.app:create_app",
-        factory=True,
-        host="0.0.0.0",
-        port=8765,
-        reload=False,
-    )
-    return 0
+    return launcher_main()
 
 
 if __name__ == "__main__":
