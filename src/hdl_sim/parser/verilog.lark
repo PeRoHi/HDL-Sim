@@ -1,21 +1,38 @@
 // Verilog subset grammar for HDL-Sim (LALR)
 
-?start: module
+?start: design
 
-module: "module" IDENT ";" decl_or_stmt* "endmodule" [";"]
+design: module+
+
+module: "module" IDENT port_list? ";" decl_or_stmt* "endmodule" [";"]
+
+port_list: "(" port_decl ("," port_decl)* ")"
+
+port_decl: PORT_DIR range? IDENT
+
+PORT_DIR: "input"i | "output"i
 
 decl_or_stmt: declaration
              | continuous_assign
              | initial_block
              | always_block
+             | module_instance
 
-declaration: TYPE range? IDENT ";"
+declaration: REG range? IDENT ";"
+          | WIRE range? IDENT ";"
 
-TYPE: "reg"i | "wire"i
+REG: "reg"i
+WIRE: "wire"i
 
 range: "[" NUMBER ":" NUMBER "]"
 
 continuous_assign: "assign" IDENT "=" expr ";"
+
+module_instance: IDENT IDENT "(" port_connections? ")" ";"
+
+port_connections: port_connection ("," port_connection)*
+
+port_connection: "." IDENT "(" expr ")"
 
 initial_block: "initial" stmt
 
@@ -29,7 +46,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
                   | "negedge"i IDENT -> negedge
                   | IDENT -> level
 
-?stmt: block
+?stmt: begin_end_block
      | blocking_assign
      | nonblocking_assign
      | delay_control
@@ -38,7 +55,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | if_stmt
      | event_control
 
-block: "begin" stmt_list "end"
+begin_end_block: "begin" stmt_list "end"
 
 stmt_list: stmt+
 

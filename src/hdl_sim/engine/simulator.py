@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from hdl_sim.core.events import EventQueue, SimTime
+from hdl_sim.engine.elaborator import ElaboratedDesign, ScopedContinuousAssign, ScopedProcess, elaborate
 from hdl_sim.engine.evaluator import ExpressionEvaluator
 from hdl_sim.engine.executor import ProcessContext, ProcessState
-from hdl_sim.engine.nets import SimNet
-from hdl_sim.parser.ast import (
-    AlwaysBlock,
-    ContinuousAssign,
-    DeclKind,
-    InitialBlock,
-    Module,
-)
-from hdl_sim.parser.parser import parse_module
 from hdl_sim.engine.expr_deps import identifiers_in_expr
+from hdl_sim.engine.nba import NBARegion
+from hdl_sim.engine.nets import SimNet
+from hdl_sim.parser.ast import AlwaysBlock, Design, EdgeKind, Module
+from hdl_sim.parser.parser import parse_design, parse_module
 from hdl_sim.vcd.writer import VCDWriter
 
 
@@ -30,23 +27,31 @@ class SimulationResult:
 
 
 class Simulator:
-    """Compile and run a single-module Verilog design."""
+    """Compile and run a Verilog design."""
 
     def __init__(
         self,
-        module: Module,
+        design: Design | Module | ElaboratedDesign,
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
     ) -> None:
-        self._module = module
+        if isinstance(design, Module):
+            design = Design(modules=(design,))
+        if isinstance(design, Design):
+            elaborated = elaborate(design)
+        else:
+            elaborated = design
+
+        self._elaborated = elaborated
         self._queue = EventQueue()
-        self._nets = self._build_nets(module)
-        self._evaluator = ExpressionEvaluator(self._nets)
-        self._vcd = VCDWriter(module.name, self._nets, timescale=timescale) if vcd_path else None
+        self._nets = elaborated.nets
+        self._nba = NBARegion(self._nets, on_update=self._record_net)
+        self._queue.set_nba_flush(lambda: self._nba.flush(self._queue.now))
+        self._vcd = (
+            VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
+        )
         self._vcd_path = vcd_path
-        self._continuous: list[ContinuousAssign] = list(module.continuous_assigns)
-        self._register_continuous_updates()
 
     @classmethod
     def from_source(
@@ -56,7 +61,7 @@ class Simulator:
         timescale: str = "1ns",
         vcd_path: Path | None = None,
     ) -> Simulator:
-        return cls(parse_module(source), timescale=timescale, vcd_path=vcd_path)
+        return cls(parse_design(source), timescale=timescale, vcd_path=vcd_path)
 
     @classmethod
     def from_file(
@@ -68,31 +73,20 @@ class Simulator:
     ) -> Simulator:
         return cls.from_source(path.read_text(encoding="utf-8"), timescale=timescale, vcd_path=vcd_path)
 
-    def _build_nets(self, module: Module) -> dict[str, SimNet]:
-        nets: dict[str, SimNet] = {}
-        for decl in module.declarations:
-            if decl.name in nets:
-                msg = f"duplicate declaration: {decl.name}"
-                raise ValueError(msg)
-            nets[decl.name] = SimNet.from_declaration(decl.name, decl.kind, decl.range)
-        for assign in module.continuous_assigns:
-            if assign.target not in nets:
-                nets[assign.target] = SimNet(name=assign.target, width=1, kind=DeclKind.WIRE)
-        return nets
-
     def _register_continuous_updates(self) -> None:
-        for assign in self._continuous:
+        for assign in self._elaborated.continuous_assigns:
+            evaluator = ExpressionEvaluator(assign.locals)
             dependencies = identifiers_in_expr(assign.expr)
 
-            def recompute(time: SimTime, assignment: ContinuousAssign = assign) -> None:
-                value = self._evaluator.eval(assignment.expr)
-                net = self._nets[assignment.target]
+            def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> None:
+                value = evaluator.eval(scoped.expr)
+                net = self._nets[scoped.target]
                 if net.update(value, time=time):
                     self._record_net(net, time)
 
             for name in dependencies:
-                if name in self._nets:
-                    self._nets[name].subscribe(
+                if name in assign.locals:
+                    assign.locals[name].subscribe(
                         lambda _net, _prev, _curr, time, cb=recompute: cb(time)
                     )
             recompute(0)
@@ -101,51 +95,67 @@ class Simulator:
         if self._vcd is not None:
             self._vcd.change(net, time)
 
-    def _spawn_process(self, body, *, time: SimTime = 0) -> None:
+    def _spawn_process(self, process: ScopedProcess, *, time: SimTime = 0) -> None:
+        evaluator = ExpressionEvaluator(process.locals)
+
         def run_process() -> None:
             context = ProcessContext(
                 queue=self._queue,
-                nets=self._nets,
-                evaluator=self._evaluator,
+                nets=process.locals,
+                evaluator=evaluator,
+                nba=self._nba,
                 schedule=lambda at, cb: self._queue.schedule_at(at, cb),
                 on_net_update=self._record_net,
             )
-            ProcessState(context).run(body)
+            ProcessState(context).run(process.body)
 
         self._queue.schedule_at(time, run_process)
 
     def _start_initial_blocks(self) -> None:
-        for block in self._module.initial_blocks:
-            self._spawn_process(block.body, time=0)
+        for process in self._elaborated.initial_blocks:
+            self._spawn_process(process, time=0)
 
     def _start_always_blocks(self) -> None:
-        for block in self._module.always_blocks:
+        for block, local_nets in self._elaborated.always_blocks:
             if block.sensitivity is None:
-                self._spawn_process(block.body, time=0)
+                self._spawn_process(ScopedProcess(body=block.body, locals=local_nets), time=0)
                 continue
-            self._start_sensitive_always(block)
+            self._start_sensitive_always(block, local_nets)
 
-    def _start_sensitive_always(self, block: AlwaysBlock) -> None:
-        watched = [name for _edge, name in block.sensitivity]
+    def _start_sensitive_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+        evaluator = ExpressionEvaluator(local_nets)
 
         def trigger() -> None:
-            context = ProcessContext(
-                queue=self._queue,
-                nets=self._nets,
-                evaluator=self._evaluator,
-                schedule=lambda at, cb: self._queue.schedule_at(at, cb),
-                on_net_update=self._record_net,
-            )
-            ProcessState(context).run(block.body)
+            self._spawn_process(ScopedProcess(body=block.body, locals=local_nets), time=self._queue.now)
 
-        def on_change(_net: SimNet, _prev: int, _curr: int, time: SimTime) -> None:
-            self._queue.schedule_at(time, trigger)
+        for edge_kind, name in block.sensitivity:
+            if name not in local_nets:
+                continue
+            net = local_nets[name]
 
-        for name in watched:
-            if name in self._nets:
-                self._nets[name].subscribe(on_change)
+            def on_change(
+                _net: SimNet,
+                prev: int,
+                curr: int,
+                time: SimTime,
+                *,
+                edge: EdgeKind | None = edge_kind,
+                fire: Callable[[], None] = trigger,
+            ) -> None:
+                if edge is EdgeKind.POSEDGE:
+                    if (prev & 1) == 0 and (curr & 1) == 1:
+                        fire()
+                elif edge is EdgeKind.NEGEDGE:
+                    if (prev & 1) == 1 and (curr & 1) == 0:
+                        fire()
+                else:
+                    fire()
+
+            net.subscribe(on_change)
 
     def run(self, *, until: SimTime | None = None, max_events: int | None = None) -> SimulationResult:
+        self._register_continuous_updates()
+
         if self._vcd is not None:
             self._vcd.dump_initial(0)
             for net in self._nets.values():
@@ -161,11 +171,12 @@ class Simulator:
             self._vcd.write(self._vcd_path)
 
         return SimulationResult(
-            top_module=self._module.name,
+            top_module=self._elaborated.top_module,
             stop_time=stop_time,
             events_processed=processed,
             vcd_path=self._vcd_path,
         )
+
 
 
 def simulate_file(

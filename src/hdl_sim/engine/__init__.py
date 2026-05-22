@@ -1,5 +1,6 @@
-"""Simulation engine built on the event queue and signal model."""
+"""Simulation engine."""
 
+from hdl_sim.engine.elaborator import ElaboratedDesign, elaborate
 from hdl_sim.engine.simulator import SimulationResult, Simulator
 
-__all__ = ["SimulationResult", "Simulator"]
+__all__ = ["ElaboratedDesign", "SimulationResult", "Simulator", "elaborate"]

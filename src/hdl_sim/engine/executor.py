@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from hdl_sim.core.events import EventQueue, SimTime
 from hdl_sim.engine.evaluator import ExpressionEvaluator
+from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import (
     Block,
@@ -25,6 +26,7 @@ from hdl_sim.parser.ast import (
 
 
 ContinueCallback = Callable[[], None]
+NetUpdateCallback = Callable[[SimNet, SimTime], None]
 
 
 @dataclass(slots=True)
@@ -32,14 +34,14 @@ class ProcessContext:
     queue: EventQueue
     nets: dict[str, SimNet]
     evaluator: ExpressionEvaluator
+    nba: NBARegion
     schedule: Callable[[SimTime, ContinueCallback], None]
-    on_net_update: Callable[[SimNet, SimTime], None]
+    on_net_update: NetUpdateCallback
 
 
 @dataclass(slots=True)
 class ProcessState:
     context: ProcessContext
-    pending_nonblocking: dict[str, int] = field(default_factory=dict)
 
     def run(self, stmt: Stmt) -> None:
         StatementRunner(self).execute(stmt)
@@ -51,14 +53,7 @@ class ProcessState:
                 self.context.on_net_update(net, time)
             return
 
-        self.pending_nonblocking[target] = value
-
-    def flush_nonblocking(self, time: SimTime) -> None:
-        for target, value in self.pending_nonblocking.items():
-            net = self._require_net(target)
-            if net.update(value, time=time):
-                self.context.on_net_update(net, time)
-        self.pending_nonblocking.clear()
+        self.context.nba.schedule(target, value)
 
     def _require_net(self, name: str) -> SimNet:
         try:
@@ -78,16 +73,14 @@ class StatementRunner:
             self._execute_statement_list(stmt.statements, on_complete=on_complete)
             return
 
-        if isinstance(stmt, BlockingAssign):
+        if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             value = self._ctx.evaluator.eval(stmt.expr)
-            self._state.assign(stmt.target, value, blocking=True, time=self._now())
-            if on_complete is not None:
-                on_complete()
-            return
-
-        if isinstance(stmt, NonBlockingAssign):
-            value = self._ctx.evaluator.eval(stmt.expr)
-            self._state.assign(stmt.target, value, blocking=False, time=self._now())
+            self._state.assign(
+                stmt.target,
+                value,
+                blocking=isinstance(stmt, BlockingAssign),
+                time=self._now(),
+            )
             if on_complete is not None:
                 on_complete()
             return
@@ -133,7 +126,6 @@ class StatementRunner:
         on_complete: ContinueCallback | None = None,
     ) -> None:
         if index >= len(statements):
-            self._state.flush_nonblocking(self._now())
             if on_complete is not None:
                 on_complete()
             return

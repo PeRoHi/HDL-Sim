@@ -11,6 +11,11 @@ class DeclKind(Enum):
     WIRE = auto()
 
 
+class PortDirection(Enum):
+    INPUT = auto()
+    OUTPUT = auto()
+
+
 class EdgeKind(Enum):
     POSEDGE = auto()
     NEGEDGE = auto()
@@ -30,6 +35,13 @@ class Range:
     @property
     def width(self) -> int:
         return abs(self.msb - self.lsb) + 1
+
+
+@dataclass(frozen=True, slots=True)
+class Port:
+    direction: PortDirection
+    name: str
+    range: Range | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +137,7 @@ class EventControl(Stmt):
 
 
 @dataclass(frozen=True, slots=True)
-class AssignStmt:
+class ContinuousAssign:
     target: str
     expr: Expr
 
@@ -142,18 +154,27 @@ class AlwaysBlock:
 
 
 @dataclass(frozen=True, slots=True)
-class ContinuousAssign:
-    target: str
+class PortConnection:
+    port: str
     expr: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleInstance:
+    module_type: str
+    instance_name: str
+    connections: tuple[PortConnection, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class Module:
     name: str
-    declarations: tuple[Declaration, ...]
+    ports: tuple[Port, ...] = ()
+    declarations: tuple[Declaration, ...] = ()
     continuous_assigns: tuple[ContinuousAssign, ...] = ()
     initial_blocks: tuple[InitialBlock, ...] = ()
     always_blocks: tuple[AlwaysBlock, ...] = ()
+    instances: tuple[ModuleInstance, ...] = ()
     loc: SourceLocation | None = None
 
 
@@ -161,9 +182,20 @@ class Module:
 class Design:
     modules: tuple[Module, ...] = field(default_factory=tuple)
 
+    def module_by_name(self, name: str) -> Module:
+        for module in self.modules:
+            if module.name == name:
+                return module
+        msg = f"unknown module: {name}"
+        raise ValueError(msg)
+
     @property
     def top(self) -> Module:
-        if len(self.modules) != 1:
-            msg = "exactly one module is supported in this MVP"
-            raise ValueError(msg)
-        return self.modules[0]
+        referenced = {instance.module_type for module in self.modules for instance in module.instances}
+        roots = [module for module in self.modules if module.name not in referenced]
+        if len(roots) == 1:
+            return roots[0]
+        if len(self.modules) == 1:
+            return self.modules[0]
+        msg = f"unable to determine top module (candidates: {[m.name for m in roots]})"
+        raise ValueError(msg)

@@ -11,11 +11,9 @@ from lark import Lark, Token, Transformer, v_args
 from hdl_sim.parser.ast import (
     Stmt,
     AlwaysBlock,
-    AssignStmt,
     BinaryExpr,
     Block,
     BlockingAssign,
-    ConcatExpr,
     ContinuousAssign,
     Declaration,
     DeclKind,
@@ -30,16 +28,21 @@ from hdl_sim.parser.ast import (
     InitialBlock,
     IntLiteral,
     Module,
+    ModuleInstance,
     NonBlockingAssign,
+    Port,
+    PortConnection,
+    PortDirection,
     Range,
     Repeat,
-    SourceLocation,
     UnaryExpr,
 )
 from hdl_sim.parser.preprocess import normalize_source
 
 
-def _int(token: Token | str) -> int:
+def _int(token: Token | str | IntLiteral) -> int:
+    if isinstance(token, IntLiteral):
+        return token.value
     return int(str(token))
 
 
@@ -60,105 +63,186 @@ def _parse_sized_number(text: str) -> IntLiteral:
     return IntLiteral(value=value, width=width)
 
 
-@v_args(inline=True)
+
+
+def _flatten(values: list[Any]) -> list[Any]:
+    flattened: list[Any] = []
+    for value in values:
+        if isinstance(value, list):
+            flattened.extend(_flatten(value))
+        else:
+            flattened.append(value)
+    return flattened
+
+def _fold_binary(op: str, children: tuple[Expr, ...]) -> Expr:
+    if len(children) == 1:
+        return children[0]
+    result = children[0]
+    for child in children[1:]:
+        result = BinaryExpr(op, result, child)
+    return result
+
+
 class VerilogTransformer(Transformer):
+    def design(self, modules: list[Module]) -> Design:
+        return Design(modules=tuple(modules))
+
     def decl_or_stmt(self, item: Any) -> Any:
         return item
 
-    def module(self, name: Token, *items: Any) -> Module:
+    def module(self, items: list[Any]) -> Module:
+        name = str(items[0])
+        ports: list[Port] = []
         declarations: list[Declaration] = []
         continuous_assigns: list[ContinuousAssign] = []
         initial_blocks: list[InitialBlock] = []
         always_blocks: list[AlwaysBlock] = []
-        for item in items:
-            if isinstance(item, Declaration):
-                declarations.append(item)
-            elif isinstance(item, ContinuousAssign):
-                continuous_assigns.append(item)
-            elif isinstance(item, InitialBlock):
-                initial_blocks.append(item)
-            elif isinstance(item, AlwaysBlock):
-                always_blocks.append(item)
+        instances: list[ModuleInstance] = []
+
+        for item in items[1:]:
+            candidates = item if isinstance(item, list) else [item]
+            for candidate in candidates:
+                if isinstance(candidate, Port):
+                    ports.append(candidate)
+                elif isinstance(candidate, Declaration):
+                    declarations.append(candidate)
+                elif isinstance(candidate, ContinuousAssign):
+                    continuous_assigns.append(candidate)
+                elif isinstance(candidate, InitialBlock):
+                    initial_blocks.append(candidate)
+                elif isinstance(candidate, AlwaysBlock):
+                    always_blocks.append(candidate)
+                elif isinstance(candidate, ModuleInstance):
+                    instances.append(candidate)
+
         return Module(
-            name=str(name),
+            name=name,
+            ports=tuple(ports),
             declarations=tuple(declarations),
             continuous_assigns=tuple(continuous_assigns),
             initial_blocks=tuple(initial_blocks),
             always_blocks=tuple(always_blocks),
+            instances=tuple(instances),
         )
 
-    def declaration(self, decl_type: Token, *rest: Any) -> Declaration:
+    def port_list(self, ports: list[Port]) -> list[Port]:
+        return ports
+
+    @v_args(inline=True)
+    def port_decl(self, direction: Token, *rest: Any) -> Port:
+        port_dir = PortDirection.INPUT if str(direction).lower() == "input" else PortDirection.OUTPUT
         if len(rest) == 2:
-            range_node, name = rest
-            return Declaration(
-                kind=DeclKind.REG if str(decl_type).lower() == "reg" else DeclKind.WIRE,
-                name=str(name),
-                range=range_node,
-            )
+            value_range, name = rest
+            return Port(direction=port_dir, name=str(name), range=value_range)
         (name,) = rest
-        return Declaration(
-            kind=DeclKind.REG if str(decl_type).lower() == "reg" else DeclKind.WIRE,
-            name=str(name),
+        return Port(direction=port_dir, name=str(name))
+
+    @v_args(inline=True)
+    def module_instance(
+        self,
+        module_type: Token,
+        instance_name: Token,
+        connections: list[PortConnection] | None = None,
+    ) -> ModuleInstance:
+        return ModuleInstance(
+            module_type=str(module_type),
+            instance_name=str(instance_name),
+            connections=tuple(connections or []),
         )
 
+    def port_connections(self, connections: list[PortConnection]) -> list[PortConnection]:
+        return connections
+
+    @v_args(inline=True)
+    def port_connection(self, port: Token, expr: Expr) -> PortConnection:
+        return PortConnection(port=str(port), expr=expr)
+
+    @v_args(inline=True)
+    def declaration(self, *rest: Any) -> Declaration:
+        if len(rest) == 3:
+            decl_type, range_node, name = rest
+            kind = DeclKind.REG if isinstance(decl_type, Token) and str(decl_type.type) == "REG" else DeclKind.WIRE
+            return Declaration(kind=kind, name=str(name), range=range_node)
+        decl_type, name = rest
+        kind = DeclKind.REG if isinstance(decl_type, Token) and str(decl_type.type) == "REG" else DeclKind.WIRE
+        return Declaration(kind=kind, name=str(name))
+
+    @v_args(inline=True)
     def range(self, msb: Token, lsb: Token) -> Range:
         return Range(msb=_int(msb), lsb=_int(lsb))
 
+    @v_args(inline=True)
     def continuous_assign(self, target: Token, expr: Expr) -> ContinuousAssign:
         return ContinuousAssign(target=str(target), expr=expr)
 
+    @v_args(inline=True)
     def initial_block(self, body: Stmt) -> InitialBlock:
         return InitialBlock(body=body)
 
+    @v_args(inline=True)
     def always_block(self, sensitivity: Any, body: Stmt) -> AlwaysBlock:
         return AlwaysBlock(sensitivity=sensitivity, body=body)
 
+    @v_args(inline=True)
     def posedge(self, name: Token) -> tuple[EdgeKind, str]:
         return (EdgeKind.POSEDGE, str(name))
 
+    @v_args(inline=True)
     def negedge(self, name: Token) -> tuple[EdgeKind, str]:
         return (EdgeKind.NEGEDGE, str(name))
 
+    @v_args(inline=True)
     def level(self, name: Token) -> tuple[None, str]:
         return (None, str(name))
 
     def sensitivity(self, *items: Any) -> tuple[tuple[EdgeKind | None, str], ...] | None:
         if len(items) == 1 and str(items[0]) == "*":
             return None
+        if len(items) == 1 and isinstance(items[0], list):
+            return tuple(items[0])
         return tuple(items)
 
-    def block(self, stmt_list: list[Stmt]) -> Block:
-        return Block(statements=tuple(stmt_list))
+    def begin_end_block(self, stmt_list: list[Stmt]) -> Block:
+        return Block(statements=tuple(_flatten(stmt_list)))
 
-    def stmt_list(self, *stmts: Stmt) -> list[Stmt]:
-        return list(stmts)
+    def stmt_list(self, stmts: list[Stmt]) -> list[Stmt]:
+        return stmts
 
+    @v_args(inline=True)
     def blocking_assign(self, target: Token, expr: Expr) -> BlockingAssign:
         return BlockingAssign(target=str(target), expr=expr)
 
+    @v_args(inline=True)
     def nonblocking_assign(self, target: Token, expr: Expr) -> NonBlockingAssign:
         return NonBlockingAssign(target=str(target), expr=expr)
 
+    @v_args(inline=True)
     def delay_control(self, delay: Token | IntLiteral, body: Stmt) -> DelayControl:
         value = delay.value if isinstance(delay, IntLiteral) else _int(delay)
         return DelayControl(delay=value, body=body)
 
+    @v_args(inline=True)
     def forever_stmt(self, body: Stmt) -> Forever:
         return Forever(body=body)
 
+    @v_args(inline=True)
     def repeat_stmt(self, count: Token | IntLiteral, body: Stmt) -> Repeat:
         value = count.value if isinstance(count, IntLiteral) else _int(count)
         return Repeat(count=value, body=body)
 
+    @v_args(inline=True)
     def if_stmt(self, condition: Expr, then_branch: Stmt, else_branch: Stmt | None = None) -> IfStmt:
         return IfStmt(condition=condition, then_branch=then_branch, else_branch=else_branch)
 
+    @v_args(inline=True)
     def ev_posedge(self, name: Token) -> Expr:
         return UnaryExpr("posedge", IdentRef(str(name)))
 
+    @v_args(inline=True)
     def ev_negedge(self, name: Token) -> Expr:
         return UnaryExpr("negedge", IdentRef(str(name)))
 
+    @v_args(inline=True)
     def ev_expr(self, expr: Expr) -> Expr:
         return expr
 
@@ -174,20 +258,20 @@ class VerilogTransformer(Transformer):
         condition, true_expr, false_expr = children
         return BinaryExpr("?:", condition, BinaryExpr("?:", true_expr, false_expr))
 
-    def lor_expr(self, *children: Expr) -> Expr:
-        return _fold_binary("||", children)
+    def lor_expr(self, children: list[Expr]) -> Expr:
+        return _fold_binary("||", tuple(children))
 
-    def land_expr(self, *children: Expr) -> Expr:
-        return _fold_binary("&&", children)
+    def land_expr(self, children: list[Expr]) -> Expr:
+        return _fold_binary("&&", tuple(children))
 
-    def bor_expr(self, *children: Expr) -> Expr:
-        return _fold_binary("|", children)
+    def bor_expr(self, children: list[Expr]) -> Expr:
+        return _fold_binary("|", tuple(children))
 
-    def bxor_expr(self, *children: Expr) -> Expr:
-        return _fold_binary("^", children)
+    def bxor_expr(self, children: list[Expr]) -> Expr:
+        return _fold_binary("^", tuple(children))
 
-    def band_expr(self, *children: Expr) -> Expr:
-        return _fold_binary("&", children)
+    def band_expr(self, children: list[Expr]) -> Expr:
+        return _fold_binary("&", tuple(children))
 
     def eq_expr(self, *children: Any) -> Expr:
         if len(children) == 1:
@@ -216,9 +300,13 @@ class VerilogTransformer(Transformer):
     def shift_expr(self, *children: Any) -> Expr:
         return self.rel_expr(*children)
 
-    def add_expr(self, *children: Any) -> Expr:
+    def add_expr(self, children: list[Any]) -> Expr:
+        if len(children) == 1 and isinstance(children[0], list):
+            children = children[0]
         if len(children) == 1:
             return children[0]
+        if all(not isinstance(child, Token) for child in children):
+            return _fold_binary("+", tuple(children))
         result = children[0]
         index = 1
         while index < len(children):
@@ -231,34 +319,29 @@ class VerilogTransformer(Transformer):
     def mul_expr(self, *children: Any) -> Expr:
         return self.add_expr(*children)
 
+    @v_args(inline=True)
     def not_(self, operand: Expr) -> UnaryExpr:
         return UnaryExpr("!", operand)
 
+    @v_args(inline=True)
     def invert(self, operand: Expr) -> UnaryExpr:
         return UnaryExpr("~", operand)
 
+    @v_args(inline=True)
     def neg(self, operand: Expr) -> UnaryExpr:
         return UnaryExpr("-", operand)
 
+    @v_args(inline=True)
     def NUMBER(self, token: Token) -> IntLiteral:
         return IntLiteral(value=_int(token))
 
+    @v_args(inline=True)
     def sized_number(self, token: Token) -> IntLiteral:
         return _parse_sized_number(str(token))
 
+    @v_args(inline=True)
     def ident_ref(self, token: Token) -> IdentRef:
         return IdentRef(str(token))
-
-
-def _fold_binary(op: str, children: tuple[Expr, ...]) -> Expr:
-    if len(children) == 1:
-        return children[0]
-    result = children[0]
-    for child in children[1:]:
-        result = BinaryExpr(op, result, child)
-    return result
-
-
 
 
 @lru_cache(maxsize=1)
@@ -273,15 +356,15 @@ def _build_parser() -> Lark:
 
 
 def parse_design(source: str) -> Design:
-    """Parse Verilog source into a single-module design."""
+    """Parse Verilog source into a design with one or more modules."""
 
     normalized = normalize_source(source)
     tree = _build_parser().parse(normalized)
-    module = VerilogTransformer().transform(tree)
-    if not isinstance(module, Module):
-        msg = "expected a module as the parse result"
+    design = VerilogTransformer().transform(tree)
+    if not isinstance(design, Design):
+        msg = "expected a design as the parse result"
         raise TypeError(msg)
-    return Design(modules=(module,))
+    return design
 
 
 def parse_module(source: str) -> Module:

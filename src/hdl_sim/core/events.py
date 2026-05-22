@@ -10,6 +10,7 @@ from typing import TypeAlias
 
 SimTime: TypeAlias = int
 EventCallback: TypeAlias = Callable[[], None]
+NBAFlushCallback: TypeAlias = Callable[[], None]
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -28,6 +29,7 @@ class EventQueue:
         self._now: SimTime = 0
         self._sequence = count()
         self._events: list[ScheduledEvent] = []
+        self._nba_flush: NBAFlushCallback | None = None
 
     @property
     def now(self) -> SimTime:
@@ -37,6 +39,11 @@ class EventQueue:
 
     def __len__(self) -> int:
         return len(self._events)
+
+    def set_nba_flush(self, callback: NBAFlushCallback | None) -> None:
+        """Register a callback invoked after all active events at a time step."""
+
+        self._nba_flush = callback
 
     def schedule(self, delay: SimTime, callback: EventCallback) -> ScheduledEvent:
         """Schedule ``callback`` after ``delay`` time units."""
@@ -72,6 +79,15 @@ class EventQueue:
         event.callback()
         return True
 
+    def _run_time_step(self, time: SimTime) -> int:
+        """Execute all active events scheduled for ``time``."""
+
+        processed = 0
+        while self._events and self._events[0].time == time:
+            self.step()
+            processed += 1
+        return processed
+
     def run(self, *, until: SimTime | None = None, max_events: int | None = None) -> int:
         """Run scheduled events until the queue is empty or a limit is reached."""
 
@@ -84,14 +100,22 @@ class EventQueue:
 
         processed = 0
         while self._events:
-            next_event = self._events[0]
-            if until is not None and next_event.time > until:
+            next_time = self._events[0].time
+            if until is not None and next_time > until:
                 self._now = until
                 break
             if max_events is not None and processed >= max_events:
                 break
 
-            self.step()
-            processed += 1
+            processed += self._run_time_step(next_time)
+
+            if max_events is not None and processed >= max_events:
+                break
+
+            if self._nba_flush is not None:
+                self._nba_flush()
+
+            if until is not None and next_time >= until:
+                break
 
         return processed

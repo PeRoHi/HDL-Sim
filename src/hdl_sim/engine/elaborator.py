@@ -1,0 +1,178 @@
+"""Elaborate parsed modules into a flat simulation netlist."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from hdl_sim.engine.nets import SimNet
+from hdl_sim.parser.ast import (
+    AlwaysBlock,
+    ContinuousAssign,
+    DeclKind,
+    Design,
+    Expr,
+    IdentRef,
+    InitialBlock,
+    Module,
+    ModuleInstance,
+    PortConnection,
+    PortDirection,
+    Stmt,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedContinuousAssign:
+    target: str
+    expr: Expr
+    locals: dict[str, SimNet]
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedProcess:
+    body: Stmt
+    locals: dict[str, SimNet]
+
+
+@dataclass(frozen=True, slots=True)
+class ElaboratedDesign:
+    """Flattened design ready for simulation."""
+
+    top_module: str
+    nets: dict[str, SimNet]
+    continuous_assigns: tuple[ScopedContinuousAssign, ...]
+    initial_blocks: tuple[ScopedProcess, ...]
+    always_blocks: tuple[tuple[AlwaysBlock, dict[str, SimNet]], ...]
+
+
+def elaborate(design: Design) -> ElaboratedDesign:
+    modules = {module.name: module for module in design.modules}
+    top = design.top
+    global_nets: dict[str, SimNet] = {}
+    continuous: list[ScopedContinuousAssign] = []
+    initials: list[ScopedProcess] = []
+    always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]] = []
+
+    _elaborate_module(
+        top,
+        modules=modules,
+        global_nets=global_nets,
+        prefix="",
+        continuous=continuous,
+        initials=initials,
+        always_blocks=always_blocks,
+    )
+
+    return ElaboratedDesign(
+        top_module=top.name,
+        nets=global_nets,
+        continuous_assigns=tuple(continuous),
+        initial_blocks=tuple(initials),
+        always_blocks=tuple(always_blocks),
+    )
+
+
+def _elaborate_module(
+    module: Module,
+    *,
+    modules: dict[str, Module],
+    global_nets: dict[str, SimNet],
+    prefix: str,
+    continuous: list[ScopedContinuousAssign],
+    initials: list[ScopedProcess],
+    always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]],
+    port_bindings: dict[str, SimNet] | None = None,
+) -> dict[str, SimNet]:
+    local: dict[str, SimNet] = {}
+
+    for port in module.ports:
+        if port_bindings and port.name in port_bindings:
+            net = port_bindings[port.name]
+        else:
+            full_name = _scoped_name(prefix, port.name)
+            kind = DeclKind.WIRE if port.direction is PortDirection.INPUT else DeclKind.REG
+            net = SimNet.from_declaration(full_name, kind, port.range)
+            global_nets[full_name] = net
+        local[port.name] = net
+
+    for decl in module.declarations:
+        if decl.name in local:
+            continue
+        full_name = _scoped_name(prefix, decl.name)
+        net = SimNet.from_declaration(full_name, decl.kind, decl.range)
+        local[decl.name] = net
+        global_nets[full_name] = net
+
+    for assign in module.continuous_assigns:
+        target = _scoped_name(prefix, assign.target)
+        if target not in global_nets:
+            global_nets[target] = SimNet(name=target, width=1, kind=DeclKind.WIRE)
+            local[assign.target] = global_nets[target]
+        continuous.append(
+            ScopedContinuousAssign(target=target, expr=assign.expr, locals=dict(local))
+        )
+
+    for block in module.initial_blocks:
+        initials.append(ScopedProcess(body=block.body, locals=dict(local)))
+
+    for block in module.always_blocks:
+        always_blocks.append((block, dict(local)))
+
+    for instance in module.instances:
+        child = modules[instance.module_type]
+        child_prefix = _scoped_name(prefix, instance.instance_name)
+        bindings = _resolve_instance_ports(instance, local, prefix, global_nets)
+        _elaborate_module(
+            child,
+            modules=modules,
+            global_nets=global_nets,
+            prefix=child_prefix,
+            continuous=continuous,
+            initials=initials,
+            always_blocks=always_blocks,
+            port_bindings=bindings,
+        )
+
+    return local
+
+
+def _resolve_instance_ports(
+    instance: ModuleInstance,
+    parent_local: dict[str, SimNet],
+    parent_prefix: str,
+    global_nets: dict[str, SimNet],
+) -> dict[str, SimNet]:
+    bindings: dict[str, SimNet] = {}
+    for connection in instance.connections:
+        bindings[connection.port] = _resolve_connection_expr(
+            connection,
+            parent_local,
+            parent_prefix,
+            global_nets,
+        )
+    return bindings
+
+
+def _resolve_connection_expr(
+    connection: PortConnection,
+    parent_local: dict[str, SimNet],
+    parent_prefix: str,
+    global_nets: dict[str, SimNet],
+) -> SimNet:
+    expr = connection.expr
+    if isinstance(expr, IdentRef):
+        if expr.name in parent_local:
+            return parent_local[expr.name]
+        full_name = _scoped_name(parent_prefix, expr.name)
+        if full_name in global_nets:
+            return global_nets[full_name]
+        msg = f"unknown connection signal: {expr.name}"
+        raise ValueError(msg)
+    msg = f"unsupported port connection expression for {connection.port}"
+    raise ValueError(msg)
+
+
+def _scoped_name(prefix: str, name: str) -> str:
+    if not prefix:
+        return name
+    return f"{prefix}.{name}"
