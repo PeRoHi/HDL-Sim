@@ -26,6 +26,7 @@ decl_or_stmt: declaration
              | continuous_assign
              | initial_block
              | always_block
+             | function_decl
              | module_instance
 
 declaration: REG range? IDENT ";"
@@ -40,6 +41,14 @@ WIRE: "wire"i
 INTEGER: "integer"i
 
 range: "[" expr ":" expr "]"
+
+function_decl: "function" range? IDENT ";" function_item+ "endfunction" [";"]
+
+function_item: "input" range? IDENT ";" -> func_input
+               | declaration
+               | blocking_assign
+               | if_stmt
+               | begin_end_block
 
 continuous_assign: "assign" lvalue "=" expr ";"
 
@@ -178,9 +187,12 @@ rel_expr: rel_expr OP_LT shift_expr
 
 ?primary: NUMBER
         | sized_number
+        | func_call
         | signal_ref -> signal_expr
         | concat_expr
         | "(" expr ")"
+
+func_call: IDENT "(" expr ("," expr)* ")"
 
 concat_expr: "{" expr ("," expr)* "}"
 

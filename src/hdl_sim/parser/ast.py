@@ -70,6 +70,27 @@ class IntLiteral(Expr):
 
 
 @dataclass(frozen=True, slots=True)
+class FunctionCall(Expr):
+    name: str
+    args: tuple[Expr, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionInput:
+    name: str
+    range: ValueRange | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionDef:
+    name: str
+    return_range: ValueRange | None
+    inputs: tuple[FunctionInput, ...]
+    declarations: tuple[Declaration, ...]
+    body_statements: tuple[Stmt, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class IdentRef(Expr):
     name: str
 
@@ -266,6 +287,7 @@ class Module:
     initial_blocks: tuple[InitialBlock, ...] = ()
     always_blocks: tuple[AlwaysBlock, ...] = ()
     instances: tuple[ModuleInstance, ...] = ()
+    functions: tuple[FunctionDef, ...] = ()
     loc: SourceLocation | None = None
 
 

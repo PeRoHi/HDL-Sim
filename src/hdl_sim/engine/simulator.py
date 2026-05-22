@@ -7,16 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hdl_sim.core.events import EventQueue, SimTime
+from hdl_sim.engine.delta import DeltaRegion
 from hdl_sim.engine.elaborator import ElaboratedDesign, ScopedContinuousAssign, ScopedProcess, elaborate
 from hdl_sim.engine.evaluator import ExpressionEvaluator
 from hdl_sim.engine.executor import ProcessContext, ProcessState
-from hdl_sim.engine.expr_deps import identifiers_in_expr, identifiers_in_stmt
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
-from hdl_sim.parser.ast import AlwaysBlock, Design, EdgeKind, Module
+from hdl_sim.engine.trace import SimulationTracer
+from hdl_sim.parser.ast import AlwaysBlock, Design, DisplayArg, EdgeKind, Module
 from hdl_sim.parser.loader import load_design, load_design_with_meta
 from hdl_sim.parser.parser import parse_design, parse_module
-from hdl_sim.engine.trace import SimulationTracer
 from hdl_sim.vcd.writer import VCDWriter
 
 
@@ -48,19 +48,30 @@ class Simulator:
             elaborated = design
 
         self._elaborated = elaborated
+        self._functions = {func.name: func for func in elaborated.functions}
         self._queue = EventQueue()
         self._nets = elaborated.nets
+        self._delta = DeltaRegion()
+        self._in_delta = False
         self._nba = NBARegion(self._nets, on_update=self._record_net)
-        def nba_flush() -> None:
-            if self._tracer is not None:
-                self._tracer.on_nba_flush(self._queue.now)
-            self._nba.flush(self._queue.now)
+        self._timescale = timescale
 
-        self._queue.set_nba_flush(nba_flush)
+        def regions_flush() -> None:
+            time = self._queue.now
+            if self._tracer is not None:
+                self._tracer.on_nba_flush(time)
+            self._nba.flush(time)
+            self._in_delta = True
+            try:
+                self._delta.flush(time)
+            finally:
+                self._in_delta = False
+
+        self._queue.set_nba_flush(regions_flush)
+        self._vcd_path = vcd_path
         self._vcd = (
             VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
         )
-        self._vcd_path = vcd_path
         self._tracer = tracer
         self._monitors: list[tuple[tuple[DisplayArg, ...], dict[str, SimNet]]] = []
 
@@ -84,24 +95,28 @@ class Simulator:
     ) -> Simulator:
         return cls.from_source(path.read_text(encoding="utf-8"), timescale=timescale, vcd_path=vcd_path)
 
+    def _ensure_vcd(self) -> None:
+        if self._vcd is None:
+            self._vcd = VCDWriter(
+                self._elaborated.top_module,
+                self._nets,
+                timescale=self._timescale,
+            )
+
     def _register_continuous_updates(self) -> None:
         for assign in self._elaborated.continuous_assigns:
-            evaluator = ExpressionEvaluator(assign.locals)
-            dependencies = identifiers_in_expr(assign.expr)
+            evaluator = ExpressionEvaluator(assign.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
 
-            def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> None:
+            def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> bool:
                 value = evaluator.eval(scoped.expr)
                 net = self._nets[scoped.target]
                 if net.update(value, time=time):
                     self._record_net(net, time)
+                    return True
+                return False
 
-            for name in dependencies:
-                if name in assign.locals:
-                    assign.locals[name].subscribe(
-                        lambda _net, _prev, _curr, time, cb=recompute: cb(time)
-                    )
+            self._delta.add_continuous(recompute)
             recompute(0)
-
 
     def _register_monitor(self, args: tuple[DisplayArg, ...], locals: dict[str, SimNet]) -> None:
         self._monitors.append((args, locals))
@@ -132,6 +147,21 @@ class Simulator:
         if self._tracer is not None:
             self._tracer.log(f"#{time} $display {message}")
 
+    def _on_dumpfile(self, path: str) -> None:
+        self._vcd_path = Path(path)
+        self._ensure_vcd()
+        if self._tracer is not None:
+            self._tracer.log(f"$dumpfile {path}")
+
+    def _on_dumpvars(self, _args: tuple[DisplayArg, ...]) -> None:
+        self._ensure_vcd()
+        time = self._queue.now
+        self._vcd.dump_initial(time)
+        for net in self._nets.values():
+            self._vcd.change(net, time)
+        if self._tracer is not None:
+            self._tracer.log(f"#{time} $dumpvars")
+
     def _record_net(self, net: SimNet, time: SimTime) -> None:
         if net.previous is not None and self._tracer is not None:
             self._tracer.on_net_change(net, net.previous, net.value, time)
@@ -140,7 +170,7 @@ class Simulator:
             self._vcd.change(net, time)
 
     def _spawn_process(self, process: ScopedProcess, *, time: SimTime = 0) -> None:
-        evaluator = ExpressionEvaluator(process.locals)
+        evaluator = ExpressionEvaluator(process.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
 
         def run_process() -> None:
             def on_finish() -> None:
@@ -156,6 +186,8 @@ class Simulator:
                 on_display=self._on_display,
                 on_finish=on_finish,
                 on_monitor=lambda args, loc=process.locals: self._register_monitor(args, loc),
+                on_dumpfile=self._on_dumpfile,
+                on_dumpvars=self._on_dumpvars,
             )
             ProcessState(context).run(process.body)
 
@@ -167,18 +199,17 @@ class Simulator:
 
     def _start_always_blocks(self) -> None:
         for block, local_nets in self._elaborated.always_blocks:
-            if block.sensitivity is None:
-                self._start_combinational_always(block, local_nets)
+            if not block.sensitivity:
+                self._register_combinational_always(block, local_nets)
                 continue
             self._start_sensitive_always(block, local_nets)
 
-    def _start_combinational_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
-        dependencies = identifiers_in_stmt(block.body)
-
-        def run_comb(time: SimTime = 0) -> None:
+    def _register_combinational_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+        def run_comb() -> bool:
             if self._queue.stopped:
-                return
-            evaluator = ExpressionEvaluator(local_nets)
+                return False
+            before = {name: net.value for name, net in local_nets.items()}
+            evaluator = ExpressionEvaluator(local_nets, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
 
             def on_finish() -> None:
                 self._queue.stop()
@@ -193,23 +224,16 @@ class Simulator:
                 on_display=self._on_display,
                 on_finish=on_finish,
                 on_monitor=lambda args, loc=local_nets: self._register_monitor(args, loc),
+                on_dumpfile=self._on_dumpfile,
+                on_dumpvars=self._on_dumpvars,
             )
             ProcessState(context).run(block.body)
+            return any(before[name] != local_nets[name].value for name in before)
 
-        def subscribe(name: str) -> None:
-            if name not in local_nets:
-                return
-            local_nets[name].subscribe(
-                lambda _net, _prev, _curr, time, cb=run_comb: cb(time)
-            )
-
-        for name in dependencies:
-            subscribe(name)
-        run_comb(0)
+        self._delta.add_comb(run_comb)
+        run_comb()
 
     def _start_sensitive_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
-        evaluator = ExpressionEvaluator(local_nets)
-
         def trigger() -> None:
             self._spawn_process(ScopedProcess(body=block.body, locals=local_nets), time=self._queue.now)
 
@@ -240,14 +264,13 @@ class Simulator:
 
     def run(self, *, until: SimTime | None = None, max_events: int | None = None) -> SimulationResult:
         self._register_continuous_updates()
+        self._start_initial_blocks()
+        self._start_always_blocks()
 
         if self._vcd is not None:
             self._vcd.dump_initial(0)
             for net in self._nets.values():
                 self._vcd.change(net, 0)
-
-        self._start_initial_blocks()
-        self._start_always_blocks()
 
         processed = self._queue.run(until=until, max_events=max_events)
         stop_time = self._queue.now
@@ -261,9 +284,6 @@ class Simulator:
             events_processed=processed,
             vcd_path=self._vcd_path,
         )
-
-
-
 
 
 def simulate_design(
@@ -302,6 +322,7 @@ def simulate_files(
         max_events=max_events,
         tracer=tracer,
     )
+
 
 def simulate_file(
     verilog_path: Path,

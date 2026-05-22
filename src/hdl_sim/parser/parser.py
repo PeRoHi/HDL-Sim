@@ -26,6 +26,9 @@ from hdl_sim.parser.ast import (
     EventControl,
     Expr,
     Forever,
+    FunctionCall,
+    FunctionDef,
+    FunctionInput,
     IdentRef,
     IfStmt,
     InitialBlock,
@@ -150,6 +153,7 @@ class VerilogTransformer(Transformer):
         initial_blocks: list[InitialBlock] = []
         always_blocks: list[AlwaysBlock] = []
         instances: list[ModuleInstance] = []
+        functions: list[FunctionDef] = []
 
         index = 1
         if index < len(items) and isinstance(items[index], list) and items[index]:
@@ -174,6 +178,8 @@ class VerilogTransformer(Transformer):
                     initial_blocks.append(candidate)
                 elif isinstance(candidate, AlwaysBlock):
                     always_blocks.append(candidate)
+                elif isinstance(candidate, FunctionDef):
+                    functions.append(candidate)
                 elif isinstance(candidate, ModuleInstance):
                     instances.append(candidate)
 
@@ -186,6 +192,7 @@ class VerilogTransformer(Transformer):
             initial_blocks=tuple(initial_blocks),
             always_blocks=tuple(always_blocks),
             instances=tuple(instances),
+            functions=tuple(functions),
         )
 
     def port_list(self, ports: list[Port]) -> list[Port]:
@@ -393,6 +400,57 @@ class VerilogTransformer(Transformer):
         value = count.value if isinstance(count, IntLiteral) else _int(count)
         return Repeat(count=value, body=body)
 
+
+
+    def function_decl(self, children: list[Any]) -> FunctionDef:
+        flat = self._child_args(tuple(children))
+        index = 0
+        return_range: ValueRange | None = None
+        if index < len(flat) and isinstance(flat[index], ValueRange):
+            return_range = flat[index]
+            index += 1
+        name = str(flat[index])
+        index += 1
+        inputs: list[FunctionInput] = []
+        declarations: list[Declaration] = []
+        statements: list[Stmt] = []
+        for item in flat[index:]:
+            if isinstance(item, FunctionInput):
+                inputs.append(item)
+            elif isinstance(item, Declaration):
+                declarations.append(item)
+            elif isinstance(item, Block):
+                statements.extend(item.statements)
+            elif isinstance(item, Stmt):
+                statements.append(item)
+            elif hasattr(item, 'data') and item.data == 'function_item':
+                resolved = self.transform(item)
+                if isinstance(resolved, Block):
+                    statements.extend(resolved.statements)
+                elif isinstance(resolved, Stmt):
+                    statements.append(resolved)
+        return FunctionDef(
+            name=name,
+            return_range=return_range,
+            inputs=tuple(inputs),
+            declarations=tuple(declarations),
+            body_statements=tuple(statements),
+        )
+
+    def function_item(self, children: list[Any]) -> Stmt | Block:
+        return self._resolve_expr(children[0])
+
+    @v_args(inline=True)
+    def func_input(self, *rest: Any) -> FunctionInput:
+        if len(rest) == 2:
+            value_range, name = rest
+            return FunctionInput(name=str(name), range=value_range)
+        (name,) = rest
+        return FunctionInput(name=str(name))
+
+    @v_args(inline=True)
+    def func_call(self, name: Token, *args: Expr) -> FunctionCall:
+        return FunctionCall(name=str(name), args=tuple(args))
 
     def concat_expr(self, children: list[Any]) -> ConcatExpr:
         return ConcatExpr(parts=tuple(self._child_args(tuple(children))))

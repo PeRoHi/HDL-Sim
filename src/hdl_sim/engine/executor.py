@@ -49,6 +49,8 @@ class ProcessContext:
     on_display: Callable[[str, SimTime], None] | None = None
     on_finish: FinishCallback | None = None
     on_monitor: Callable[[tuple[DisplayArg, ...]], None] | None = None
+    on_dumpfile: Callable[[str], None] | None = None
+    on_dumpvars: Callable[[tuple[DisplayArg, ...]], None] | None = None
 
 
 @dataclass(slots=True)
@@ -217,12 +219,16 @@ class StatementRunner:
         if stmt.name == "stop":
             return
         if stmt.name == "dumpfile":
+            if stmt.args and stmt.args[0].text is not None and self._ctx.on_dumpfile is not None:
+                self._ctx.on_dumpfile(stmt.args[0].text)
             return
         if stmt.name == "monitor":
             if self._ctx.on_monitor is not None:
                 self._ctx.on_monitor(stmt.args)
             return
         if stmt.name == "dumpvars":
+            if self._ctx.on_dumpvars is not None:
+                self._ctx.on_dumpvars(stmt.args)
             return
         msg = f"unsupported system task: {stmt.name}"
         raise RuntimeError(msg)

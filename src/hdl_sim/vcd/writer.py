@@ -17,9 +17,16 @@ class VCDChange:
     value: str
 
 
+@dataclass(slots=True)
+class _VCDScopeNode:
+    name: str
+    children: dict[str, _VCDScopeNode] = field(default_factory=dict)
+    nets: list[str] = field(default_factory=list)
+
+
 @dataclass
 class VCDWriter:
-    """Collect signal transitions and emit a VCD file."""
+    """Collect signal transitions and emit a VCD file with hierarchical scopes."""
 
     scope: str
     nets: dict[str, SimNet]
@@ -27,6 +34,7 @@ class VCDWriter:
     _codes: dict[str, str] = field(init=False, repr=False)
     _changes: list[VCDChange] = field(default_factory=list, init=False, repr=False)
     _last_dumped: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _scope_root: _VCDScopeNode = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         alphabet = "!" + "".join(chr(code) for code in range(34, 127) if chr(code) not in {"!", " "})
@@ -38,6 +46,7 @@ class VCDWriter:
                 raise ValueError(msg)
             self._codes[name] = alphabet[index]
             index += 1
+        self._scope_root = _build_scope_tree(self.scope, sorted(self.nets))
 
     def change(self, net: SimNet, time: SimTime) -> None:
         value = net.vcd_value()
@@ -53,15 +62,11 @@ class VCDWriter:
     def render(self) -> str:
         lines = [
             f"$date {datetime.now(tz=UTC).isoformat()} $end",
-            "$version HDL-Sim 0.1.0 $end",
+            "$version HDL-Sim 0.2.0 $end",
             f"$timescale {self.timescale} $end",
-            "$scope module {} $end".format(self.scope),
         ]
-        for name in sorted(self.nets):
-            net = self.nets[name]
-            code = self._codes[name]
-            lines.append(f"$var wire {net.width} {code} {name} $end")
-        lines.extend(["$upscope $end", "$enddefinitions $end", "$dumpvars", "#0"])
+        _emit_scope(lines, self._scope_root, self.nets, self._codes)
+        lines.extend(["$enddefinitions $end", "$dumpvars", "#0"])
         for name in sorted(self.nets):
             net = self.nets[name]
             lines.append(f"{net.vcd_value()}{self._codes[name]}")
@@ -77,3 +82,35 @@ class VCDWriter:
 
     def write(self, path: Path) -> None:
         path.write_text(self.render(), encoding="utf-8")
+
+
+def _build_scope_tree(top: str, net_names: list[str]) -> _VCDScopeNode:
+    root = _VCDScopeNode(name=top)
+    for full_name in net_names:
+        if "." not in full_name:
+            root.nets.append(full_name)
+            continue
+        parts = full_name.split(".")
+        node = root
+        for part in parts[:-1]:
+            if part not in node.children:
+                node.children[part] = _VCDScopeNode(name=part)
+            node = node.children[part]
+        node.nets.append(full_name)
+    return root
+
+
+def _emit_scope(
+    lines: list[str],
+    node: _VCDScopeNode,
+    nets: dict[str, SimNet],
+    codes: dict[str, str],
+) -> None:
+    lines.append(f"$scope module {node.name} $end")
+    for child in sorted(node.children.values(), key=lambda item: item.name):
+        _emit_scope(lines, child, nets, codes)
+    for net_name in sorted(node.nets):
+        net = nets[net_name]
+        code = codes[net_name]
+        lines.append(f"$var wire {net.width} {code} {net_name.split('.')[-1]} $end")
+    lines.append("$upscope $end")

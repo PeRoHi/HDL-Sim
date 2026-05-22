@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from hdl_sim.core.events import EventQueue
 from hdl_sim.engine.lvalue import read_lvalue
+from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import (
     BinaryExpr,
     BitSelect,
     ConcatExpr,
+    FunctionCall,
+    FunctionDef,
     Expr,
     IdentRef,
     IntLiteral,
@@ -24,10 +28,35 @@ class EvaluationError(RuntimeError):
 class ExpressionEvaluator:
     """Evaluate AST expressions against the current net values."""
 
-    def __init__(self, nets: dict[str, SimNet]) -> None:
+    def __init__(
+        self,
+        nets: dict[str, SimNet],
+        *,
+        functions: dict[str, FunctionDef] | None = None,
+        queue: EventQueue | None = None,
+        nba: NBARegion | None = None,
+        on_net_update=None,
+    ) -> None:
         self._nets = nets
+        self._functions = functions or {}
+        self._queue = queue
+        self._nba = nba
+        self._on_net_update = on_net_update
 
     def eval(self, expr: Expr) -> int:
+        if isinstance(expr, FunctionCall):
+            args = tuple(self.eval(arg) for arg in expr.args)
+            from hdl_sim.engine.functions import call_function
+
+            func = self._functions[expr.name]
+            return call_function(
+                func,
+                args,
+                functions=self._functions,
+                queue=self._queue or EventQueue(),
+                nba=self._nba or NBARegion(self._nets, on_update=lambda *_: None),
+                on_net_update=self._on_net_update or (lambda *_: None),
+            )
         if isinstance(expr, IntLiteral):
             return expr.value
         if isinstance(expr, IdentRef):

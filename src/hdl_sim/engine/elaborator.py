@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.engine.params import ParameterEvaluator
 from hdl_sim.parser.ast import (
+    FunctionDef,
     AlwaysBlock,
     ContinuousAssign,
     DeclKind,
@@ -44,6 +45,7 @@ class ElaboratedDesign:
     continuous_assigns: tuple[ScopedContinuousAssign, ...]
     initial_blocks: tuple[ScopedProcess, ...]
     always_blocks: tuple[tuple[AlwaysBlock, dict[str, SimNet]], ...]
+    functions: tuple[FunctionDef, ...] = ()
 
 
 def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
@@ -53,6 +55,8 @@ def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
     continuous: list[ScopedContinuousAssign] = []
     initials: list[ScopedProcess] = []
     always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]] = []
+
+    functions = tuple(top.functions)
 
     _elaborate_module(
         top,
@@ -71,6 +75,7 @@ def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
         continuous_assigns=tuple(continuous),
         initial_blocks=tuple(initials),
         always_blocks=tuple(always_blocks),
+        functions=functions,
     )
 
 
