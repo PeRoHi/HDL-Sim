@@ -33,6 +33,12 @@ from hdl_sim.parser.ast import (
     Port,
     PortConnection,
     PortDirection,
+    ParameterDecl,
+    ParameterOverride,
+    Display,
+    DisplayArg,
+    StringLiteral,
+    ValueRange,
     Range,
     Repeat,
     UnaryExpr,
@@ -92,6 +98,7 @@ class VerilogTransformer(Transformer):
 
     def module(self, items: list[Any]) -> Module:
         name = str(items[0])
+        parameters: list[ParameterDecl] = []
         ports: list[Port] = []
         declarations: list[Declaration] = []
         continuous_assigns: list[ContinuousAssign] = []
@@ -99,11 +106,21 @@ class VerilogTransformer(Transformer):
         always_blocks: list[AlwaysBlock] = []
         instances: list[ModuleInstance] = []
 
-        for item in items[1:]:
+        index = 1
+        if index < len(items) and isinstance(items[index], list) and items[index]:
+            if isinstance(items[index][0], ParameterDecl):
+                parameters.extend(items[index])
+                index += 1
+            elif isinstance(items[index][0], Port):
+                ports.extend(items[index])
+                index += 1
+        for item in items[index:]:
             candidates = item if isinstance(item, list) else [item]
             for candidate in candidates:
                 if isinstance(candidate, Port):
                     ports.append(candidate)
+                elif isinstance(candidate, ParameterDecl):
+                    parameters.append(candidate)
                 elif isinstance(candidate, Declaration):
                     declarations.append(candidate)
                 elif isinstance(candidate, ContinuousAssign):
@@ -117,6 +134,7 @@ class VerilogTransformer(Transformer):
 
         return Module(
             name=name,
+            parameters=tuple(parameters),
             ports=tuple(ports),
             declarations=tuple(declarations),
             continuous_assigns=tuple(continuous_assigns),
@@ -141,14 +159,50 @@ class VerilogTransformer(Transformer):
     def module_instance(
         self,
         module_type: Token,
-        instance_name: Token,
-        connections: list[PortConnection] | None = None,
+        *rest: Any,
     ) -> ModuleInstance:
+        overrides: tuple[ParameterOverride, ...] = ()
+        instance_name: Token
+        connections: list[PortConnection] | None = None
+        if len(rest) == 1:
+            (instance_name,) = rest
+        elif len(rest) == 2:
+            first, second = rest
+            if isinstance(first, list):
+                overrides = tuple(first)
+                instance_name = second
+            else:
+                instance_name, connections = first, second
+        elif len(rest) == 3:
+            overrides = tuple(rest[0])
+            instance_name, connections = rest[1], rest[2]
+        else:
+            msg = "invalid module instance"
+            raise ValueError(msg)
         return ModuleInstance(
             module_type=str(module_type),
             instance_name=str(instance_name),
+            parameter_overrides=overrides,
             connections=tuple(connections or []),
         )
+
+    def parameter_list(self, params: list[ParameterDecl]) -> list[ParameterDecl]:
+        return params
+
+    @v_args(inline=True)
+    def parameter_decl(self, name: Token, expr: Expr) -> ParameterDecl:
+        return ParameterDecl(name=str(name), expr=expr)
+
+    @v_args(inline=True)
+    def parameter_decl_stmt(self, name: Token, expr: Expr) -> ParameterDecl:
+        return ParameterDecl(name=str(name), expr=expr)
+
+    def param_instance(self, overrides: list[ParameterOverride]) -> list[ParameterOverride]:
+        return overrides
+
+    @v_args(inline=True)
+    def param_override(self, name: Token, expr: Expr) -> ParameterOverride:
+        return ParameterOverride(name=str(name), expr=expr)
 
     def port_connections(self, connections: list[PortConnection]) -> list[PortConnection]:
         return connections
@@ -168,8 +222,8 @@ class VerilogTransformer(Transformer):
         return Declaration(kind=kind, name=str(name))
 
     @v_args(inline=True)
-    def range(self, msb: Token, lsb: Token) -> Range:
-        return Range(msb=_int(msb), lsb=_int(lsb))
+    def range(self, msb: Expr, lsb: Expr) -> ValueRange:
+        return ValueRange(msb=msb, lsb=lsb)
 
     @v_args(inline=True)
     def continuous_assign(self, target: Token, expr: Expr) -> ContinuousAssign:
@@ -207,6 +261,24 @@ class VerilogTransformer(Transformer):
 
     def stmt_list(self, stmts: list[Stmt]) -> list[Stmt]:
         return stmts
+
+    def display_args(self, args: list[DisplayArg]) -> list[DisplayArg]:
+        return args
+
+    @v_args(inline=True)
+    def display_arg(self, value: Any) -> DisplayArg:
+        if isinstance(value, StringLiteral):
+            return DisplayArg(text=value.value)
+        return DisplayArg(expr=value)
+
+    @v_args(inline=True)
+    def display_stmt(self, args: list[DisplayArg] | None = None) -> Display:
+        return Display(args=tuple(args or []))
+
+    @v_args(inline=True)
+    def STRING(self, token: Token) -> StringLiteral:
+        raw = str(token)
+        return StringLiteral(value=raw[1:-1])
 
     @v_args(inline=True)
     def blocking_assign(self, target: Token, expr: Expr) -> BlockingAssign:

@@ -4,7 +4,15 @@
 
 design: module+
 
-module: "module" IDENT port_list? ";" decl_or_stmt* "endmodule" [";"]
+module: "module" IDENT parameter_list? port_list? ";" decl_or_stmt* "endmodule" [";"]
+
+parameter_list: "#" "(" parameter_decl ("," parameter_decl)* ")"
+
+parameter_decl: "parameter"i IDENT "=" expr
+
+param_instance: "#" "(" param_override ("," param_override)* ")"
+
+param_override: "." IDENT "(" expr ")"
 
 port_list: "(" port_decl ("," port_decl)* ")"
 
@@ -13,6 +21,7 @@ port_decl: PORT_DIR range? IDENT
 PORT_DIR: "input"i | "output"i
 
 decl_or_stmt: declaration
+             | parameter_decl_stmt
              | continuous_assign
              | initial_block
              | always_block
@@ -21,14 +30,16 @@ decl_or_stmt: declaration
 declaration: REG range? IDENT ";"
           | WIRE range? IDENT ";"
 
+parameter_decl_stmt: "parameter"i IDENT "=" expr ";"
+
 REG: "reg"i
 WIRE: "wire"i
 
-range: "[" NUMBER ":" NUMBER "]"
+range: "[" expr ":" expr "]"
 
 continuous_assign: "assign" IDENT "=" expr ";"
 
-module_instance: IDENT IDENT "(" port_connections? ")" ";"
+module_instance: IDENT param_instance? IDENT "(" port_connections? ")" ";"
 
 port_connections: port_connection ("," port_connection)*
 
@@ -47,6 +58,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
                   | IDENT -> level
 
 ?stmt: begin_end_block
+     | display_stmt
      | blocking_assign
      | nonblocking_assign
      | delay_control
@@ -58,6 +70,12 @@ sensitivity_item: "posedge"i IDENT -> posedge
 begin_end_block: "begin" stmt_list "end"
 
 stmt_list: stmt+
+
+display_stmt: "$display"i "(" display_args? ")" ";"
+
+display_args: display_arg ("," display_arg)*
+
+display_arg: STRING | expr
 
 blocking_assign: IDENT "=" expr ";"
 nonblocking_assign: IDENT "<=" expr ";"
@@ -116,6 +134,7 @@ ident_ref: IDENT
 sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 
 NUMBER: /\d+/
+STRING: /"[^"\n]*"/
 IDENT: /[A-Za-z_]\w*/
 
 %import common.WS

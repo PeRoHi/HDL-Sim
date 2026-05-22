@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from hdl_sim.engine.nets import SimNet
+from hdl_sim.engine.params import ParameterEvaluator
 from hdl_sim.parser.ast import (
     AlwaysBlock,
     ContinuousAssign,
@@ -58,6 +59,7 @@ def elaborate(design: Design) -> ElaboratedDesign:
         modules=modules,
         global_nets=global_nets,
         prefix="",
+        param_env={},
         continuous=continuous,
         initials=initials,
         always_blocks=always_blocks,
@@ -82,8 +84,11 @@ def _elaborate_module(
     initials: list[ScopedProcess],
     always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]],
     port_bindings: dict[str, SimNet] | None = None,
+    param_env: dict[str, int] | None = None,
 ) -> dict[str, SimNet]:
     local: dict[str, SimNet] = {}
+    param_evaluator = ParameterEvaluator(param_env)
+    param_evaluator.resolve_module_params(module.parameters)
 
     for port in module.ports:
         if port_bindings and port.name in port_bindings:
@@ -91,7 +96,7 @@ def _elaborate_module(
         else:
             full_name = _scoped_name(prefix, port.name)
             kind = DeclKind.WIRE if port.direction is PortDirection.INPUT else DeclKind.REG
-            net = SimNet.from_declaration(full_name, kind, port.range)
+            net = SimNet.from_declaration(full_name, kind, param_evaluator.resolve_range(port.range))
             global_nets[full_name] = net
         local[port.name] = net
 
@@ -99,7 +104,7 @@ def _elaborate_module(
         if decl.name in local:
             continue
         full_name = _scoped_name(prefix, decl.name)
-        net = SimNet.from_declaration(full_name, decl.kind, decl.range)
+        net = SimNet.from_declaration(full_name, decl.kind, param_evaluator.resolve_range(decl.range))
         local[decl.name] = net
         global_nets[full_name] = net
 
@@ -122,6 +127,10 @@ def _elaborate_module(
         child = modules[instance.module_type]
         child_prefix = _scoped_name(prefix, instance.instance_name)
         bindings = _resolve_instance_ports(instance, local, prefix, global_nets)
+        child_params = ParameterEvaluator(param_evaluator.snapshot()).resolve_module_params(
+            child.parameters,
+            instance.parameter_overrides,
+        )
         _elaborate_module(
             child,
             modules=modules,
@@ -131,6 +140,7 @@ def _elaborate_module(
             initials=initials,
             always_blocks=always_blocks,
             port_bindings=bindings,
+            param_env=child_params,
         )
 
     return local

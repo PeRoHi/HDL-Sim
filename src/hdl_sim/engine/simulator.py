@@ -14,7 +14,9 @@ from hdl_sim.engine.expr_deps import identifiers_in_expr
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import AlwaysBlock, Design, EdgeKind, Module
+from hdl_sim.parser.loader import load_design
 from hdl_sim.parser.parser import parse_design, parse_module
+from hdl_sim.engine.trace import SimulationTracer
 from hdl_sim.vcd.writer import VCDWriter
 
 
@@ -35,6 +37,7 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        tracer: SimulationTracer | None = None,
     ) -> None:
         if isinstance(design, Module):
             design = Design(modules=(design,))
@@ -47,11 +50,17 @@ class Simulator:
         self._queue = EventQueue()
         self._nets = elaborated.nets
         self._nba = NBARegion(self._nets, on_update=self._record_net)
-        self._queue.set_nba_flush(lambda: self._nba.flush(self._queue.now))
+        def nba_flush() -> None:
+            if self._tracer is not None:
+                self._tracer.on_nba_flush(self._queue.now)
+            self._nba.flush(self._queue.now)
+
+        self._queue.set_nba_flush(nba_flush)
         self._vcd = (
             VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
         )
         self._vcd_path = vcd_path
+        self._tracer = tracer
 
     @classmethod
     def from_source(
@@ -91,7 +100,13 @@ class Simulator:
                     )
             recompute(0)
 
+    def _on_display(self, message: str, time: SimTime) -> None:
+        if self._tracer is not None:
+            self._tracer.log(f"#{time} $display {message}")
+
     def _record_net(self, net: SimNet, time: SimTime) -> None:
+        if net.previous is not None and self._tracer is not None:
+            self._tracer.on_net_change(net, net.previous, net.value, time)
         if self._vcd is not None:
             self._vcd.change(net, time)
 
@@ -106,6 +121,7 @@ class Simulator:
                 nba=self._nba,
                 schedule=lambda at, cb: self._queue.schedule_at(at, cb),
                 on_net_update=self._record_net,
+                on_display=self._on_display,
             )
             ProcessState(context).run(process.body)
 
@@ -179,6 +195,39 @@ class Simulator:
 
 
 
+
+
+def simulate_design(
+    design: Design,
+    *,
+    vcd_path: Path | None = None,
+    until: SimTime | None = None,
+    max_events: int | None = None,
+    timescale: str = "1ns",
+    tracer: SimulationTracer | None = None,
+) -> SimulationResult:
+    simulator = Simulator(design, timescale=timescale, vcd_path=vcd_path, tracer=tracer)
+    return simulator.run(until=until, max_events=max_events)
+
+
+def simulate_files(
+    paths: list[Path],
+    *,
+    vcd_path: Path | None = None,
+    until: SimTime | None = None,
+    max_events: int | None = None,
+    timescale: str = "1ns",
+    tracer: SimulationTracer | None = None,
+) -> SimulationResult:
+    return simulate_design(
+        load_design(paths),
+        vcd_path=vcd_path,
+        until=until,
+        max_events=max_events,
+        timescale=timescale,
+        tracer=tracer,
+    )
+
 def simulate_file(
     verilog_path: Path,
     *,
@@ -187,7 +236,7 @@ def simulate_file(
     max_events: int | None = None,
     timescale: str = "1ns",
 ) -> SimulationResult:
-    simulator = Simulator.from_file(verilog_path, timescale=timescale, vcd_path=vcd_path)
+    simulator = Simulator.from_file(verilog_path, timescale=timescale, vcd_path=vcd_path, tracer=None)
     return simulator.run(until=until, max_events=max_events)
 
 

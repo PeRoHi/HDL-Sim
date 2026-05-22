@@ -28,6 +28,12 @@ class SourceLocation:
 
 
 @dataclass(frozen=True, slots=True)
+class ValueRange:
+    msb: Expr
+    lsb: Expr
+
+
+@dataclass(frozen=True, slots=True)
 class Range:
     msb: int
     lsb: int
@@ -41,14 +47,14 @@ class Range:
 class Port:
     direction: PortDirection
     name: str
-    range: Range | None = None
+    range: ValueRange | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Declaration:
     kind: DeclKind
     name: str
-    range: Range | None = None
+    range: ValueRange | None = None
     loc: SourceLocation | None = None
 
 
@@ -154,6 +160,34 @@ class AlwaysBlock:
 
 
 @dataclass(frozen=True, slots=True)
+class ParameterDecl:
+    name: str
+    expr: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterOverride:
+    name: str
+    expr: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class StringLiteral(Expr):
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class DisplayArg:
+    text: str | None = None
+    expr: Expr | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Display(Stmt):
+    args: tuple[DisplayArg, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class PortConnection:
     port: str
     expr: Expr
@@ -163,12 +197,14 @@ class PortConnection:
 class ModuleInstance:
     module_type: str
     instance_name: str
+    parameter_overrides: tuple[ParameterOverride, ...] = ()
     connections: tuple[PortConnection, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class Module:
     name: str
+    parameters: tuple[ParameterDecl, ...] = ()
     ports: tuple[Port, ...] = ()
     declarations: tuple[Declaration, ...] = ()
     continuous_assigns: tuple[ContinuousAssign, ...] = ()

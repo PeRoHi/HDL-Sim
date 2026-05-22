@@ -11,6 +11,8 @@ from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import (
     Block,
+    Display,
+    DisplayArg,
     BlockingAssign,
     DelayControl,
     EventControl,
@@ -37,6 +39,7 @@ class ProcessContext:
     nba: NBARegion
     schedule: Callable[[SimTime, ContinueCallback], None]
     on_net_update: NetUpdateCallback
+    on_display: Callable[[str, SimTime], None] | None = None
 
 
 @dataclass(slots=True)
@@ -111,6 +114,12 @@ class StatementRunner:
                 on_complete()
             return
 
+        if isinstance(stmt, Display):
+            self._execute_display(stmt)
+            if on_complete is not None:
+                on_complete()
+            return
+
         if isinstance(stmt, EventControl):
             self._execute_event_control(stmt)
             return
@@ -163,6 +172,27 @@ class StatementRunner:
             self._execute_statement_list(statements, index + 1, on_complete=on_complete)
 
         nested_runner.execute(stmt, on_complete=after_stmt)
+
+
+    def _execute_display(self, stmt: Display) -> None:
+        parts: list[str] = []
+        format_values: list[int] = []
+        for arg in stmt.args:
+            if arg.text is not None:
+                parts.append(arg.text)
+            elif arg.expr is not None:
+                format_values.append(self._ctx.evaluator.eval(arg.expr))
+        if parts and format_values:
+            message = parts[0] % tuple(format_values)
+        elif parts:
+            message = "".join(parts)
+        elif format_values:
+            message = " ".join(str(value) for value in format_values)
+        else:
+            message = ""
+        print(message, flush=True)
+        if self._ctx.on_display is not None:
+            self._ctx.on_display(message, self._now())
 
     def _execute_forever(self, body: Stmt) -> None:
         def loop() -> None:
