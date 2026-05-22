@@ -30,6 +30,7 @@ class EventQueue:
         self._sequence = count()
         self._events: list[ScheduledEvent] = []
         self._nba_flush: NBAFlushCallback | None = None
+        self._stopped = False
 
     @property
     def now(self) -> SimTime:
@@ -39,6 +40,16 @@ class EventQueue:
 
     def __len__(self) -> int:
         return len(self._events)
+
+    def stop(self) -> None:
+        """Halt simulation and discard pending events."""
+
+        self._stopped = True
+        self._events.clear()
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
 
     def set_nba_flush(self, callback: NBAFlushCallback | None) -> None:
         """Register a callback invoked after all active events at a time step."""
@@ -99,7 +110,7 @@ class EventQueue:
             raise ValueError(msg)
 
         processed = 0
-        while self._events:
+        while self._events and not self._stopped:
             next_time = self._events[0].time
             if until is not None and next_time > until:
                 self._now = until

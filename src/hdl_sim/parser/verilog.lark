@@ -9,6 +9,7 @@ module: "module" IDENT parameter_list? port_list? ";" decl_or_stmt* "endmodule" 
 parameter_list: "#" "(" parameter_decl ("," parameter_decl)* ")"
 
 parameter_decl: "parameter"i IDENT "=" expr
+               | "localparam"i IDENT "=" expr
 
 param_instance: "#" "(" param_override ("," param_override)* ")"
 
@@ -29,15 +30,18 @@ decl_or_stmt: declaration
 
 declaration: REG range? IDENT ";"
           | WIRE range? IDENT ";"
+          | INTEGER range? IDENT ";"
 
 parameter_decl_stmt: "parameter"i IDENT "=" expr ";"
+                    | "localparam"i IDENT "=" expr ";"
 
 REG: "reg"i
 WIRE: "wire"i
+INTEGER: "integer"i
 
 range: "[" expr ":" expr "]"
 
-continuous_assign: "assign" IDENT "=" expr ";"
+continuous_assign: "assign" lvalue "=" expr ";"
 
 module_instance: IDENT param_instance? IDENT "(" port_connections? ")" ";"
 
@@ -50,6 +54,7 @@ initial_block: "initial" stmt
 always_block: "always" sensitivity stmt
 
 sensitivity: "@" "(" sensitivity_item ("," sensitivity_item)* ")"
+            | "@" "(" "*" ")"
             | "@" sensitivity_item
             | "@" "*"
 
@@ -58,27 +63,36 @@ sensitivity_item: "posedge"i IDENT -> posedge
                   | IDENT -> level
 
 ?stmt: begin_end_block
-     | display_stmt
+     | system_task
      | blocking_assign
      | nonblocking_assign
      | delay_control
      | forever_stmt
      | repeat_stmt
+     | while_stmt
      | if_stmt
+     | case_stmt
      | event_control
 
 begin_end_block: "begin" stmt_list "end"
 
 stmt_list: stmt+
 
-display_stmt: "$display"i "(" display_args? ")" ";"
+system_task: "$display"i "(" display_args? ")" ";" -> display
+            | "$finish"i [";"] -> finish
+            | "$stop"i [";"] -> stop
+            | "$dumpfile"i "(" STRING ")" ";" -> dumpfile
+            | "$dumpvars"i ["(" display_args? ")"] ";" -> dumpvars
 
 display_args: display_arg ("," display_arg)*
 
 display_arg: STRING | expr
 
-blocking_assign: IDENT "=" expr ";"
-nonblocking_assign: IDENT "<=" expr ";"
+blocking_assign: lvalue "=" expr ";"
+nonblocking_assign: lvalue "<=" expr ";"
+
+select: "[" expr ":" expr "]" -> part_sel
+       | "[" expr "]" -> bit_sel
 
 delay_control: "#" NUMBER stmt
 
@@ -86,7 +100,18 @@ forever_stmt: "forever" stmt
 
 repeat_stmt: "repeat" "(" NUMBER ")" stmt
 
+while_stmt: "while" "(" expr ")" stmt
+
 if_stmt: "if" "(" expr ")" stmt ["else" stmt]
+
+case_stmt: "case"i "(" expr ")" case_item+ "endcase" [";"] -> case
+          | "casex"i "(" expr ")" case_item+ "endcase" [";"] -> casex
+          | "casez"i "(" expr ")" case_item+ "endcase" [";"] -> casez
+
+case_item: case_pattern ":" stmt
+
+case_pattern: "default"i -> default_pat
+             | expr ("," expr)* -> expr_pat
 
 event_control: "@" "(" event_expr ("," event_expr)* ")" stmt
               | "@" event_expr stmt
@@ -99,43 +124,74 @@ event_expr: "posedge"i IDENT -> ev_posedge
 
 ?ternary_expr: lor_expr ("?" lor_expr ":" lor_expr)?
 
-?lor_expr: land_expr ("||" land_expr)*
+?lor_expr: lor_expr "||" land_expr
+          | land_expr
 
-?land_expr: bor_expr ("&&" bor_expr)*
+?land_expr: land_expr "&&" bitor_expr
+           | bitor_expr
 
-?bor_expr: bxor_expr ("|" bxor_expr)*
+?bitor_expr: bitor_expr "|" bitxor_expr
+            | bitxor_expr
 
-?bxor_expr: band_expr ("^" band_expr)*
+?bitxor_expr: bitxor_expr "^" bitand_expr
+             | bitand_expr
 
-?band_expr: eq_expr ("&" eq_expr)*
+?bitand_expr: bitand_expr "&" eq_expr
+             | eq_expr
 
-?eq_expr: rel_expr (("==" | "!=") rel_expr)*
+?eq_expr: eq_expr "==" rel_expr
+         | eq_expr "!=" rel_expr
+         | rel_expr
 
-?rel_expr: shift_expr (("<" | "<=" | ">" | ">=") shift_expr)*
+rel_expr: rel_expr OP_LT shift_expr
+          | rel_expr OP_LE shift_expr
+          | rel_expr OP_GT shift_expr
+          | rel_expr OP_GE shift_expr
+          | shift_expr
 
-?shift_expr: add_expr (("<<" | ">>") add_expr)*
+?shift_expr: shift_expr OP_SHL add_expr
+            | shift_expr OP_SHR add_expr
+            | add_expr
 
-?add_expr: mul_expr (("+" | "-") mul_expr)*
+?add_expr: add_expr "+" mul_expr
+          | add_expr "-" mul_expr
+          | mul_expr
 
-?mul_expr: unary_expr (("*" | "/" | "%") unary_expr)*
+?mul_expr: mul_expr "*" unary_expr
+          | mul_expr "/" unary_expr
+          | mul_expr "%" unary_expr
+          | unary_expr
 
 ?unary_expr: "!" unary_expr -> not_
              | "~" unary_expr -> invert
              | "-" unary_expr -> neg
+             | "&" unary_expr -> uand
+             | "|" unary_expr -> uor
+             | "^" unary_expr -> uxor
              | primary
 
 ?primary: NUMBER
         | sized_number
-        | ident_ref
+        | signal_ref -> signal_expr
         | "(" expr ")"
 
-ident_ref: IDENT
+signal_ref: IDENT select?
+
+lvalue: signal_ref -> to_lvalue
 
 sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 
 NUMBER: /\d+/
 STRING: /"[^"\n]*"/
 IDENT: /[A-Za-z_]\w*/
+
+
+OP_SHL: "<<"
+OP_SHR: ">>"
+OP_LE: "<="
+OP_GE: ">="
+OP_LT: "<"
+OP_GT: ">"
 
 %import common.WS
 %ignore WS

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from hdl_sim.engine.lvalue import read_lvalue
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import (
     BinaryExpr,
+    BitSelect,
     ConcatExpr,
     Expr,
     IdentRef,
     IntLiteral,
+    Lvalue,
+    PartSelect,
     UnaryExpr,
 )
 
@@ -32,6 +36,14 @@ class ExpressionEvaluator:
             except KeyError as exc:
                 msg = f"unknown identifier: {expr.name}"
                 raise EvaluationError(msg) from exc
+        if isinstance(expr, BitSelect):
+            return read_lvalue(Lvalue(base=expr.signal, bit=expr.index), self._nets, self.eval)
+        if isinstance(expr, PartSelect):
+            return read_lvalue(
+                Lvalue(base=expr.signal, msb=expr.msb, lsb=expr.lsb),
+                self._nets,
+                self.eval,
+            )
         if isinstance(expr, UnaryExpr):
             value = self.eval(expr.operand)
             if expr.op == "~":
@@ -43,6 +55,8 @@ class ExpressionEvaluator:
                 return 1 if value == 0 else 0
             if expr.op == "-":
                 return -value
+            if expr.op in {"uand", "uor", "uxor"}:
+                return self._reduction(value, self._width_of(expr.operand), expr.op)
             if expr.op in {"posedge", "negedge"}:
                 return value
             msg = f"unsupported unary operator: {expr.op}"
@@ -71,6 +85,10 @@ class ExpressionEvaluator:
                 return left - right
             if expr.op == "*":
                 return left * right
+            if expr.op == "/":
+                return 0 if right == 0 else left // right
+            if expr.op == "%":
+                return 0 if right == 0 else left % right
             if expr.op == "==":
                 return 1 if left == right else 0
             if expr.op == "!=":
@@ -103,6 +121,10 @@ class ExpressionEvaluator:
     def _operand_net(self, expr: Expr) -> SimNet | None:
         if isinstance(expr, IdentRef):
             return self._nets.get(expr.name)
+        if isinstance(expr, BitSelect):
+            return self._nets.get(expr.signal)
+        if isinstance(expr, PartSelect):
+            return self._nets.get(expr.signal)
         return None
 
     def _width_of(self, expr: Expr) -> int:
@@ -112,3 +134,16 @@ class ExpressionEvaluator:
         if isinstance(expr, IntLiteral) and expr.width is not None:
             return expr.width
         return 32
+
+    def _reduction(self, value: int, width: int, op: str) -> int:
+        mask = (1 << width) - 1
+        bits = value & mask
+        if op == "uand":
+            return 1 if bits == mask else 0
+        if op == "uor":
+            return 1 if bits != 0 else 0
+        parity = 0
+        while bits:
+            parity ^= bits & 1
+            bits >>= 1
+        return parity

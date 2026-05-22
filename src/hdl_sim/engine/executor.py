@@ -7,10 +7,12 @@ from dataclasses import dataclass
 
 from hdl_sim.core.events import EventQueue, SimTime
 from hdl_sim.engine.evaluator import ExpressionEvaluator
+from hdl_sim.engine.lvalue import write_lvalue
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import (
     Block,
+    CaseStmt,
     Display,
     DisplayArg,
     BlockingAssign,
@@ -20,15 +22,19 @@ from hdl_sim.parser.ast import (
     Forever,
     IdentRef,
     IfStmt,
+    Lvalue,
     NonBlockingAssign,
     Repeat,
     Stmt,
+    SystemTask,
     UnaryExpr,
+    WhileStmt,
 )
 
 
 ContinueCallback = Callable[[], None]
 NetUpdateCallback = Callable[[SimNet, SimTime], None]
+FinishCallback = Callable[[], None]
 
 
 @dataclass(slots=True)
@@ -40,6 +46,7 @@ class ProcessContext:
     schedule: Callable[[SimTime, ContinueCallback], None]
     on_net_update: NetUpdateCallback
     on_display: Callable[[str, SimTime], None] | None = None
+    on_finish: FinishCallback | None = None
 
 
 @dataclass(slots=True)
@@ -49,14 +56,18 @@ class ProcessState:
     def run(self, stmt: Stmt) -> None:
         StatementRunner(self).execute(stmt)
 
-    def assign(self, target: str, value: int, *, blocking: bool, time: SimTime) -> None:
+    def assign_lvalue(self, target: Lvalue, value: int, *, blocking: bool, time: SimTime) -> None:
         if blocking:
-            net = self._require_net(target)
-            if net.update(value, time=time):
-                self.context.on_net_update(net, time)
+            write_lvalue(
+                target,
+                value,
+                nets=self.context.nets,
+                eval_fn=self.context.evaluator.eval,
+                time=time,
+                on_update=self.context.on_net_update,
+            )
             return
-
-        self.context.nba.schedule(target, value)
+        self.context.nba.schedule_lvalue(target, value, eval_fn=self.context.evaluator.eval)
 
     def _require_net(self, name: str) -> SimNet:
         try:
@@ -78,7 +89,7 @@ class StatementRunner:
 
         if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             value = self._ctx.evaluator.eval(stmt.expr)
-            self._state.assign(
+            self._state.assign_lvalue(
                 stmt.target,
                 value,
                 blocking=isinstance(stmt, BlockingAssign),
@@ -105,6 +116,10 @@ class StatementRunner:
             self._execute_repeat(stmt.count, stmt.body, on_complete=on_complete)
             return
 
+        if isinstance(stmt, WhileStmt):
+            self._execute_while(stmt, on_complete=on_complete)
+            return
+
         if isinstance(stmt, IfStmt):
             condition = self._ctx.evaluator.eval(stmt.condition)
             branch = stmt.then_branch if condition else stmt.else_branch
@@ -114,8 +129,18 @@ class StatementRunner:
                 on_complete()
             return
 
+        if isinstance(stmt, CaseStmt):
+            self._execute_case(stmt, on_complete=on_complete)
+            return
+
         if isinstance(stmt, Display):
             self._execute_display(stmt)
+            if on_complete is not None:
+                on_complete()
+            return
+
+        if isinstance(stmt, SystemTask):
+            self._execute_system_task(stmt)
             if on_complete is not None:
                 on_complete()
             return
@@ -125,6 +150,50 @@ class StatementRunner:
             return
 
         msg = f"unsupported statement: {type(stmt).__name__}"
+        raise RuntimeError(msg)
+
+    def _execute_while(self, stmt: WhileStmt, *, on_complete: ContinueCallback | None = None) -> None:
+        if self._ctx.evaluator.eval(stmt.condition):
+            self.execute(stmt.body, on_complete=lambda: self._execute_while(stmt, on_complete=on_complete))
+            return
+        if on_complete is not None:
+            on_complete()
+
+    def _execute_case(self, stmt: CaseStmt, *, on_complete: ContinueCallback | None = None) -> None:
+        selector = self._ctx.evaluator.eval(stmt.expression)
+        for item in stmt.items:
+            if not item.expressions:
+                self.execute(item.body, on_complete=on_complete)
+                return
+            for pattern in item.expressions:
+                if self._case_match(selector, self._ctx.evaluator.eval(pattern), stmt.case_style):
+                    self.execute(item.body, on_complete=on_complete)
+                    return
+        if on_complete is not None:
+            on_complete()
+
+    def _case_match(self, selector: int, pattern: int, style: str) -> bool:
+        if style == "case":
+            return selector == pattern
+        if style == "casex":
+            ignore = 0xFFFFFFFF
+            return (selector | ignore) == (pattern | ignore) or selector == pattern
+        if style == "casez":
+            return selector == pattern
+        return selector == pattern
+
+    def _execute_system_task(self, stmt: SystemTask) -> None:
+        if stmt.name == "finish":
+            if self._ctx.on_finish is not None:
+                self._ctx.on_finish()
+            return
+        if stmt.name == "stop":
+            return
+        if stmt.name == "dumpfile":
+            return
+        if stmt.name == "dumpvars":
+            return
+        msg = f"unsupported system task: {stmt.name}"
         raise RuntimeError(msg)
 
     def _execute_statement_list(
@@ -152,7 +221,7 @@ class StatementRunner:
             self._ctx.schedule(target_time, resume_after_delay)
             return
 
-        if isinstance(stmt, (BlockingAssign, NonBlockingAssign, IfStmt)):
+        if isinstance(stmt, (BlockingAssign, NonBlockingAssign, IfStmt, WhileStmt, CaseStmt)):
             self.execute(stmt)
             self._execute_statement_list(statements, index + 1, on_complete=on_complete)
             return
@@ -172,7 +241,6 @@ class StatementRunner:
             self._execute_statement_list(statements, index + 1, on_complete=on_complete)
 
         nested_runner.execute(stmt, on_complete=after_stmt)
-
 
     def _execute_display(self, stmt: Display) -> None:
         parts: list[str] = []

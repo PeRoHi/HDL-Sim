@@ -101,14 +101,22 @@ class Block(Stmt):
 
 
 @dataclass(frozen=True, slots=True)
+class Lvalue:
+    base: str
+    bit: Expr | None = None
+    msb: Expr | None = None
+    lsb: Expr | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class BlockingAssign(Stmt):
-    target: str
+    target: Lvalue
     expr: Expr
 
 
 @dataclass(frozen=True, slots=True)
 class NonBlockingAssign(Stmt):
-    target: str
+    target: Lvalue
     expr: Expr
 
 
@@ -181,6 +189,44 @@ class DisplayArg:
     text: str | None = None
     expr: Expr | None = None
 
+
+
+@dataclass(frozen=True, slots=True)
+class BitSelect(Expr):
+    signal: str
+    index: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class PartSelect(Expr):
+    signal: str
+    msb: Expr
+    lsb: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class CaseItem:
+    expressions: tuple[Expr, ...]
+    body: Stmt
+
+
+@dataclass(frozen=True, slots=True)
+class CaseStmt(Stmt):
+    expression: Expr
+    items: tuple[CaseItem, ...]
+    case_style: str = "case"
+
+
+@dataclass(frozen=True, slots=True)
+class WhileStmt(Stmt):
+    condition: Expr
+    body: Stmt
+
+
+@dataclass(frozen=True, slots=True)
+class SystemTask(Stmt):
+    name: str
+    args: tuple[DisplayArg, ...] = ()
 
 @dataclass(frozen=True, slots=True)
 class Display(Stmt):

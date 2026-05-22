@@ -10,7 +10,7 @@ from hdl_sim.core.events import EventQueue, SimTime
 from hdl_sim.engine.elaborator import ElaboratedDesign, ScopedContinuousAssign, ScopedProcess, elaborate
 from hdl_sim.engine.evaluator import ExpressionEvaluator
 from hdl_sim.engine.executor import ProcessContext, ProcessState
-from hdl_sim.engine.expr_deps import identifiers_in_expr
+from hdl_sim.engine.expr_deps import identifiers_in_expr, identifiers_in_stmt
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.parser.ast import AlwaysBlock, Design, EdgeKind, Module
@@ -114,6 +114,9 @@ class Simulator:
         evaluator = ExpressionEvaluator(process.locals)
 
         def run_process() -> None:
+            def on_finish() -> None:
+                self._queue.stop()
+
             context = ProcessContext(
                 queue=self._queue,
                 nets=process.locals,
@@ -122,6 +125,7 @@ class Simulator:
                 schedule=lambda at, cb: self._queue.schedule_at(at, cb),
                 on_net_update=self._record_net,
                 on_display=self._on_display,
+                on_finish=on_finish,
             )
             ProcessState(context).run(process.body)
 
@@ -134,9 +138,43 @@ class Simulator:
     def _start_always_blocks(self) -> None:
         for block, local_nets in self._elaborated.always_blocks:
             if block.sensitivity is None:
-                self._spawn_process(ScopedProcess(body=block.body, locals=local_nets), time=0)
+                self._start_combinational_always(block, local_nets)
                 continue
             self._start_sensitive_always(block, local_nets)
+
+    def _start_combinational_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+        dependencies = identifiers_in_stmt(block.body)
+
+        def run_comb(time: SimTime = 0) -> None:
+            if self._queue.stopped:
+                return
+            evaluator = ExpressionEvaluator(local_nets)
+
+            def on_finish() -> None:
+                self._queue.stop()
+
+            context = ProcessContext(
+                queue=self._queue,
+                nets=local_nets,
+                evaluator=evaluator,
+                nba=self._nba,
+                schedule=lambda at, cb: self._queue.schedule_at(at, cb),
+                on_net_update=self._record_net,
+                on_display=self._on_display,
+                on_finish=on_finish,
+            )
+            ProcessState(context).run(block.body)
+
+        def subscribe(name: str) -> None:
+            if name not in local_nets:
+                return
+            local_nets[name].subscribe(
+                lambda _net, _prev, _curr, time, cb=run_comb: cb(time)
+            )
+
+        for name in dependencies:
+            subscribe(name)
+        run_comb(0)
 
     def _start_sensitive_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
         evaluator = ExpressionEvaluator(local_nets)
