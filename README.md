@@ -31,3 +31,11 @@ poetry run pytest
 ## ドキュメント
 
 - [docs/architecture.md](docs/architecture.md)
+
+
+## Recent capabilities
+
+- Verilog `task` / `endtask` with input/output ports
+- Four-state `casex` / `casez` matching (x/z in sized literals)
+- `$dumpvars(level, scope)` selective waveform dump
+- `$monitor` system task

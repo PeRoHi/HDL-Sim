@@ -35,6 +35,7 @@ class VCDWriter:
     _changes: list[VCDChange] = field(default_factory=list, init=False, repr=False)
     _last_dumped: dict[str, str] = field(default_factory=dict, init=False, repr=False)
     _scope_root: _VCDScopeNode = field(init=False, repr=False)
+    _active_nets: frozenset[str] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         alphabet = "!" + "".join(chr(code) for code in range(34, 127) if chr(code) not in {"!", " "})
@@ -48,7 +49,12 @@ class VCDWriter:
             index += 1
         self._scope_root = _build_scope_tree(self.scope, sorted(self.nets))
 
+    def set_active_nets(self, names: frozenset[str]) -> None:
+        self._active_nets = names
+
     def change(self, net: SimNet, time: SimTime) -> None:
+        if self._active_nets is not None and net.name not in self._active_nets:
+            return
         value = net.vcd_value()
         if self._last_dumped.get(net.name) == value:
             return
@@ -56,7 +62,10 @@ class VCDWriter:
         self._changes.append(VCDChange(time=time, code=self._codes[net.name], value=value))
 
     def dump_initial(self, time: SimTime) -> None:
-        for net in self.nets.values():
+        targets = self.nets.values()
+        if self._active_nets is not None:
+            targets = (self.nets[n] for n in self._active_nets if n in self.nets)
+        for net in targets:
             self.change(net, time)
 
     def render(self) -> str:

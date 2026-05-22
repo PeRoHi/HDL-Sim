@@ -8,6 +8,7 @@ from hdl_sim.engine.nets import SimNet
 from hdl_sim.engine.params import ParameterEvaluator
 from hdl_sim.parser.ast import (
     FunctionDef,
+    TaskDef,
     AlwaysBlock,
     ContinuousAssign,
     DeclKind,
@@ -46,6 +47,7 @@ class ElaboratedDesign:
     initial_blocks: tuple[ScopedProcess, ...]
     always_blocks: tuple[tuple[AlwaysBlock, dict[str, SimNet]], ...]
     functions: tuple[FunctionDef, ...] = ()
+    tasks: tuple[TaskDef, ...] = ()
 
 
 def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
@@ -57,6 +59,7 @@ def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
     always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]] = []
 
     functions = tuple(top.functions)
+    tasks = tuple(top.tasks)
 
     _elaborate_module(
         top,
@@ -76,6 +79,7 @@ def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
         initial_blocks=tuple(initials),
         always_blocks=tuple(always_blocks),
         functions=functions,
+        tasks=tasks,
     )
 
 

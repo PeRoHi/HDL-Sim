@@ -12,7 +12,9 @@ from hdl_sim.parser.ast import (
     ConcatExpr,
     FunctionCall,
     FunctionDef,
+    TaskDef,
     Expr,
+    IdentRef,
     IdentRef,
     IntLiteral,
     Lvalue,
@@ -33,15 +35,32 @@ class ExpressionEvaluator:
         nets: dict[str, SimNet],
         *,
         functions: dict[str, FunctionDef] | None = None,
+        tasks: dict[str, TaskDef] | None = None,
         queue: EventQueue | None = None,
         nba: NBARegion | None = None,
         on_net_update=None,
+        caller_nets: dict[str, SimNet] | None = None,
     ) -> None:
         self._nets = nets
         self._functions = functions or {}
+        self._tasks = tasks or {}
         self._queue = queue
         self._nba = nba
         self._on_net_update = on_net_update
+        self._caller_nets = caller_nets or nets
+
+    def call_task(self, name: str, args: tuple) -> None:
+        from hdl_sim.engine.tasks import call_task
+
+        task = self._tasks[name]
+        call_task(
+            task,
+            args,
+            caller_nets=self._caller_nets,
+            queue=self._queue or EventQueue(),
+            nba=self._nba or NBARegion(self._nets, on_update=lambda *_: None),
+            on_net_update=self._on_net_update or (lambda *_: None),
+        )
 
     def eval(self, expr: Expr) -> int:
         if isinstance(expr, FunctionCall):

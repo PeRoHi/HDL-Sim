@@ -67,6 +67,8 @@ class Expr:
 class IntLiteral(Expr):
     value: int
     width: int | None = None
+    x_mask: int = 0
+    z_mask: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +88,26 @@ class FunctionDef:
     name: str
     return_range: ValueRange | None
     inputs: tuple[FunctionInput, ...]
+    declarations: tuple[Declaration, ...]
+    body_statements: tuple[Stmt, ...]
+
+
+class TaskPortKind(Enum):
+    INPUT = auto()
+    OUTPUT = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class TaskPort:
+    kind: TaskPortKind
+    name: str
+    range: ValueRange | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaskDef:
+    name: str
+    ports: tuple[TaskPort, ...]
     declarations: tuple[Declaration, ...]
     body_statements: tuple[Stmt, ...]
 
@@ -115,6 +137,12 @@ class ConcatExpr(Expr):
 
 class Stmt:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class TaskEnable(Stmt):
+    name: str
+    args: tuple[Expr, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,6 +316,7 @@ class Module:
     always_blocks: tuple[AlwaysBlock, ...] = ()
     instances: tuple[ModuleInstance, ...] = ()
     functions: tuple[FunctionDef, ...] = ()
+    tasks: tuple[TaskDef, ...] = ()
     loc: SourceLocation | None = None
 
 

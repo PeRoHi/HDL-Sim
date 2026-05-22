@@ -30,6 +30,7 @@ from hdl_sim.parser.ast import (
     UnaryExpr,
     WhileStmt,
     ForStmt,
+    TaskEnable,
 )
 
 
@@ -153,6 +154,12 @@ class StatementRunner:
                 on_complete()
             return
 
+        if isinstance(stmt, TaskEnable):
+            self._ctx.evaluator.call_task(stmt.name, stmt.args)
+            if on_complete is not None:
+                on_complete()
+            return
+
         if isinstance(stmt, EventControl):
             self._execute_event_control(stmt)
             return
@@ -189,27 +196,20 @@ class StatementRunner:
             on_complete()
 
     def _execute_case(self, stmt: CaseStmt, *, on_complete: ContinueCallback | None = None) -> None:
-        selector = self._ctx.evaluator.eval(stmt.expression)
+        from hdl_sim.engine.four_state import case_match, eval_four_state
+
+        selector = eval_four_state(stmt.expression, self._ctx.evaluator.eval)
         for item in stmt.items:
             if not item.expressions:
                 self.execute(item.body, on_complete=on_complete)
                 return
             for pattern in item.expressions:
-                if self._case_match(selector, self._ctx.evaluator.eval(pattern), stmt.case_style):
+                pat_val = eval_four_state(pattern, self._ctx.evaluator.eval)
+                if case_match(selector, pat_val, stmt.case_style):
                     self.execute(item.body, on_complete=on_complete)
                     return
         if on_complete is not None:
             on_complete()
-
-    def _case_match(self, selector: int, pattern: int, style: str) -> bool:
-        if style == "case":
-            return selector == pattern
-        if style == "casex":
-            ignore = 0xFFFFFFFF
-            return (selector | ignore) == (pattern | ignore) or selector == pattern
-        if style == "casez":
-            return selector == pattern
-        return selector == pattern
 
     def _execute_system_task(self, stmt: SystemTask) -> None:
         if stmt.name == "finish":

@@ -27,6 +27,7 @@ decl_or_stmt: declaration
              | initial_block
              | always_block
              | function_decl
+             | task_decl
              | module_instance
 
 declaration: REG range? IDENT ";"
@@ -43,6 +44,15 @@ INTEGER: "integer"i
 range: "[" expr ":" expr "]"
 
 function_decl: "function" range? IDENT ";" function_item+ "endfunction" [";"]
+
+task_decl: "task" IDENT ";" task_item+ "endtask" [";"]
+
+task_item: "input" range? IDENT ";" -> task_input
+         | "output" range? IDENT ";" -> task_output
+         | declaration
+         | blocking_assign
+         | if_stmt
+         | begin_end_block
 
 function_item: "input" range? IDENT ";" -> func_input
                | declaration
@@ -82,6 +92,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | for_stmt
      | if_stmt
      | case_stmt
+     | task_enable
      | event_control
 
 begin_end_block: "begin" stmt_list "end"
@@ -93,6 +104,7 @@ system_task: "$display"i "(" display_args? ")" ";" -> display
             | "$stop"i [";"] -> stop
             | "$dumpfile"i "(" STRING ")" ";" -> dumpfile
             | "$dumpvars"i ["(" display_args? ")"] ";" -> dumpvars
+            | "$monitor"i "(" display_args? ")" ";" -> monitor
 
 display_args: display_arg ("," display_arg)*
 
@@ -118,6 +130,9 @@ for_step: lvalue "=" expr
 for_stmt: "for" "(" for_init? ";" expr? ";" for_step? ")" stmt
 
 if_stmt: "if" "(" expr ")" stmt ["else" stmt]
+
+task_enable: IDENT "(" expr ("," expr)* ")" ";" -> task_call
+          | IDENT "(" ")" ";" -> task_call_empty
 
 case_stmt: "case"i "(" expr ")" case_item+ "endcase" [";"] -> case
           | "casex"i "(" expr ")" case_item+ "endcase" [";"] -> casex

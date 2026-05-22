@@ -49,6 +49,7 @@ class Simulator:
 
         self._elaborated = elaborated
         self._functions = {func.name: func for func in elaborated.functions}
+        self._tasks = {task.name: task for task in elaborated.tasks}
         self._queue = EventQueue()
         self._nets = elaborated.nets
         self._delta = DeltaRegion()
@@ -153,14 +154,49 @@ class Simulator:
         if self._tracer is not None:
             self._tracer.log(f"$dumpfile {path}")
 
-    def _on_dumpvars(self, _args: tuple[DisplayArg, ...]) -> None:
+    def _on_dumpvars(self, args: tuple[DisplayArg, ...]) -> None:
         self._ensure_vcd()
         time = self._queue.now
+        active = self._resolve_dump_nets(args)
+        self._vcd.set_active_nets(active)
         self._vcd.dump_initial(time)
-        for net in self._nets.values():
-            self._vcd.change(net, time)
+        for name in active:
+            self._vcd.change(self._nets[name], time)
         if self._tracer is not None:
-            self._tracer.log(f"#{time} $dumpvars")
+            self._tracer.log(f"#{time} $dumpvars ({len(active)} nets)")
+
+    def _resolve_dump_nets(self, args: tuple[DisplayArg, ...]) -> frozenset[str]:
+        from hdl_sim.parser.ast import IdentRef
+
+        level = 0
+        scope: str | None = None
+        if args:
+            evaluator = ExpressionEvaluator(self._nets)
+            if args[0].expr is not None:
+                level = evaluator.eval(args[0].expr)
+            if len(args) > 1:
+                second = args[1]
+                if second.text is not None:
+                    scope = second.text.strip('"')
+                elif isinstance(second.expr, IdentRef):
+                    scope = second.expr.name
+        selected: list[str] = []
+        for name in self._nets:
+            if scope is not None and not (name == scope or name.startswith(f"{scope}.")):
+                continue
+            if level > 0:
+                if scope and name.startswith(f"{scope}."):
+                    relative = name[len(scope) + 1 :]
+                elif scope and name == scope:
+                    relative = ""
+                else:
+                    relative = name
+                parts = relative.split(".") if relative else []
+                subscopes = max(0, len(parts) - 1)
+                if subscopes >= level:
+                    continue
+            selected.append(name)
+        return frozenset(selected if selected else list(self._nets))
 
     def _record_net(self, net: SimNet, time: SimTime) -> None:
         if net.previous is not None and self._tracer is not None:
@@ -170,7 +206,15 @@ class Simulator:
             self._vcd.change(net, time)
 
     def _spawn_process(self, process: ScopedProcess, *, time: SimTime = 0) -> None:
-        evaluator = ExpressionEvaluator(process.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
+        evaluator = ExpressionEvaluator(
+            process.locals,
+            functions=self._functions,
+            tasks=self._tasks,
+            queue=self._queue,
+            nba=self._nba,
+            on_net_update=self._record_net,
+            caller_nets=process.locals,
+        )
 
         def run_process() -> None:
             def on_finish() -> None:
@@ -209,7 +253,15 @@ class Simulator:
             if self._queue.stopped:
                 return False
             before = {name: net.value for name, net in local_nets.items()}
-            evaluator = ExpressionEvaluator(local_nets, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
+            evaluator = ExpressionEvaluator(
+                local_nets,
+                functions=self._functions,
+                tasks=self._tasks,
+                queue=self._queue,
+                nba=self._nba,
+                on_net_update=self._record_net,
+                caller_nets=local_nets,
+            )
 
             def on_finish() -> None:
                 self._queue.stop()

@@ -29,6 +29,10 @@ from hdl_sim.parser.ast import (
     FunctionCall,
     FunctionDef,
     FunctionInput,
+    TaskEnable,
+    TaskPortKind,
+    TaskPort,
+    TaskDef,
     IdentRef,
     IfStmt,
     InitialBlock,
@@ -68,16 +72,51 @@ def _parse_sized_number(text: str) -> IntLiteral:
     width = int(width_text.strip())
     base = base_and_digits[0].lower()
     digits = base_and_digits[1:].replace("_", "")
+    value = 0
+    x_mask = 0
+    z_mask = 0
+
+    def consume_binary() -> None:
+        nonlocal value, x_mask, z_mask
+        for index, char in enumerate(reversed(digits)):
+            bit = 1 << index
+            lower = char.lower()
+            if lower in {"0", "1"}:
+                if lower == "1":
+                    value |= bit
+            elif lower == "x":
+                x_mask |= bit
+            elif lower == "z":
+                z_mask |= bit
+                x_mask |= bit
+            else:
+                msg = f"invalid digit in sized literal: {char}"
+                raise ValueError(msg)
+
     if base == "b":
-        value = int(digits.replace("x", "0").replace("z", "0"), 2)
+        consume_binary()
     elif base == "h":
-        value = int(digits.replace("x", "0").replace("z", "0"), 16)
+        expanded = ""
+        for char in digits:
+            lower = char.lower()
+            if lower in "0123456789abcdef":
+                expanded += f"{int(lower, 16):04b}"
+            elif lower == "x":
+                expanded += "xxxx"
+            elif lower == "z":
+                expanded += "zzzz"
+            else:
+                msg = f"invalid hex digit: {char}"
+                raise ValueError(msg)
+        digits = expanded
+        consume_binary()
     elif base == "d":
         value = int(digits)
     else:
         msg = f"unsupported sized literal base: {base}"
         raise ValueError(msg)
-    return IntLiteral(value=value, width=width)
+    mask = (1 << width) - 1
+    return IntLiteral(value=value & mask, width=width, x_mask=x_mask & mask, z_mask=z_mask & mask)
 
 
 def _flatten(values: list[Any]) -> list[Any]:
@@ -154,6 +193,7 @@ class VerilogTransformer(Transformer):
         always_blocks: list[AlwaysBlock] = []
         instances: list[ModuleInstance] = []
         functions: list[FunctionDef] = []
+        tasks: list[TaskDef] = []
 
         index = 1
         if index < len(items) and isinstance(items[index], list) and items[index]:
@@ -180,6 +220,8 @@ class VerilogTransformer(Transformer):
                     always_blocks.append(candidate)
                 elif isinstance(candidate, FunctionDef):
                     functions.append(candidate)
+                elif isinstance(candidate, TaskDef):
+                    tasks.append(candidate)
                 elif isinstance(candidate, ModuleInstance):
                     instances.append(candidate)
 
@@ -193,6 +235,7 @@ class VerilogTransformer(Transformer):
             always_blocks=tuple(always_blocks),
             instances=tuple(instances),
             functions=tuple(functions),
+            tasks=tuple(tasks),
         )
 
     def port_list(self, ports: list[Port]) -> list[Port]:
@@ -400,6 +443,62 @@ class VerilogTransformer(Transformer):
         value = count.value if isinstance(count, IntLiteral) else _int(count)
         return Repeat(count=value, body=body)
 
+
+
+    def task_decl(self, children: list[Any]) -> TaskDef:
+        flat = self._child_args(tuple(children))
+        name = str(flat[0])
+        ports: list[TaskPort] = []
+        declarations: list[Declaration] = []
+        statements: list[Stmt] = []
+        for item in flat[1:]:
+            if isinstance(item, TaskPort):
+                ports.append(item)
+            elif isinstance(item, Declaration):
+                declarations.append(item)
+            elif isinstance(item, Block):
+                statements.extend(item.statements)
+            elif isinstance(item, Stmt):
+                statements.append(item)
+            elif hasattr(item, "data") and item.data == "task_item":
+                resolved = self.transform(item)
+                if isinstance(resolved, Block):
+                    statements.extend(resolved.statements)
+                elif isinstance(resolved, Stmt):
+                    statements.append(resolved)
+        return TaskDef(
+            name=name,
+            ports=tuple(ports),
+            declarations=tuple(declarations),
+            body_statements=tuple(statements),
+        )
+
+    def task_item(self, children: list[Any]) -> Stmt | Block:
+        return self._resolve_expr(children[0])
+
+    @v_args(inline=True)
+    def task_input(self, *rest: Any) -> TaskPort:
+        if len(rest) == 2:
+            value_range, name = rest
+            return TaskPort(kind=TaskPortKind.INPUT, name=str(name), range=value_range)
+        (name,) = rest
+        return TaskPort(kind=TaskPortKind.INPUT, name=str(name))
+
+    @v_args(inline=True)
+    def task_output(self, *rest: Any) -> TaskPort:
+        if len(rest) == 2:
+            value_range, name = rest
+            return TaskPort(kind=TaskPortKind.OUTPUT, name=str(name), range=value_range)
+        (name,) = rest
+        return TaskPort(kind=TaskPortKind.OUTPUT, name=str(name))
+
+    @v_args(inline=True)
+    def task_call(self, name: Token, *args: Expr) -> TaskEnable:
+        return TaskEnable(name=str(name), args=tuple(args))
+
+    @v_args(inline=True)
+    def task_call_empty(self, name: Token) -> TaskEnable:
+        return TaskEnable(name=str(name), args=())
 
 
     def function_decl(self, children: list[Any]) -> FunctionDef:
