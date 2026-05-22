@@ -77,3 +77,52 @@ def _insert_part(value: int, msb: int, lsb: int, part: int, total_width: int) ->
     mask = ((1 << width) - 1) << lsb
     total_mask = (1 << total_width) - 1
     return ((value & ~mask) | ((part << lsb) & mask)) & total_mask
+
+
+def write_lvalue_logic(
+    lvalue: Lvalue,
+    state,
+    *,
+    nets: dict[str, SimNet],
+    eval_fn: EvalFn,
+    time: SimTime,
+    on_update,
+) -> bool:
+    from hdl_sim.engine.logic_eval import to_int
+
+    value = to_int(state)
+    x_mask = state.x_mask
+    z_mask = state.z_mask
+    net = _require_net(lvalue.base, nets)
+    if lvalue.bit is not None:
+        index = eval_fn(lvalue.bit)
+        bit_value = value & 1
+        x_bit = (x_mask >> index) & 1
+        z_bit = (z_mask >> index) & 1
+        next_value = (net.value & ~(1 << index)) | (bit_value << index)
+        next_x = (net.x_mask & ~(1 << index)) | (x_bit << index)
+        next_z = (net.z_mask & ~(1 << index)) | (z_bit << index)
+        if (
+            next_value == net.value
+            and next_x == net.x_mask
+            and next_z == net.z_mask
+        ):
+            return False
+        net.previous = net.value
+        net.value = next_value
+        net.x_mask = next_x
+        net.z_mask = next_z
+        on_update(net, time)
+        return True
+    if lvalue.msb is not None and lvalue.lsb is not None:
+        msb = eval_fn(lvalue.msb)
+        lsb = eval_fn(lvalue.lsb)
+        next_value = _insert_part(net.value, msb, lsb, value, net.width)
+        if net.update(next_value, time=time, x_mask=net.x_mask, z_mask=net.z_mask):
+            on_update(net, time)
+            return True
+        return False
+    changed = net.update(value, time=time, x_mask=x_mask, z_mask=z_mask)
+    if changed:
+        on_update(net, time)
+    return changed

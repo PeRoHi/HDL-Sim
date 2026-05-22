@@ -20,6 +20,8 @@ class SimNet:
     width: int
     kind: DeclKind
     value: int = 0
+    x_mask: int = 0
+    z_mask: int = 0
     previous: int | None = None
     _observers: list[NetObserver] = field(default_factory=list, repr=False)
     _mask: int = field(init=False, repr=False)
@@ -30,6 +32,8 @@ class SimNet:
             raise ValueError(msg)
         object.__setattr__(self, "_mask", (1 << self.width) - 1)
         self.value &= self._mask
+        self.x_mask &= self._mask
+        self.z_mask &= self._mask
 
     @classmethod
     def from_declaration(cls, name: str, kind: DeclKind, value_range: Range | None) -> SimNet:
@@ -42,12 +46,23 @@ class SimNet:
     def subscribe(self, observer: NetObserver) -> None:
         self._observers.append(observer)
 
-    def update(self, value: int, *, time: SimTime) -> bool:
+    def update(
+        self,
+        value: int,
+        *,
+        time: SimTime,
+        x_mask: int | None = None,
+        z_mask: int | None = None,
+    ) -> bool:
         masked = value & self._mask
-        if masked == self.value:
+        next_x = (x_mask if x_mask is not None else self.x_mask) & self._mask
+        next_z = (z_mask if z_mask is not None else self.z_mask) & self._mask
+        if masked == self.value and next_x == self.x_mask and next_z == self.z_mask:
             return False
         self.previous = self.value
         self.value = masked
+        self.x_mask = next_x
+        self.z_mask = next_z
         for observer in tuple(self._observers):
             observer(self, self.previous, masked, time)
         return True
@@ -57,5 +72,18 @@ class SimNet:
 
     def vcd_value(self) -> str:
         if self.width == 1:
+            if self.x_mask & 1:
+                return "x"
+            if self.z_mask & 1:
+                return "z"
             return "1" if self.bit(0) else "0"
-        return "b" + format(self.value, f"0{self.width}b")
+        chars = []
+        for index in range(self.width - 1, -1, -1):
+            bit = 1 << index
+            if self.x_mask & bit:
+                chars.append("x")
+            elif self.z_mask & bit:
+                chars.append("z")
+            else:
+                chars.append("1" if self.value & bit else "0")
+        return "b" + "".join(chars)

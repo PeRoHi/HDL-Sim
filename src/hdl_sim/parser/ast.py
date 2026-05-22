@@ -178,6 +178,7 @@ class TaskEnable(Stmt):
 @dataclass(frozen=True, slots=True)
 class Block(Stmt):
     statements: tuple[Stmt, ...]
+    label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

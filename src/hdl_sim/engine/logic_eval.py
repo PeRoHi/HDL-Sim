@@ -1,0 +1,163 @@
+"""Full four-state expression evaluation."""
+
+from __future__ import annotations
+
+from hdl_sim.engine.four_state import (
+    FourStateValue,
+    bitwise_and,
+    bitwise_not,
+    bitwise_or,
+    bitwise_xor,
+)
+from hdl_sim.parser.ast import (
+    BinaryExpr,
+    BitSelect,
+    ConcatExpr,
+    Expr,
+    IdentRef,
+    IntLiteral,
+    PartSelect,
+    UnaryExpr,
+)
+
+
+def to_int(value: FourStateValue) -> int:
+    return value.value
+
+
+def has_unknown(value: FourStateValue) -> bool:
+    mask = (1 << value.width) - 1 if value.width else 0
+    return bool((value.x_mask | value.z_mask) & mask)
+
+
+def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
+    """Evaluate an expression into a four-state bit vector."""
+
+    if isinstance(expr, IntLiteral):
+        return FourStateValue.from_literal(expr)
+    if isinstance(expr, IdentRef):
+        net = nets[expr.name]
+        return FourStateValue(
+            value=net.value,
+            width=net.width,
+            x_mask=getattr(net, "x_mask", 0),
+            z_mask=getattr(net, "z_mask", 0),
+        )
+    if isinstance(expr, BitSelect):
+        base = eval_logic(IdentRef(expr.signal), eval_int, nets)
+        index = eval_int(expr.index)
+        bit = (base.value >> index) & 1
+        x = (base.x_mask >> index) & 1
+        z = (base.z_mask >> index) & 1
+        return FourStateValue(value=bit, width=1, x_mask=x, z_mask=z)
+    if isinstance(expr, PartSelect):
+        from hdl_sim.engine.lvalue import read_lvalue
+        from hdl_sim.parser.ast import Lvalue
+
+        value = read_lvalue(
+            Lvalue(base=expr.signal, msb=expr.msb, lsb=expr.lsb),
+            nets,
+            eval_int,
+        )
+        width = abs(eval_int(expr.msb) - eval_int(expr.lsb)) + 1
+        return FourStateValue.from_int(value, width=width)
+    if isinstance(expr, UnaryExpr):
+        operand = eval_logic(expr.operand, eval_int, nets)
+        if expr.op == "~":
+            return bitwise_not(operand)
+        value = to_int(operand)
+        if expr.op == "!":
+            known = not has_unknown(operand)
+            return FourStateValue(value=1 if known and value == 0 else 0, width=1, x_mask=0 if known else 1)
+        if expr.op == "-":
+            if has_unknown(operand):
+                return FourStateValue(value=0, width=operand.width, x_mask=(1 << operand.width) - 1)
+            return FourStateValue.from_int(-value, width=operand.width)
+        if expr.op in {"uand", "uor", "uxor"}:
+            mask = (1 << operand.width) - 1
+            bits = operand.value & mask
+            if has_unknown(operand):
+                return FourStateValue(value=0, width=1, x_mask=1)
+            if expr.op == "uand":
+                return FourStateValue(value=1 if bits == mask else 0, width=1)
+            if expr.op == "uor":
+                return FourStateValue(value=1 if bits else 0, width=1)
+            parity = 0
+            while bits:
+                parity ^= bits & 1
+                bits >>= 1
+            return FourStateValue(value=parity, width=1)
+        msg = f"unsupported unary operator: {expr.op}"
+        raise ValueError(msg)
+    if isinstance(expr, BinaryExpr):
+        if expr.op == "?:":
+            condition, branches = expr.left, expr.right
+            cond = eval_logic(condition, eval_int, nets)
+            if has_unknown(cond):
+                return FourStateValue(value=0, width=32, x_mask=1)
+            branch = branches.left if cond.value else branches.right
+            return eval_logic(branch, eval_int, nets)
+        left = eval_logic(expr.left, eval_int, nets)
+        right = eval_logic(expr.right, eval_int, nets)
+        if expr.op == "&":
+            return bitwise_and(left, right)
+        if expr.op == "|":
+            return bitwise_or(left, right)
+        if expr.op == "^":
+            return bitwise_xor(left, right)
+        if expr.op in {"&&", "||"}:
+            lv, rv = to_int(left), to_int(right)
+            if has_unknown(left) or has_unknown(right):
+                return FourStateValue(value=0, width=1, x_mask=1)
+            if expr.op == "&&":
+                return FourStateValue(value=1 if lv and rv else 0, width=1)
+            return FourStateValue(value=1 if lv or rv else 0, width=1)
+        if has_unknown(left) or has_unknown(right):
+            width = max(left.width, right.width)
+            return FourStateValue(value=0, width=width, x_mask=(1 << width) - 1)
+        lv, rv = to_int(left), to_int(right)
+        width = max(left.width, right.width)
+        mask = (1 << width) - 1
+        if expr.op == "+":
+            return FourStateValue.from_int((lv + rv) & mask, width=width)
+        if expr.op == "-":
+            return FourStateValue.from_int((lv - rv) & mask, width=width)
+        if expr.op == "*":
+            return FourStateValue.from_int((lv * rv) & mask, width=width)
+        if expr.op == "<<":
+            return FourStateValue.from_int((lv << rv) & mask, width=width)
+        if expr.op == ">>":
+            return FourStateValue.from_int(lv >> rv, width=width)
+        if expr.op in {"==", "!=", "<", "<=", ">", ">="}:
+            if expr.op == "==":
+                ok = lv == rv
+            elif expr.op == "!=":
+                ok = lv != rv
+            elif expr.op == "<":
+                ok = lv < rv
+            elif expr.op == "<=":
+                ok = lv <= rv
+            elif expr.op == ">":
+                ok = lv > rv
+            else:
+                ok = lv >= rv
+            return FourStateValue(value=1 if ok else 0, width=1)
+        msg = f"unsupported binary operator: {expr.op}"
+        raise ValueError(msg)
+    if isinstance(expr, ConcatExpr):
+        parts = [eval_logic(part, eval_int, nets) for part in expr.parts]
+        total_width = sum(part.width for part in parts)
+        value = x_mask = z_mask = 0
+        shift = 0
+        for part in reversed(parts):
+            value |= part.value << shift
+            x_mask |= part.x_mask << shift
+            z_mask |= part.z_mask << shift
+            shift += part.width
+        mask = (1 << total_width) - 1
+        return FourStateValue(value=value & mask, width=total_width, x_mask=x_mask & mask, z_mask=z_mask & mask)
+    from hdl_sim.parser.ast import FunctionCall
+
+    if isinstance(expr, FunctionCall):
+        return FourStateValue.from_int(eval_int(expr), width=32)
+    return FourStateValue.from_int(eval_int(expr), width=32)

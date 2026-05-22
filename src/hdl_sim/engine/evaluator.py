@@ -15,7 +15,6 @@ from hdl_sim.parser.ast import (
     TaskDef,
     Expr,
     IdentRef,
-    IdentRef,
     IntLiteral,
     Lvalue,
     PartSelect,
@@ -61,6 +60,11 @@ class ExpressionEvaluator:
             nba=self._nba or NBARegion(self._nets, on_update=lambda *_: None),
             on_net_update=self._on_net_update or (lambda *_: None),
         )
+
+    def eval_logic(self, expr: Expr):
+        from hdl_sim.engine.logic_eval import eval_logic
+
+        return eval_logic(expr, self.eval, self._nets)
 
     def eval_four_state(self, expr: Expr):
         from hdl_sim.engine.four_state import (

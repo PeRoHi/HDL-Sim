@@ -94,13 +94,26 @@ class StatementRunner:
             return
 
         if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
-            value = self._ctx.evaluator.eval(stmt.expr)
-            self._state.assign_lvalue(
-                stmt.target,
-                value,
-                blocking=isinstance(stmt, BlockingAssign),
-                time=self._now(),
-            )
+            if isinstance(stmt, BlockingAssign):
+                from hdl_sim.engine.lvalue import write_lvalue_logic
+
+                state = self._ctx.evaluator.eval_logic(stmt.expr)
+                write_lvalue_logic(
+                    stmt.target,
+                    state,
+                    nets=self._ctx.nets,
+                    eval_fn=self._ctx.evaluator.eval,
+                    time=self._now(),
+                    on_update=self._ctx.on_net_update,
+                )
+            else:
+                value = self._ctx.evaluator.eval(stmt.expr)
+                self._state.assign_lvalue(
+                    stmt.target,
+                    value,
+                    blocking=False,
+                    time=self._now(),
+                )
             if on_complete is not None:
                 on_complete()
             return
@@ -231,8 +244,9 @@ class StatementRunner:
                 if on_complete is not None:
                     on_complete()
 
+        time = self._now()
         for branch in branches:
-            self.execute(branch, on_complete=branch_done)
+            self._ctx.schedule(time, lambda b=branch: self.execute(b, on_complete=branch_done))
 
 
     def _execute_case(self, stmt: CaseStmt, *, on_complete: ContinueCallback | None = None) -> None:

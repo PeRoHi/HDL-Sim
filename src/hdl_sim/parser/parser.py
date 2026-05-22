@@ -419,6 +419,13 @@ class VerilogTransformer(Transformer):
             return tuple(items[0])
         return tuple(items)
 
+    @v_args(inline=True)
+    def begin_labeled(self, label: Token, stmt_list: list[Stmt]) -> Block:
+        return Block(statements=tuple(_flatten(stmt_list)), label=str(label))
+
+    def begin_plain(self, stmt_list: list[Stmt]) -> Block:
+        return Block(statements=tuple(_flatten(stmt_list)))
+
     def begin_end_block(self, stmt_list: list[Stmt]) -> Block:
         return Block(statements=tuple(_flatten(stmt_list)))
 
@@ -506,6 +513,10 @@ class VerilogTransformer(Transformer):
     def generate_block(self, items: list[Any]) -> GenerateBlock:
         return GenerateBlock(items=tuple(self._resolve_generate_item(i) for i in _flatten(items)))
 
+    @v_args(inline=True)
+    def gen_begin_labeled(self, label: Token, items: list[Any]) -> tuple[str, Any]:
+        return ("labeled", str(label), self._resolve_generate_items(items))
+
     def gen_begin(self, items: list[Any]) -> tuple[Any, ...]:
         return self._resolve_generate_items(items)
 
@@ -523,8 +534,21 @@ class VerilogTransformer(Transformer):
         genvar, init = flat[0]
         condition = flat[1]
         step = flat[2]
-        body = self._resolve_generate_items(flat[3])
-        return GenerateFor(genvar=genvar, init=init, condition=condition, step=step, body=body)
+        body_raw = flat[3]
+        label = None
+        if isinstance(body_raw, tuple) and len(body_raw) == 3 and body_raw[0] == "labeled":
+            label = body_raw[1]
+            body = body_raw[2]
+        else:
+            body = self._resolve_generate_items(body_raw)
+        return GenerateFor(
+            genvar=genvar,
+            init=init,
+            condition=condition,
+            step=step,
+            body=body,
+            label=label,
+        )
 
     def gen_if(self, *children: Any) -> GenerateIf:
         flat = self._child_args(children)

@@ -65,7 +65,8 @@ generate_for: "for" "(" genvar_init ";" expr ";" for_step ")" generate_body -> g
 
 genvar_init: "genvar"i? IDENT "=" expr
 
-generate_body: "begin" generate_item+ "end" -> gen_begin
+generate_body: "begin" ":" IDENT generate_item+ "end" -> gen_begin_labeled
+              | "begin" generate_item+ "end" -> gen_begin
               | generate_item -> gen_single
 
 generate_if: "if" "(" expr ")" generate_body ["else" generate_body] -> gen_if
@@ -119,7 +120,8 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | fork_stmt
      | event_control
 
-begin_end_block: "begin" stmt_list "end"
+begin_end_block: "begin" ":" IDENT stmt_list "end" -> begin_labeled
+                 | "begin" stmt_list "end" -> begin_plain
 
 stmt_list: stmt+
 
