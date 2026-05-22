@@ -1,0 +1,107 @@
+// Verilog subset grammar for HDL-Sim (LALR)
+
+?start: module
+
+module: "module" IDENT ";" decl_or_stmt* "endmodule" [";"]
+
+decl_or_stmt: declaration
+             | continuous_assign
+             | initial_block
+             | always_block
+
+declaration: TYPE range? IDENT ";"
+
+TYPE: "reg"i | "wire"i
+
+range: "[" NUMBER ":" NUMBER "]"
+
+continuous_assign: "assign" IDENT "=" expr ";"
+
+initial_block: "initial" stmt
+
+always_block: "always" sensitivity stmt
+
+sensitivity: "@" "(" sensitivity_item ("," sensitivity_item)* ")"
+            | "@" sensitivity_item
+            | "@" "*"
+
+sensitivity_item: "posedge"i IDENT -> posedge
+                  | "negedge"i IDENT -> negedge
+                  | IDENT -> level
+
+?stmt: block
+     | blocking_assign
+     | nonblocking_assign
+     | delay_control
+     | forever_stmt
+     | repeat_stmt
+     | if_stmt
+     | event_control
+
+block: "begin" stmt_list "end"
+
+stmt_list: stmt+
+
+blocking_assign: IDENT "=" expr ";"
+nonblocking_assign: IDENT "<=" expr ";"
+
+delay_control: "#" NUMBER stmt
+
+forever_stmt: "forever" stmt
+
+repeat_stmt: "repeat" "(" NUMBER ")" stmt
+
+if_stmt: "if" "(" expr ")" stmt ["else" stmt]
+
+event_control: "@" "(" event_expr ("," event_expr)* ")" stmt
+              | "@" event_expr stmt
+
+event_expr: "posedge"i IDENT -> ev_posedge
+           | "negedge"i IDENT -> ev_negedge
+           | expr -> ev_expr
+
+?expr: ternary_expr
+
+?ternary_expr: lor_expr ("?" lor_expr ":" lor_expr)?
+
+?lor_expr: land_expr ("||" land_expr)*
+
+?land_expr: bor_expr ("&&" bor_expr)*
+
+?bor_expr: bxor_expr ("|" bxor_expr)*
+
+?bxor_expr: band_expr ("^" band_expr)*
+
+?band_expr: eq_expr ("&" eq_expr)*
+
+?eq_expr: rel_expr (("==" | "!=") rel_expr)*
+
+?rel_expr: shift_expr (("<" | "<=" | ">" | ">=") shift_expr)*
+
+?shift_expr: add_expr (("<<" | ">>") add_expr)*
+
+?add_expr: mul_expr (("+" | "-") mul_expr)*
+
+?mul_expr: unary_expr (("*" | "/" | "%") unary_expr)*
+
+?unary_expr: "!" unary_expr -> not_
+             | "~" unary_expr -> invert
+             | "-" unary_expr -> neg
+             | primary
+
+?primary: NUMBER
+        | sized_number
+        | ident_ref
+        | "(" expr ")"
+
+ident_ref: IDENT
+
+sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
+
+NUMBER: /\d+/
+IDENT: /[A-Za-z_]\w*/
+
+%import common.WS
+%ignore WS
+%ignore /\/\/[^\n]*/
+%ignore /\/\*[\s\S]*?\*\//

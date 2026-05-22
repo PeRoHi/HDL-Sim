@@ -1,62 +1,86 @@
-# HDL-Sim architecture foundation
+# HDL-Sim architecture
 
-HDL-Sim is planned as a lightweight, event-driven Verilog HDL simulator that
-can emit VCD files for waveform viewers such as GTKWave.
+HDL-Sim is a lightweight, event-driven Verilog HDL simulator that emits VCD
+files for waveform viewers such as GTKWave.
 
-## Proposed directory layout
+## Directory layout
 
 ```text
 hdl-sim/
 ├── pyproject.toml
 ├── docs/
 │   └── architecture.md
+├── examples/
+│   ├── clock.v
+│   └── and_gate.v
 ├── src/
 │   └── hdl_sim/
 │       ├── __init__.py
+│       ├── __main__.py
+│       ├── cli.py
 │       ├── core/
-│       │   ├── __init__.py
-│       │   ├── events.py        # Simulation time and event queue
-│       │   └── signals.py       # Signal state and change notification
+│       │   ├── events.py
+│       │   └── signals.py
 │       ├── parser/
-│       │   └── __init__.py      # Lexer/parser facade and AST conversion
+│       │   ├── ast.py
+│       │   ├── verilog.lark
+│       │   ├── parser.py
+│       │   └── preprocess.py
+│       ├── engine/
+│       │   ├── nets.py
+│       │   ├── evaluator.py
+│       │   ├── executor.py
+│       │   ├── expr_deps.py
+│       │   └── simulator.py
 │       └── vcd/
-│           └── __init__.py      # VCD writer facade
+│           └── writer.py
 └── tests/
-    └── test_core.py
+    ├── test_core.py
+    ├── test_parser.py
+    └── test_simulation.py
 ```
 
-## Parser library choice
+## Parser library
 
-Use **Lark 1.2.2** for Verilog parsing.
-
-Reasons:
-
-- Lark supports EBNF grammars directly, which keeps a Verilog subset grammar
-  readable while the simulator grows.
-- It provides both Earley and LALR parsing modes, making it practical to
-  prototype ambiguous grammar fragments first and later optimize stable grammar
-  paths with LALR.
-- Parse-tree transformers are built in, so grammar nodes can be converted into
-  a simulator AST without a separate visitor framework.
-- Lark is pure Python and compatible with Python 3.12, which keeps the initial
-  dependency footprint small.
-
-Installation command for the selected parser library:
+**Lark 1.2.2** is used for the Verilog subset grammar.
 
 ```bash
 poetry add lark==1.2.2
 ```
 
-## Core simulation model
+Reasons: EBNF grammars, LALR mode, built-in tree transformers, pure Python, Python 3.12 compatible.
 
-- `EventQueue` owns the current simulation time and schedules callbacks at
-  absolute or relative times.
-- Events are ordered by `(time, sequence)` so callbacks scheduled for the same
-  timestamp run deterministically in insertion order.
-- `Signal` stores the current logic value and lets observers schedule follow-up
-  behavior when the value changes.
-- Four-state values (`0`, `1`, `x`, `z`) are represented by `LogicValue`.
+## Supported Verilog subset (MVP)
 
-This foundation intentionally does not parse or execute Verilog yet. The next
-layer should translate parsed modules, continuous assignments, procedural
-blocks, and delays into callbacks scheduled on the event queue.
+- `module` / `endmodule`
+- `reg` / `wire` declarations (optional vector range)
+- `assign` continuous assignments
+- `initial` / `always` blocks with `begin` / `end`
+- blocking `=` and non-blocking `<=` assignments
+- `#delay` event controls
+- `forever`, `repeat`, `if` / `else`
+- `@(posedge/negedge signal)` and `@(*)`
+- Expression operators: `~`, `&`, `|`, `^`, `+`, `-`, `*`, comparisons, `?:`
+
+## Simulation pipeline
+
+1. Preprocess comments (`parser/preprocess.py`)
+2. Parse to AST (`parser/parser.py` + `verilog.lark`)
+3. Build netlist (`engine/nets.py`)
+4. Register continuous assigns (`engine/simulator.py`)
+5. Spawn `initial` / `always` processes (`engine/executor.py`)
+6. Run `EventQueue` until `until` / `max_events` / queue empty
+7. Optional VCD dump (`vcd/writer.py`)
+
+## CLI
+
+```bash
+poetry install
+poetry run hdl-sim examples/clock.v --until 20 --max-events 100 -o build/clock.vcd
+```
+
+Or:
+
+```bash
+PYTHONPATH=src python3 -m hdl_sim examples/clock.v --until 20
+```

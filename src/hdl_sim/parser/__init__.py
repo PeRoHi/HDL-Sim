@@ -1,5 +1,6 @@
-"""Verilog lexer/parser package.
+"""Verilog parsing for the supported subset."""
 
-The initial parser implementation will be built on Lark. This package will
-own grammar loading and parse-tree-to-AST transformation.
-"""
+from hdl_sim.parser.ast import Design, Module
+from hdl_sim.parser.parser import parse_design, parse_module
+
+__all__ = ["Design", "Module", "parse_design", "parse_module"]

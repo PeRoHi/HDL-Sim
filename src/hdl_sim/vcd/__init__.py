@@ -1,5 +1,5 @@
-"""VCD output package.
+"""VCD output helpers."""
 
-The VCD writer will subscribe to signal changes from the simulation core and
-serialize them for waveform viewers such as GTKWave.
-"""
+from hdl_sim.vcd.writer import VCDWriter
+
+__all__ = ["VCDWriter"]
