@@ -21,9 +21,10 @@ from hdl_sim.parser.ast import Design, Module, PortDirection
 from hdl_sim.parser.loader import load_design_with_meta
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
-ROOT = Path(__file__).resolve().parents[3]
-UI_DIR = ROOT / "ui"
-EXAMPLES_DIR = ROOT / "examples"
+from hdl_sim.web.paths import examples_dir, ui_dir
+
+UI_DIR = ui_dir()
+EXAMPLES_DIR = examples_dir()
 
 
 class SourceFile(BaseModel):
