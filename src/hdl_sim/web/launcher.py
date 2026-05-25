@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import socket
 import subprocess
 import sys
 import threading
@@ -12,9 +11,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from hdl_sim.web.port_util import (
+    DEFAULT_UI_PORT,
+    ensure_default_port,
+    port_is_free,
+    release_port,
+    wait_for_server,
+)
 from hdl_sim.web.paths import project_root
 
-DEFAULT_PORT = 8765
+DEFAULT_PORT = DEFAULT_UI_PORT
 REQUIRED_PACKAGES = ("fastapi", "uvicorn", "lark")
 
 
@@ -28,15 +34,23 @@ def ensure_src_on_path() -> None:
 
 
 def find_free_port(start: int = DEFAULT_PORT) -> int:
+    """Return the first bindable port (legacy helper). Prefer ensure_default_port()."""
+
     for port in range(start, start + 50):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                sock.bind(("127.0.0.1", port))
-            except OSError:
-                continue
+        if port_is_free("127.0.0.1", port):
             return port
     return start
+
+
+def prepare_ui_port(
+    host: str = "127.0.0.1",
+    port: int = DEFAULT_PORT,
+    *,
+    on_log: Callable[[str], None] | None = None,
+) -> int:
+    """Bind the default UI port, stopping stale python servers when needed."""
+
+    return ensure_default_port(host, port, on_log=on_log)
 
 
 def missing_dependencies() -> list[str]:
@@ -78,11 +92,16 @@ def install_dependencies(*, on_line: Callable[[str], None] | None = None) -> tup
     return True, output.strip()
 
 
-def open_browser_later(url: str) -> None:
-    def _open() -> None:
-        webbrowser.open(url, new=2)
+def open_browser_later(url: str, *, delay: float = 0.3) -> None:
+    import time
 
-    threading.Timer(0.8, _open).start()
+    stamp = int(time.time())
+    open_url = f"{url.rstrip('/')}/?launch={stamp}"
+
+    def _open() -> None:
+        webbrowser.open(open_url, new=1)
+
+    threading.Timer(delay, _open).start()
 
 
 @dataclass(slots=True)
@@ -107,9 +126,14 @@ def start_server(
     open_browser: bool = True,
     reload: bool = False,
     blocking: bool = True,
+    on_log: Callable[[str], None] | None = None,
 ) -> RunningServer | int:
     ensure_src_on_path()
-    port = find_free_port(port)
+    try:
+        port = prepare_ui_port(host, port, on_log=on_log)
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     url = f"http://{host}:{port}"
     missing = missing_dependencies()
     if missing:
@@ -132,8 +156,14 @@ def start_server(
     def _serve() -> None:
         server.run()
 
-    thread = threading.Thread(target=_serve, daemon=True, name="hdl-sim-ui")
+    thread = threading.Thread(target=_serve, daemon=False, name="hdl-sim-ui")
     thread.start()
+
+    if not wait_for_server(host, port):
+        print(f"HDL-Sim server did not become ready on {url}", file=sys.stderr)
+        server.should_exit = True
+        thread.join(timeout=3)
+        return 2
 
     if open_browser:
         open_browser_later(url)

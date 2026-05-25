@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-UI_BUILD = "0.2.0"
+UI_BUILD = "0.2.1"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 

@@ -8,6 +8,7 @@ from tkinter import messagebox, scrolledtext, ttk
 
 from hdl_sim import __version__
 from hdl_sim.web.launcher import (
+    DEFAULT_PORT,
     RunningServer,
     dependency_help,
     install_dependencies,
@@ -118,7 +119,13 @@ class HDLSimGuiLauncher:
             text = index.read_text(encoding="utf-8")
             layout = "IDE" if "pane-explorer" in text else "legacy"
             self.append_log(f"Layout: {layout}")
-        result = start_server(self.host, self.port, open_browser=True, blocking=False)
+        result = start_server(
+            self.host,
+            self.port,
+            open_browser=True,
+            blocking=False,
+            on_log=self.append_log,
+        )
         if isinstance(result, int):
             self.status.set("起動に失敗しました")
             messagebox.showerror("HDL-Sim", dependency_help())
@@ -128,6 +135,8 @@ class HDLSimGuiLauncher:
         self.url.set(self.server.url)
         self.btn_open.configure(state=tk.NORMAL)
         self.append_log(f"URL: {self.server.url}")
+        if self.server.port != DEFAULT_PORT:
+            self.append_log(f"注意: 既定ポート {DEFAULT_PORT} 以外で起動しています")
 
     def open_browser(self) -> None:
         if self.server is not None:
