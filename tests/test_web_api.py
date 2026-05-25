@@ -37,4 +37,5 @@ def test_ui_info_reports_ide_layout() -> None:
     ).endpoint
     data = handler()
     assert data["ide_layout"] is True
-    assert "ide" in data["build"]
+    assert data["version"] == "0.2.0"
+    assert data["version_label"] == "Ver 0.2.0"

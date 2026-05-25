@@ -6,6 +6,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
+from hdl_sim import __version__
 from hdl_sim.web.launcher import (
     RunningServer,
     dependency_help,
@@ -40,6 +41,7 @@ class HDLSimGuiLauncher:
         frame.pack(fill=tk.BOTH, expand=True)
 
         ttk.Label(frame, text="HDL-Sim UI", font=("Segoe UI", 16, "bold")).pack(anchor=tk.W)
+        ttk.Label(frame, text=f"Ver {__version__}", font=("Consolas", 10)).pack(anchor=tk.W, pady=(0, 4))
         ttk.Label(
             frame,
             text="Verilog を編集してシミュレーションできます。",

@@ -4,14 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="ide-20250523" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=ide-20250523" />
+  <meta name="hdl-sim-ui-build" content="0.2.0" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.2.0" />
 </head>
 <body>
   <!-- Compact toolbar -->
   <header class="toolbar" role="banner">
     <div class="toolbar-left">
-      <span class="brand" title="HDL-Sim">HDL-Sim</span>
+      <div class="brand-block">
+        <span id="app-version" class="version-badge" title="HDL-Sim UI バージョン">Ver 0.2.0</span>
+        <span class="brand" title="HDL-Sim">HDL-Sim</span>
+      </div>
       <div class="toolbar-group" role="toolbar" aria-label="実行">
         <button type="button" id="btn-run" class="tb-btn primary" title="実行 (F5)" aria-label="実行">
           <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
@@ -125,7 +128,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=ide-20250523"></script>
-  <script src="/assets/js/app.js?v=ide-20250523" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.2.0"></script>
+  <script src="/assets/js/app.js?v=0.2.0" type="module"></script>
 </body>
 </html>

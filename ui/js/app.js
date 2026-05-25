@@ -601,8 +601,13 @@ function bindUi() {
 }
 
 async function verifyUiBuild() {
+  const badge = $("app-version");
   try {
     const info = await api("/api/ui-info");
+    if (info.version_label && badge) {
+      badge.textContent = info.version_label;
+      badge.title = `HDL-Sim UI ${info.version}${info.ide_layout ? " (IDE)" : ""}`;
+    }
     if (!info.ide_layout) {
       setStatus("旧UI — サーバー再起動", "err");
       appendConsole(
@@ -611,9 +616,9 @@ async function verifyUiBuild() {
       );
       return;
     }
-    setStatus(`IDE ${info.build}`, "ok");
+    setStatus("Ready", "ok");
   } catch {
-    /* ignore */
+    /* keep static badge */
   }
 }
 

@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-UI_BUILD = "ide-20250523"
+UI_BUILD = "0.2.0"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 
@@ -30,6 +30,7 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 from pydantic import BaseModel, Field
 
+from hdl_sim import __version__
 from hdl_sim.engine.elaborator import elaborate
 from hdl_sim.engine.simulator import Simulator
 from hdl_sim.parser.ast import Design, Module, PortDirection
@@ -201,7 +202,7 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="HDL-Sim UI", version="0.1.0")
+    app = FastAPI(title="HDL-Sim UI", version=__version__)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -218,6 +219,8 @@ def create_app() -> FastAPI:
         index_path = UI_DIR / "index.html"
         index_text = index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
         return {
+            "version": __version__,
+            "version_label": f"Ver {__version__}",
             "build": UI_BUILD,
             "ui_dir": str(UI_DIR.resolve()),
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
