@@ -563,6 +563,7 @@ function initMonaco() {
     renderFileTree();
     loadExamples();
     runElaborate();
+    verifyUiBuild();
   });
 }
 
@@ -597,6 +598,23 @@ function bindUi() {
   $("chk-auto-scroll")?.addEventListener("change", () => {
     if (lastWaveform) drawWave(lastWaveform);
   });
+}
+
+async function verifyUiBuild() {
+  try {
+    const info = await api("/api/ui-info");
+    if (!info.ide_layout) {
+      setStatus("旧UI — サーバー再起動", "err");
+      appendConsole(
+        `[ui] IDE layout not detected. ui_dir=${info.ui_dir}`,
+        "warn"
+      );
+      return;
+    }
+    setStatus(`IDE ${info.build}`, "ok");
+  } catch {
+    /* ignore */
+  }
 }
 
 initFiles();

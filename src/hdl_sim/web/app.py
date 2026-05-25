@@ -12,7 +12,22 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from starlette.staticfiles import StaticFiles
+from starlette.types import Scope
+
+UI_BUILD = "ide-20250523"
+_NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve UI assets without aggressive browser caching (dev-friendly)."""
+
+    async def get_response(self, path: str, scope: Scope):
+        response = await super().get_response(path, scope)
+        if path.endswith(_NO_CACHE_SUFFIXES):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
 from pydantic import BaseModel, Field
 
 from hdl_sim.engine.elaborator import elaborate
@@ -198,6 +213,17 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/ui-info")
+    def ui_info() -> dict[str, Any]:
+        index_path = UI_DIR / "index.html"
+        index_text = index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
+        return {
+            "build": UI_BUILD,
+            "ui_dir": str(UI_DIR.resolve()),
+            "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
+            "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
+        }
+
     @app.get("/api/examples")
     def list_examples() -> list[dict[str, str]]:
         if not EXAMPLES_DIR.is_dir():
@@ -305,11 +331,17 @@ def create_app() -> FastAPI:
             }
 
     if UI_DIR.is_dir():
-        app.mount("/assets", StaticFiles(directory=UI_DIR), name="assets")
+        app.mount("/assets", NoCacheStaticFiles(directory=UI_DIR), name="assets")
 
         @app.get("/")
         def index() -> FileResponse:
-            return FileResponse(UI_DIR / "index.html")
+            return FileResponse(
+                UI_DIR / "index.html",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                },
+            )
 
     return app
 

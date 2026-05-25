@@ -14,6 +14,7 @@ from hdl_sim.web.launcher import (
     open_browser_later,
     start_server,
 )
+from hdl_sim.web.paths import ui_dir
 
 
 class HDLSimGuiLauncher:
@@ -108,6 +109,13 @@ class HDLSimGuiLauncher:
             open_browser_later(self.server.url)
             return
         self.status.set("サーバーを起動しています...")
+        ui_path = ui_dir().resolve()
+        self.append_log(f"UI: {ui_path}")
+        index = ui_path / "index.html"
+        if index.is_file():
+            text = index.read_text(encoding="utf-8")
+            layout = "IDE" if "pane-explorer" in text else "legacy"
+            self.append_log(f"Layout: {layout}")
         result = start_server(self.host, self.port, open_browser=True, blocking=False)
         if isinstance(result, int):
             self.status.set("起動に失敗しました")

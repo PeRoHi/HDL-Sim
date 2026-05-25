@@ -28,3 +28,13 @@ def test_simulate_silos_via_app_handler() -> None:
     assert "SILOS_REGRESSION PASS" in data["console"]
     assert data["waveform"] is not None
     assert len(data["signals"]) >= 3
+
+
+def test_ui_info_reports_ide_layout() -> None:
+    app = create_app()
+    handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/ui-info"
+    ).endpoint
+    data = handler()
+    assert data["ide_layout"] is True
+    assert "ide" in data["build"]
