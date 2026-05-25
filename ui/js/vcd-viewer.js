@@ -71,6 +71,12 @@
     }
   }
 
+  function yForLevel(level, y0, y1) {
+    const mid = (y0 + y1) / 2;
+    if (level === "bus" || level === "x" || level === "z") return mid;
+    return level === "high" ? y0 : y1;
+  }
+
   function formatBusValue(v, width) {
     const s = String(v);
     if (/^[01xzXZ]+$/.test(s)) {
