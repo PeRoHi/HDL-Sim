@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.3.0" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.3.0" />
+  <meta name="hdl-sim-ui-build" content="0.4.0" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.4.0" />
 </head>
 <body>
   <!-- Compact toolbar -->
   <header class="toolbar" role="banner">
     <div class="toolbar-left">
       <div class="brand-block">
-        <span id="app-version" class="version-badge" title="HDL-Sim UI バージョン">Ver 0.3.0</span>
+        <span id="app-version" class="version-badge" title="HDL-Sim UI バージョン">Ver 0.4.0</span>
         <span class="brand" title="HDL-Sim">HDL-Sim</span>
       </div>
       <div class="toolbar-group" role="toolbar" aria-label="実行">
@@ -71,6 +71,14 @@
       <div id="split-h-main" class="split-h-main">
         <!-- Left: Explorer -->
         <aside id="pane-explorer" class="pane pane-explorer" aria-label="エクスプローラー">
+          <div class="project-bar">
+            <label class="project-label" for="select-project">Project</label>
+            <select id="select-project" title="プロジェクト切替">
+              <option value="">— workspace —</option>
+            </select>
+            <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
+            <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
+          </div>
           <div class="pane-tabs" role="tablist">
             <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
             <button type="button" class="pane-tab" data-pane="hierarchy" role="tab" aria-selected="false">Hierarchy</button>
@@ -132,7 +140,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.3.1"></script>
-  <script src="/assets/js/app.js?v=0.3.1" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.4.0"></script>
+  <script src="/assets/js/app.js?v=0.4.0" type="module"></script>
 </body>
 </html>

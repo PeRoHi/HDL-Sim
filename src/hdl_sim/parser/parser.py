@@ -259,8 +259,8 @@ class VerilogTransformer(Transformer):
                     ports.append(candidate)
                 elif isinstance(candidate, ParameterDecl):
                     parameters.append(candidate)
-                elif isinstance(candidate, Declaration):
-                    declarations.append(candidate)
+                elif isinstance(candidate, (Declaration, tuple)):
+                    self._append_declaration(declarations, candidate)
                 elif isinstance(candidate, ContinuousAssign):
                     continuous_assigns.append(candidate)
                 elif isinstance(candidate, InitialBlock):
@@ -364,8 +364,59 @@ class VerilogTransformer(Transformer):
     def port_connection(self, port: Token, expr: Expr) -> PortConnection:
         return PortConnection(port=str(port), expr=expr)
 
+    def _append_declaration(self, bucket: list[Declaration], item: Any) -> None:
+        if isinstance(item, Declaration):
+            bucket.append(item)
+        elif isinstance(item, tuple):
+            for sub in item:
+                if isinstance(sub, Declaration):
+                    bucket.append(sub)
+
     @v_args(inline=True)
-    def declaration(self, *rest: Any) -> Declaration:
+    def ident_list(self, first: Token, *rest: Token) -> list[str]:
+        return [str(first), *(str(r) for r in rest)]
+
+    def _decls_from_names(
+        self,
+        kind: DeclKind,
+        names: list[str],
+        range_node: ValueRange | None = None,
+    ) -> tuple[Declaration, ...]:
+        decls: list[Declaration] = []
+        for name in names:
+            if range_node is not None:
+                decls.append(Declaration(kind=kind, name=name, range=range_node))
+            else:
+                decls.append(Declaration(kind=kind, name=name))
+        return tuple(decls)
+
+    def _multi_decl(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ...]:
+        filtered = [c for c in children if not isinstance(c, Token)]
+        if not filtered:
+            return ()
+        if len(filtered) == 1:
+            names = filtered[0]
+            return self._decls_from_names(kind, names, None)
+        range_node, names = filtered[0], filtered[1]
+        if not isinstance(range_node, ValueRange):
+            names = filtered[0]
+            range_node = None
+        return self._decls_from_names(kind, names, range_node)
+
+    def make_reg_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
+        return self._multi_decl(DeclKind.REG, children)
+
+    def make_wire_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
+        return self._multi_decl(DeclKind.WIRE, children)
+
+    def make_integer_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
+        return self._multi_decl(DeclKind.INTEGER, children)
+
+    @v_args(inline=True)
+    def declaration(self, *rest: Any) -> Declaration | tuple[Declaration, ...]:
+        """Legacy fallback if a single declaration slips through."""
+        if len(rest) == 1 and isinstance(rest[0], tuple):
+            return rest[0]
         if len(rest) == 3:
             decl_type, range_node, name = rest
             if isinstance(decl_type, Token) and str(decl_type.type) == "REG":
@@ -513,15 +564,32 @@ class VerilogTransformer(Transformer):
     def generate_block(self, items: list[Any]) -> GenerateBlock:
         return GenerateBlock(items=tuple(self._resolve_generate_item(i) for i in _flatten(items)))
 
+    def _flatten_body_items(self, items: Any) -> tuple[Any, ...]:
+        flat: list[Any] = []
+        for item in _flatten(items if isinstance(items, (list, tuple)) else [items]):
+            resolved = self._resolve_generate_item(item)
+            if isinstance(resolved, Declaration):
+                flat.append(resolved)
+            elif isinstance(resolved, tuple):
+                for sub in resolved:
+                    if isinstance(sub, Declaration):
+                        flat.append(sub)
+                    else:
+                        flat.append(sub)
+            elif resolved is not None:
+                flat.append(resolved)
+        return tuple(flat)
+
     @v_args(inline=True)
-    def gen_begin_labeled(self, label: Token, items: list[Any]) -> tuple[str, Any]:
-        return ("labeled", str(label), self._resolve_generate_items(items))
+    def gen_begin_labeled(self, label: Token, *items: Any) -> tuple[str, Any]:
+        body = self._flatten_body_items(list(items))
+        return ("labeled", str(label), body)
 
     def gen_begin(self, items: list[Any]) -> tuple[Any, ...]:
-        return self._resolve_generate_items(items)
+        return self._flatten_body_items(items)
 
     def gen_single(self, item: Any) -> tuple[Any, ...]:
-        return self._resolve_generate_items(item)
+        return self._flatten_body_items([item])
 
     @v_args(inline=True)
     def genvar_init(self, *items: Any) -> tuple[str, Expr]:
@@ -538,7 +606,7 @@ class VerilogTransformer(Transformer):
         label = None
         if isinstance(body_raw, tuple) and len(body_raw) == 3 and body_raw[0] == "labeled":
             label = body_raw[1]
-            body = body_raw[2]
+            body = body_raw[2] if isinstance(body_raw[2], tuple) else (body_raw[2],)
         else:
             body = self._resolve_generate_items(body_raw)
         return GenerateFor(
@@ -581,8 +649,8 @@ class VerilogTransformer(Transformer):
         for item in flat[1:]:
             if isinstance(item, TaskPort):
                 ports.append(item)
-            elif isinstance(item, Declaration):
-                declarations.append(item)
+            elif isinstance(item, (Declaration, tuple)):
+                self._append_declaration(declarations, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):
@@ -643,8 +711,8 @@ class VerilogTransformer(Transformer):
         for item in flat[index:]:
             if isinstance(item, FunctionInput):
                 inputs.append(item)
-            elif isinstance(item, Declaration):
-                declarations.append(item)
+            elif isinstance(item, (Declaration, tuple)):
+                self._append_declaration(declarations, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):

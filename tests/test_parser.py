@@ -71,3 +71,20 @@ def test_parse_delay_control() -> None:
     initial = module.initial_blocks[0]
     assert isinstance(initial.body, DelayControl)
     assert initial.body.delay == 3
+
+
+def test_parse_comma_separated_reg_declarations() -> None:
+    module = parse_module(
+        """
+        module tb;
+          reg clk, rst;
+          wire [3:0] count;
+        endmodule
+        """
+    )
+    assert len(module.declarations) == 3
+    names = [d.name for d in module.declarations]
+    assert names == ["clk", "rst", "count"]
+    assert module.declarations[0].kind is DeclKind.REG
+    assert module.declarations[1].kind is DeclKind.REG
+    assert module.declarations[2].kind is DeclKind.WIRE

@@ -31,10 +31,12 @@ decl_or_stmt: declaration
              | generate_block
              | module_instance
 
-declaration: REG range? IDENT ";"
+declaration: REG range? ident_list ";" -> make_reg_decls
+          | WIRE range? ident_list ";" -> make_wire_decls
+          | INTEGER range? ident_list ";" -> make_integer_decls
           | genvar_decl
-          | WIRE range? IDENT ";"
-          | INTEGER range? IDENT ";"
+
+ident_list: IDENT ("," IDENT)*
 
 parameter_decl_stmt: "parameter"i IDENT "=" expr ";"
                     | "localparam"i IDENT "=" expr ";"

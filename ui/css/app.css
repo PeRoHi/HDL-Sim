@@ -355,6 +355,35 @@ body {
 
 .tb-field-top input[type="text"] { width: 120px; }
 
+.project-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: #2a2d2e;
+  flex-shrink: 0;
+}
+
+.project-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+#select-project {
+  flex: 1;
+  min-width: 80px;
+  height: 22px;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 2px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

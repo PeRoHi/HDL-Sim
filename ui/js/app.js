@@ -59,6 +59,8 @@ const SPLIT_SIZES = {
   v: { main: 72, console: 28 },
 };
 
+let currentProject = "";
+
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
 }
@@ -182,6 +184,102 @@ function loadWorkspaceFiles(fileEntries, top) {
   renderEditorTabs();
   renderFileTree();
   syncDeleteButton();
+}
+
+async function loadProjects() {
+  const sel = $("select-project");
+  if (!sel) return;
+  try {
+    const projects = await api("/api/projects");
+    const selected = currentProject;
+    sel.innerHTML = '<option value="">— workspace —</option>';
+    projects.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.name;
+      opt.textContent = `${p.label || p.name} (${p.file_count})`;
+      sel.appendChild(opt);
+    });
+    if (selected && projects.some((p) => p.name === selected)) {
+      sel.value = selected;
+    }
+  } catch {
+    setStatus("Projects failed", "err");
+  }
+}
+
+async function openProject(name) {
+  if (!name) {
+    currentProject = "";
+    return;
+  }
+  setStatus("Loading project…", "busy");
+  try {
+    const data = await api(`/api/projects/${encodeURIComponent(name)}`);
+    currentProject = data.name;
+    loadWorkspaceFiles(data.files, data.top || "");
+    $("select-project").value = data.name;
+    appendConsole(`[project] opened: ${data.name} (${data.files.length} files)`, "info");
+    setStatus(`Project: ${data.name}`, "ok");
+    runElaborate();
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("Project load failed", "err");
+  }
+}
+
+async function createProject() {
+  const name = prompt("プロジェクト名 (英数字, _ -):", currentProject || "my_design");
+  if (!name?.trim()) return;
+  try {
+    saveActiveEditor();
+    const top = $("input-top").value.trim() || null;
+    await api("/api/projects", { name: name.trim(), top });
+    currentProject = name.trim();
+    await loadProjects();
+    $("select-project").value = currentProject;
+    await saveCurrentProject(false);
+    appendConsole(`[project] created: ${currentProject}`, "ok");
+    setStatus(`Created: ${currentProject}`, "ok");
+  } catch (e) {
+    appendConsole(String(e), "err");
+  }
+}
+
+async function saveCurrentProject(showPrompt = true) {
+  let name = currentProject || $("select-project")?.value;
+  if (!name && showPrompt) {
+    name = prompt("保存先プロジェクト名:", "my_design");
+    if (!name?.trim()) return;
+    name = name.trim();
+    try {
+      await api("/api/projects", { name, top: $("input-top").value.trim() || null });
+      currentProject = name;
+      await loadProjects();
+      $("select-project").value = name;
+    } catch (e) {
+      appendConsole(String(e), "err");
+      return;
+    }
+  }
+  if (!name) return;
+
+  try {
+    const payload = getPayload();
+    const data = await api(
+      `/api/projects/${encodeURIComponent(name)}`,
+      { files: payload.files, top: payload.top, label: name },
+      undefined,
+      "PUT"
+    );
+    currentProject = data.name;
+    await loadProjects();
+    $("select-project").value = data.name;
+    appendConsole(`[project] saved: ${data.name} (${data.files.length} files)`, "ok");
+    setStatus(`Saved: ${data.name}`, "ok");
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("Save failed", "err");
+  }
 }
 
 /* ── Split.js layout ── */
@@ -568,13 +666,16 @@ function drawWave(waveform) {
 
 /* ── API ── */
 
-async function api(path, body, signal) {
-  const res = await fetch(path, {
-    method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-    signal,
-  });
+async function api(path, body, signal, method) {
+  const init = { signal };
+  if (body !== undefined && body !== null) {
+    init.method = method || "POST";
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  } else {
+    init.method = method || "GET";
+  }
+  const res = await fetch(path, init);
   return res.json();
 }
 
@@ -770,6 +871,7 @@ function initMonaco() {
     renderEditorTabs();
     renderFileTree();
     loadExamples();
+    loadProjects();
     runElaborate();
     verifyUiBuild();
   });
@@ -792,6 +894,9 @@ function bindUi() {
     e.target.value = "";
   });
   $("select-example").addEventListener("change", (e) => openExample(e.target.value));
+  $("select-project")?.addEventListener("change", (e) => openProject(e.target.value));
+  $("btn-new-project")?.addEventListener("click", () => createProject());
+  $("btn-save-project")?.addEventListener("click", () => saveCurrentProject());
 
   document.querySelectorAll(".pane-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchExplorerTab(tab.dataset.pane));

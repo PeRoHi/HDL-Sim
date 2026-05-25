@@ -2,8 +2,7 @@
 `timescale 1ns/1ps
 
 module tb_counter;
-    reg clk;
-    reg rst;
+    reg clk, rst;
     wire [3:0] count;
 
     counter_dut #(.WIDTH(4)) dut (

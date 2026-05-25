@@ -24,8 +24,9 @@ from hdl_sim.parser.loader import load_design_with_meta
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir
+from hdl_sim.web import projects as project_store
 
-UI_BUILD = "0.3.0"
+UI_BUILD = "0.4.0"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -73,6 +74,18 @@ EXAMPLES_DIR = examples_dir()
 class SourceFile(BaseModel):
     path: str = Field(description="Virtual path, e.g. tb.v")
     content: str
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    top: str | None = None
+    label: str | None = None
+
+
+class ProjectSaveRequest(BaseModel):
+    files: list[SourceFile]
+    top: str | None = None
+    label: str | None = None
 
 
 class ElaborateRequest(BaseModel):
@@ -339,6 +352,46 @@ def create_app() -> FastAPI:
             "top": top,
             "kind": "project" if example_id in EXAMPLE_PROJECTS else "file",
         }
+
+    @app.get("/api/projects")
+    def api_list_projects() -> list[dict[str, Any]]:
+        try:
+            return project_store.list_projects()
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/projects")
+    def api_create_project(req: ProjectCreateRequest) -> dict[str, Any]:
+        try:
+            return project_store.create_project(req.name, top=req.top, label=req.label)
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/projects/{project_name}")
+    def api_load_project(project_name: str) -> dict[str, Any]:
+        try:
+            return project_store.load_project(project_name)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="project not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/projects/{project_name}")
+    def api_save_project(project_name: str, req: ProjectSaveRequest) -> dict[str, Any]:
+        if not req.files:
+            raise HTTPException(status_code=400, detail="files required")
+        try:
+            payload = [{"path": f.path, "content": f.content} for f in req.files]
+            return project_store.save_project(
+                project_name,
+                payload,
+                top=req.top,
+                label=req.label,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/elaborate")
     def api_elaborate(req: ElaborateRequest) -> dict[str, Any]:
