@@ -3,88 +3,126 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HDL-Sim — Silos風シミュレータ UI</title>
+  <title>HDL-Sim</title>
   <link rel="stylesheet" href="/assets/css/app.css" />
 </head>
 <body>
+  <!-- Compact toolbar -->
   <header class="toolbar" role="banner">
-    <div class="toolbar-brand">
-      <span class="logo">HDL-Sim</span>
-      <span class="tagline">イベント駆動 Verilog シミュレータ</span>
+    <div class="toolbar-left">
+      <span class="brand" title="HDL-Sim">HDL-Sim</span>
+      <div class="toolbar-group" role="toolbar" aria-label="実行">
+        <button type="button" id="btn-run" class="tb-btn primary" title="実行 (F5)" aria-label="実行">
+          <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+          <span class="tb-label">Run</span>
+        </button>
+        <button type="button" id="btn-stop" class="tb-btn" title="停止" aria-label="停止" disabled>
+          <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" fill="currentColor"/></svg>
+          <span class="tb-label">Stop</span>
+        </button>
+        <button type="button" id="btn-step" class="tb-btn" title="ステップ実行（未対応）" aria-label="ステップ">
+          <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5v11l6-5.5-6-5.5zm7 0v11l6-5.5-6-5.5z" fill="currentColor"/></svg>
+          <span class="tb-label">Step</span>
+        </button>
+        <span class="tb-sep"></span>
+        <button type="button" id="btn-elab" class="tb-btn" title="階層を更新" aria-label="階層更新">
+          <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l7 4v6l-7 4-7-4V5z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 8l7-3M8 8v7M8 8L1 5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+          <span class="tb-label">Elab</span>
+        </button>
+        <button type="button" id="btn-wave-toggle" class="tb-btn" title="波形パネル" aria-label="波形">
+          <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 12l3-4 3 2 4-6 4 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="tb-label">Waveform</span>
+        </button>
+      </div>
     </div>
-    <div class="toolbar-actions">
-      <button type="button" id="btn-run" class="btn primary" title="実行 (F5)">▶ 実行</button>
-      <button type="button" id="btn-elab" class="btn" title="構造チェック">階層を更新</button>
-      <label class="field">
-        <span>トップ</span>
-        <input type="text" id="input-top" placeholder="自動" />
+    <div class="toolbar-center">
+      <label class="tb-field">
+        <span class="tb-field-label">Top</span>
+        <input type="text" id="input-top" placeholder="auto" spellcheck="false" />
       </label>
-      <label class="field">
-        <span>終了時刻</span>
+      <label class="tb-field">
+        <span class="tb-field-label">Until</span>
         <input type="number" id="input-until" value="50" min="0" />
       </label>
-      <label class="field">
-        <span>最大イベント</span>
+      <label class="tb-field">
+        <span class="tb-field-label">MaxEv</span>
         <input type="number" id="input-max-events" value="500" min="1" />
       </label>
-      <label class="field">
-        <span>例</span>
+      <label class="tb-field">
+        <span class="tb-field-label">例</span>
         <select id="select-example">
-          <option value="">— 読み込み —</option>
+          <option value="">—</option>
         </select>
       </label>
     </div>
-    <div class="toolbar-status" id="status-bar" aria-live="polite">準備完了</div>
+    <div class="toolbar-right">
+      <span id="status-bar" class="status-pill" aria-live="polite">Ready</span>
+    </div>
   </header>
 
-  <main class="workspace">
-    <aside class="panel panel-left" aria-label="階層">
-      <div class="panel-header">
-        <h2>階層</h2>
-        <span class="hint">モジュール・ポート・信号</span>
-      </div>
-      <div id="hierarchy-tree" class="tree" tabindex="0"></div>
-      <div class="panel-header panel-header-sub">
-        <h2>信号一覧</h2>
-      </div>
-      <ul id="signal-list" class="signal-list"></ul>
-    </aside>
+  <!-- Resizable IDE body -->
+  <div class="ide-root">
+    <div id="split-v-top" class="split-v-top">
+      <div id="split-h-main" class="split-h-main">
+        <!-- Left: Explorer -->
+        <aside id="pane-explorer" class="pane pane-explorer" aria-label="エクスプローラー">
+          <div class="pane-tabs" role="tablist">
+            <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
+            <button type="button" class="pane-tab" data-pane="hierarchy" role="tab" aria-selected="false">Hierarchy</button>
+          </div>
+          <div class="pane-body">
+            <div id="view-files" class="pane-view active" role="tabpanel">
+              <div class="tree-toolbar">
+                <button type="button" id="btn-new-file" class="mini-btn" title="新規ファイル">+ File</button>
+              </div>
+              <div id="file-tree" class="tree-view" tabindex="0"></div>
+            </div>
+            <div id="view-hierarchy" class="pane-view" role="tabpanel" hidden>
+              <div id="hierarchy-tree" class="tree-view" tabindex="0"></div>
+              <div class="signal-section">
+                <div class="signal-section-header">Signals</div>
+                <ul id="signal-list" class="signal-list"></ul>
+              </div>
+            </div>
+          </div>
+        </aside>
 
-    <section class="panel panel-center" aria-label="エディタ">
-      <div class="panel-header">
-        <h2>ソース</h2>
-        <span class="hint">ここで Verilog を編集して実行できます（Silos と同様）</span>
-      </div>
-      <div class="editor-tabs">
-        <span class="tab active" data-path="design.v">design.v</span>
-      </div>
-      <div id="editor" class="editor-host"></div>
-    </section>
+        <!-- Center: Editor -->
+        <section id="pane-editor" class="pane pane-editor" aria-label="エディタ">
+          <div id="editor-tabs" class="editor-tabs" role="tablist"></div>
+          <div id="editor-host" class="editor-host"></div>
+        </section>
 
-    <aside class="panel panel-right" aria-label="波形">
-      <div class="panel-header">
-        <h2>波形</h2>
-        <span class="hint">実行後に VCD から表示</span>
+        <!-- Right: Waveform (collapsible) -->
+        <aside id="pane-waveform" class="pane pane-waveform" aria-label="波形">
+          <div class="pane-header-bar">
+            <span class="pane-title">Waveform</span>
+            <div class="pane-header-actions">
+              <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示">Fit</button>
+              <button type="button" id="btn-wave-close" class="mini-btn icon-only" title="閉じる" aria-label="波形を閉じる">×</button>
+            </div>
+          </div>
+          <div class="wave-toolbar">
+            <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
+          </div>
+          <div id="waveform-wrap" class="waveform-wrap">
+            <canvas id="waveform-canvas"></canvas>
+          </div>
+        </aside>
       </div>
-      <div class="wave-toolbar">
-        <button type="button" id="btn-wave-fit" class="btn small">全体表示</button>
-        <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> 自動スクロール</label>
-      </div>
-      <div id="waveform-wrap" class="waveform-wrap">
-        <canvas id="waveform-canvas"></canvas>
-      </div>
-    </aside>
-  </main>
 
-  <footer class="panel panel-console" aria-label="コンソール">
-    <div class="panel-header">
-      <h2>コンソール</h2>
-      <span class="hint">$display やシミュレータメッセージ</span>
-      <button type="button" id="btn-clear-console" class="btn small">クリア</button>
+      <!-- Bottom: Console -->
+      <footer id="pane-console" class="pane pane-console" aria-label="コンソール">
+        <div class="pane-header-bar">
+          <span class="pane-title">Output</span>
+          <button type="button" id="btn-clear-console" class="mini-btn" title="クリア">Clear</button>
+        </div>
+        <pre id="console-output" class="console-output"></pre>
+      </footer>
     </div>
-    <pre id="console-output" class="console-output"></pre>
-  </footer>
+  </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
   <script src="/assets/js/vcd-viewer.js"></script>
   <script src="/assets/js/app.js" type="module"></script>
