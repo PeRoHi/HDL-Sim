@@ -58,11 +58,46 @@ def test_example_bundle_includes_lib() -> None:
     handler = next(
         r for r in app.routes if getattr(r, "path", None) == "/api/examples/{example_id:path}"
     ).endpoint
-    data = handler("tb_multi.v")
+    data = handler("@project/and_gate")
     paths = [f["path"] for f in data["files"]]
     assert "lib/and2.v" in paths
     assert "tb_multi.v" in paths
     assert data["top"] == "tb_multi"
+    assert data["kind"] == "project"
+
+
+def test_counter_project_bundle() -> None:
+    app = create_app()
+    get_handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/examples/{example_id:path}"
+    ).endpoint
+    sim_handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/simulate"
+    ).endpoint
+
+    bundle = get_handler("@project/counter")
+    assert len(bundle["files"]) == 2
+    assert bundle["top"] == "tb_counter"
+
+    req = SimulateRequest(
+        files=[SourceFile(path=f["path"], content=f["content"]) for f in bundle["files"]],
+        top=bundle["top"],
+        until=50,
+        max_events=500,
+    )
+    data = sim_handler(req)
+    assert data["ok"] is True
+    assert "COUNTER_PROJECT PASS" in data["console"]
+
+
+def test_list_examples_includes_projects() -> None:
+    app = create_app()
+    handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/examples"
+    ).endpoint
+    items = handler()
+    ids = [i["id"] for i in items if i.get("kind") == "project"]
+    assert "@project/counter" in ids
 
 
 def test_ui_info_reports_ide_layout() -> None:

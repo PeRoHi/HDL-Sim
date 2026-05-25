@@ -589,13 +589,34 @@ async function loadExamples() {
   const sel = $("select-example");
   try {
     const items = await api("/api/examples");
-    sel.innerHTML = '<option value="">—</option>';
-    items.forEach((ex) => {
-      const opt = document.createElement("option");
-      opt.value = ex.id;
-      opt.textContent = ex.label;
-      sel.appendChild(opt);
-    });
+    sel.innerHTML = '<option value="">— プロジェクト / 例 —</option>';
+
+    const projects = items.filter((ex) => ex.kind === "project");
+    const singles = items.filter((ex) => ex.kind !== "project");
+
+    if (projects.length) {
+      const grp = document.createElement("optgroup");
+      grp.label = "Projects (複数ファイル)";
+      projects.forEach((ex) => {
+        const opt = document.createElement("option");
+        opt.value = ex.id;
+        opt.textContent = ex.label;
+        grp.appendChild(opt);
+      });
+      sel.appendChild(grp);
+    }
+
+    if (singles.length) {
+      const grp = document.createElement("optgroup");
+      grp.label = "Single file";
+      singles.forEach((ex) => {
+        const opt = document.createElement("option");
+        opt.value = ex.id;
+        opt.textContent = ex.label;
+        grp.appendChild(opt);
+      });
+      sel.appendChild(grp);
+    }
   } catch {
     setStatus("Examples failed", "err");
   }
@@ -610,7 +631,9 @@ async function openExample(id) {
     : [{ path: id.includes("/") ? id.split("/").pop() : id, content: data.content }];
 
   loadWorkspaceFiles(files, data.top || "");
-  setStatus(`Loaded: ${id} (${files.length} files)`, "ok");
+  const label = data.label || id;
+  setStatus(`Loaded: ${label} (${files.length} files)`, "ok");
+  appendConsole(`[project] ${label}`, "info");
   appendConsole(`[load] ${files.map((f) => f.path).join(", ")}`, "info");
   runElaborate();
 }

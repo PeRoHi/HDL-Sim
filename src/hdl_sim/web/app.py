@@ -28,13 +28,28 @@ from hdl_sim.web.paths import examples_dir, ui_dir
 UI_BUILD = "0.3.0"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
-# Multi-file example bundles (paths relative to examples/)
+# Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
+EXAMPLE_PROJECTS: dict[str, dict[str, Any]] = {
+    "@project/counter": {
+        "label": "Project: 4-bit counter (DUT + TB)",
+        "files": ["project/counter_dut.v", "project/tb_counter.v"],
+        "top": "tb_counter",
+    },
+    "@project/and_gate": {
+        "label": "Project: AND gate (lib + TB)",
+        "files": ["lib/and2.v", "tb_multi.v"],
+        "top": "tb_multi",
+    },
+}
+
+# Legacy single-key bundles (example id → file list)
 EXAMPLE_BUNDLES: dict[str, list[str]] = {
     "tb_multi.v": ["lib/and2.v", "tb_multi.v"],
 }
 
 EXAMPLE_TOPS: dict[str, str] = {
     "tb_multi.v": "tb_multi",
+    "project/tb_counter.v": "tb_counter",
     "silos_regression.v": "silos_regression_tb",
     "hierarchy.v": "tb",
 }
@@ -213,11 +228,8 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
     return loaded, base, tmp
 
 
-def _read_example_bundle(example_id: str) -> tuple[list[dict[str, str]], str | None]:
-    """Load one example, including companion files for multi-file testbenches."""
-
+def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
     root = EXAMPLES_DIR.resolve()
-    rel_paths = EXAMPLE_BUNDLES.get(example_id, [example_id])
     files: list[dict[str, str]] = []
     for rel in rel_paths:
         path = (EXAMPLES_DIR / rel).resolve()
@@ -228,8 +240,28 @@ def _read_example_bundle(example_id: str) -> tuple[list[dict[str, str]], str | N
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="example not found") from exc
         files.append({"path": rel, "content": path.read_text(encoding="utf-8")})
+    return files
+
+
+def _read_example_bundle(example_id: str) -> tuple[list[dict[str, str]], str | None]:
+    """Load one example, including companion files for multi-file testbenches."""
+
+    if example_id in EXAMPLE_PROJECTS:
+        proj = EXAMPLE_PROJECTS[example_id]
+        return _read_example_paths(proj["files"]), proj.get("top")
+
+    rel_paths = EXAMPLE_BUNDLES.get(example_id, [example_id])
     top = EXAMPLE_TOPS.get(example_id)
-    return files, top
+    return _read_example_paths(rel_paths), top
+
+
+def _project_member_paths() -> set[str]:
+    members: set[str] = set()
+    for proj in EXAMPLE_PROJECTS.values():
+        members.update(proj["files"])
+    for paths in EXAMPLE_BUNDLES.values():
+        members.update(paths)
+    return members
 
 
 def create_app() -> FastAPI:
@@ -259,16 +291,32 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/examples")
-    def list_examples() -> list[dict[str, str]]:
+    def list_examples() -> list[dict[str, Any]]:
         if not EXAMPLES_DIR.is_dir():
             return []
-        items: list[dict[str, str]] = []
+        items: list[dict[str, Any]] = []
+
+        for pid, proj in EXAMPLE_PROJECTS.items():
+            items.append(
+                {
+                    "id": pid,
+                    "label": proj["label"],
+                    "kind": "project",
+                    "files": proj["files"],
+                    "top": proj.get("top"),
+                }
+            )
+
+        bundled = _project_member_paths()
         for path in sorted(EXAMPLES_DIR.rglob("*.v")):
             rel = path.relative_to(EXAMPLES_DIR).as_posix()
+            if rel in bundled:
+                continue
             items.append(
                 {
                     "id": rel,
                     "label": rel,
+                    "kind": "file",
                     "path": str(path),
                 }
             )
@@ -277,13 +325,19 @@ def create_app() -> FastAPI:
     @app.get("/api/examples/{example_id:path}")
     def get_example(example_id: str) -> dict[str, Any]:
         files, top = _read_example_bundle(example_id)
-        main = next((f for f in files if f["path"] == example_id), files[-1])
+        main_id = example_id
+        if example_id in EXAMPLE_PROJECTS:
+            main_id = EXAMPLE_PROJECTS[example_id]["files"][-1]
+        main = next((f for f in files if f["path"] == main_id), files[-1])
+        label = EXAMPLE_PROJECTS.get(example_id, {}).get("label", example_id)
         return {
             "id": example_id,
             "path": example_id,
+            "label": label,
             "content": main["content"],
             "files": files,
             "top": top,
+            "kind": "project" if example_id in EXAMPLE_PROJECTS else "file",
         }
 
     @app.post("/api/elaborate")
