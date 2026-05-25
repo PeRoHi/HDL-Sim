@@ -40,7 +40,7 @@ endmodule
 
 const $ = (id) => document.getElementById(id);
 
-/** @type {Map<string, {content: string, model: monaco.editor.ITextModel | null}>} */
+/** Virtual workspace: path → { content, model } */
 const fileStore = new Map();
 let activeFile = "design.v";
 let editor = null;
@@ -69,14 +69,38 @@ function setStatus(text, kind = "") {
   bar.className = "status-pill" + (kind ? ` ${kind}` : "");
 }
 
-function appendConsole(text, kind) {
+function appendConsole(text, kind = "") {
   const el = $("console-output");
-  if (!text) return;
-  const prefix = kind === "err" ? "[ERROR] " : kind === "ok" ? "[OK] " : kind === "warn" ? "[WARN] " : "";
-  const line = document.createElement("span");
-  line.className = kind ? `line-${kind}` : "";
-  line.textContent = prefix + text + (text.endsWith("\n") ? "" : "\n");
-  el.appendChild(line);
+  if (text == null || text === "") return;
+
+  const prefix =
+    kind === "err" ? "[ERROR] " :
+    kind === "ok" ? "[OK] " :
+    kind === "warn" ? "[WARN] " :
+    kind === "info" ? "" : "";
+
+  const lines = String(text).replace(/\r\n/g, "\n").split("\n");
+  lines.forEach((line, index) => {
+    if (line === "" && index === lines.length - 1) return;
+
+    let lineKind = kind;
+    if (!lineKind) {
+      if (/^(Traceback|Error|Exception|SyntaxError|\.{3})/i.test(line) || /\bError:/i.test(line)) {
+        lineKind = "err";
+      } else if (/^\s+File "/.test(line) || /^\s+\^/.test(line)) {
+        lineKind = "trace";
+      } else if (/^PASS|^OK|\bPASS\b/i.test(line)) {
+        lineKind = "ok";
+      }
+    } else if (lineKind === "err" && /^\s+File "/.test(line)) {
+      lineKind = "trace";
+    }
+
+    const row = document.createElement("div");
+    row.className = "console-line" + (lineKind ? ` line-${lineKind}` : "");
+    row.textContent = (index === 0 ? prefix : "") + line;
+    el.appendChild(row);
+  });
   el.scrollTop = el.scrollHeight;
 }
 
@@ -97,6 +121,7 @@ function getPayload() {
   for (const [path, entry] of fileStore) {
     files.push({ path, content: entry.content });
   }
+  files.sort((a, b) => a.path.localeCompare(b.path));
   return {
     files,
     top: top || null,
@@ -104,6 +129,59 @@ function getPayload() {
     max_events: Number($("input-max-events").value) || 500,
     generate_vcd: true,
   };
+}
+
+function updateTopModuleList(moduleNames, suggestedTop) {
+  const datalist = $("top-module-list");
+  datalist.innerHTML = "";
+  if (!moduleNames?.length) return;
+
+  const sorted = [...moduleNames].sort((a, b) => {
+    const score = (n) => {
+      let s = n.length * 0.001;
+      if (n === suggestedTop) s -= 10;
+      if (n.endsWith("_tb") || n === "tb") s -= 5;
+      return s;
+    };
+    return score(a) - score(b) || a.localeCompare(b);
+  });
+
+  sorted.forEach((name) => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    datalist.appendChild(opt);
+  });
+
+  const input = $("input-top");
+  if (!input.value.trim() && suggestedTop) {
+    input.value = suggestedTop;
+  }
+}
+
+function syncDeleteButton() {
+  const btn = $("btn-delete-file");
+  if (btn) btn.disabled = fileStore.size <= 1;
+}
+
+function loadWorkspaceFiles(fileEntries, top) {
+  for (const [, entry] of fileStore) {
+    entry.model?.dispose();
+  }
+  fileStore.clear();
+
+  fileEntries.forEach(({ path, content }) => {
+    fileStore.set(path, { content, model: null });
+  });
+
+  activeFile = fileEntries[0]?.path || "design.v";
+  if (editor) {
+    const entry = fileStore.get(activeFile);
+    editor.setModel(getOrCreateModel(activeFile, entry.content));
+  }
+  if (top != null) $("input-top").value = top;
+  renderEditorTabs();
+  renderFileTree();
+  syncDeleteButton();
 }
 
 /* ── Split.js layout ── */
@@ -203,22 +281,69 @@ function renderEditorTabs() {
 function renderFileTree() {
   const root = $("file-tree");
   root.innerHTML = "";
-  const section = document.createElement("div");
-  section.className = "tree-node";
-  section.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">WORKSPACE</span>`;
-  root.appendChild(section);
 
-  const children = document.createElement("div");
-  children.className = "tree-children";
+  const header = document.createElement("div");
+  header.className = "tree-node";
+  header.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">WORKSPACE</span>`;
+  root.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "tree-children";
+  renderFileTreeNode(body, buildFileTree(), 0);
+  root.appendChild(body);
+  syncDeleteButton();
+}
+
+function buildFileTree() {
+  /** @type {Map<string, { dirs: Map<string, any>, files: string[] }>} */
+  const root = { dirs: new Map(), files: [] };
+
   for (const path of fileStore.keys()) {
-    const node = document.createElement("div");
-    node.className = "tree-node" + (path === activeFile ? " selected" : "");
-    node.innerHTML = `<span class="twist empty"></span><span class="icon">📄</span><span class="label">${path}</span>`;
-    node.addEventListener("click", () => openFile(path));
-    node.addEventListener("dblclick", () => openFile(path));
-    children.appendChild(node);
+    const parts = path.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dir = parts[i];
+      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
+      node = node.dirs.get(dir);
+    }
+    node.files.push(path);
   }
-  root.appendChild(children);
+  return root;
+}
+
+function renderFileTreeNode(parentEl, node, depth) {
+  const sortedDirs = [...node.dirs.keys()].sort();
+  sortedDirs.forEach((dirName) => {
+    const dirNode = node.dirs.get(dirName);
+    const row = document.createElement("div");
+    row.className = "tree-node";
+    row.style.paddingLeft = `${depth * 12 + 4}px`;
+    row.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">${dirName}</span>`;
+    parentEl.appendChild(row);
+
+    const childWrap = document.createElement("div");
+    childWrap.className = "tree-children";
+    renderFileTreeNode(childWrap, dirNode, depth + 1);
+    parentEl.appendChild(childWrap);
+
+    const twist = row.querySelector(".twist");
+    twist.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const collapsed = childWrap.classList.toggle("collapsed");
+      twist.textContent = collapsed ? "▶" : "▼";
+    });
+  });
+
+  node.files.sort().forEach((path) => {
+    const row = document.createElement("div");
+    row.className = "tree-node" + (path === activeFile ? " selected" : "");
+    row.style.paddingLeft = `${depth * 12 + 4}px`;
+    const name = path.includes("/") ? path.split("/").pop() : path;
+    row.innerHTML = `<span class="twist empty"></span><span class="icon">📄</span><span class="label">${name}</span>`;
+    row.title = path;
+    row.addEventListener("click", () => openFile(path));
+    parentEl.appendChild(row);
+  });
 }
 
 function getOrCreateModel(path, content) {
@@ -241,33 +366,44 @@ function openFile(path) {
 }
 
 function addFile(name) {
-  let path = name || prompt("ファイル名 (例: dut.v):", "new.v");
+  let path = name || prompt("ファイル名 (例: dut.v または lib/and2.v):", "dut.v");
   if (!path) return;
-  path = path.trim();
+  path = path.trim().replace(/\\/g, "/");
   if (!path.endsWith(".v")) path += ".v";
   if (fileStore.has(path)) {
     openFile(path);
     return;
   }
-  fileStore.set(path, { content: "// new file\n", model: null });
+  fileStore.set(path, { content: `// ${path}\n`, model: null });
   openFile(path);
+  switchExplorerTab("files");
 }
 
-function closeFile(path) {
+function deleteFile(path, { confirmDelete = true } = {}) {
+  const target = path || activeFile;
   if (fileStore.size <= 1) return;
-  const entry = fileStore.get(path);
+  if (!fileStore.has(target)) return;
+  if (confirmDelete && !window.confirm(`「${target}」を削除しますか？`)) return;
+
+  const entry = fileStore.get(target);
   if (entry?.model) {
     entry.content = entry.model.getValue();
     entry.model.dispose();
   }
-  fileStore.delete(path);
-  if (activeFile === path) {
+  fileStore.delete(target);
+
+  if (activeFile === target) {
     activeFile = fileStore.keys().next().value;
     openFile(activeFile);
   } else {
     renderEditorTabs();
     renderFileTree();
   }
+  syncDeleteButton();
+}
+
+function closeFile(path) {
+  deleteFile(path, { confirmDelete: false });
 }
 
 /* ── Hierarchy tree ── */
@@ -425,34 +561,31 @@ async function openExample(id) {
   if (!id) return;
   setStatus("Loading…", "busy");
   const data = await api(`/api/examples/${encodeURIComponent(id)}`);
-  const fileName = id.includes("/") ? id.split("/").pop() : id;
-  fileStore.clear();
-  fileStore.set(fileName, { content: data.content, model: null });
-  activeFile = fileName;
-  editor.setModel(getOrCreateModel(fileName, data.content));
-  renderEditorTabs();
-  renderFileTree();
+  const files = data.files?.length
+    ? data.files
+    : [{ path: id.includes("/") ? id.split("/").pop() : id, content: data.content }];
 
-  $("input-top").value = "";
-  if (id.includes("silos")) $("input-top").value = "silos_regression_tb";
-  else if (id.includes("tb_multi")) $("input-top").value = "tb_multi";
-  else if (id.includes("hierarchy")) $("input-top").value = "tb";
-
-  setStatus(`Loaded: ${id}`, "ok");
+  loadWorkspaceFiles(files, data.top || "");
+  setStatus(`Loaded: ${id} (${files.length} files)`, "ok");
+  appendConsole(`[load] ${files.map((f) => f.path).join(", ")}`, "info");
   runElaborate();
 }
 
 async function runElaborate() {
   setStatus("Elaborating…", "busy");
   try {
-    const data = await api("/api/elaborate", getPayload());
+    const payload = getPayload();
+    appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
+    const data = await api("/api/elaborate", payload);
     if (!data.ok) {
-      appendConsole(data.error + "\n" + (data.trace || ""), "err");
+      appendConsole(data.error, "err");
+      if (data.trace) appendConsole(data.trace, "err");
       setStatus("Elab error", "err");
       switchExplorerTab("hierarchy");
       return;
     }
     renderHierarchy(data.hierarchy);
+    updateTopModuleList(data.module_names || data.overview?.module_names, data.top);
     if (data.top) $("input-top").placeholder = data.top;
     setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
@@ -471,14 +604,22 @@ async function runSimulate() {
   abortController = new AbortController();
 
   try {
-    const data = await api("/api/simulate", getPayload(), abortController.signal);
+    const payload = getPayload();
+    const topLabel = payload.top || "(auto)";
+    appendConsole(`[run] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
+    appendConsole(`[run] top=${topLabel}`, "info");
+
+    const data = await api("/api/simulate", payload, abortController.signal);
     if (!data.ok) {
-      appendConsole(data.error + "\n" + (data.trace || ""), "err");
+      appendConsole(data.error, "err");
+      if (data.trace) appendConsole(data.trace, "err");
+      if (data.console) appendConsole(data.console);
       setStatus("Sim failed", "err");
       return;
     }
-    appendConsole(data.console || "(no output)");
+    if (data.console) appendConsole(data.console);
     appendConsole(`time=${data.stop_time} events=${data.events_processed} top=${data.top_module}`, "ok");
+    updateTopModuleList(data.module_names || data.overview?.module_names, data.top_module);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
     lastWaveform = data.waveform;
@@ -577,6 +718,7 @@ function bindUi() {
   $("btn-wave-close").addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit").addEventListener("click", () => drawWave(lastWaveform));
   $("btn-new-file").addEventListener("click", () => addFile());
+  $("btn-delete-file").addEventListener("click", () => deleteFile());
   $("select-example").addEventListener("change", (e) => openExample(e.target.value));
 
   document.querySelectorAll(".pane-tab").forEach((tab) => {

@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.2.1" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.2.1" />
+  <meta name="hdl-sim-ui-build" content="0.3.0" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.3.0" />
 </head>
 <body>
   <!-- Compact toolbar -->
   <header class="toolbar" role="banner">
     <div class="toolbar-left">
       <div class="brand-block">
-        <span id="app-version" class="version-badge" title="HDL-Sim UI バージョン">Ver 0.2.1</span>
+        <span id="app-version" class="version-badge" title="HDL-Sim UI バージョン">Ver 0.3.0</span>
         <span class="brand" title="HDL-Sim">HDL-Sim</span>
       </div>
       <div class="toolbar-group" role="toolbar" aria-label="実行">
@@ -40,9 +40,10 @@
       </div>
     </div>
     <div class="toolbar-center">
-      <label class="tb-field">
+      <label class="tb-field tb-field-top">
         <span class="tb-field-label">Top</span>
-        <input type="text" id="input-top" placeholder="auto" spellcheck="false" />
+        <input type="text" id="input-top" list="top-module-list" placeholder="auto" spellcheck="false" autocomplete="off" />
+        <datalist id="top-module-list"></datalist>
       </label>
       <label class="tb-field">
         <span class="tb-field-label">Until</span>
@@ -78,6 +79,7 @@
             <div id="view-files" class="pane-view active" role="tabpanel">
               <div class="tree-toolbar">
                 <button type="button" id="btn-new-file" class="mini-btn" title="新規ファイル">+ File</button>
+                <button type="button" id="btn-delete-file" class="mini-btn danger" title="選択ファイルを削除">− File</button>
               </div>
               <div id="file-tree" class="tree-view" tabindex="0"></div>
             </div>
@@ -121,14 +123,14 @@
           <span class="pane-title">Output</span>
           <button type="button" id="btn-clear-console" class="mini-btn" title="クリア">Clear</button>
         </div>
-        <pre id="console-output" class="console-output"></pre>
+        <div id="console-output" class="console-output"></div>
       </footer>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.2.1"></script>
-  <script src="/assets/js/app.js?v=0.2.1" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.3.0"></script>
+  <script src="/assets/js/app.js?v=0.3.0" type="module"></script>
 </body>
 </html>

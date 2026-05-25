@@ -349,9 +349,15 @@ body {
 }
 
 .mini-btn:hover { background: var(--bg-hover); color: var(--text); }
+.mini-btn.danger:hover { background: rgba(244, 135, 113, 0.2); color: var(--error); }
+.mini-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .mini-btn.icon-only { font-size: 14px; padding: 0 4px; line-height: 1; }
 
+.tb-field-top input[type="text"] { width: 120px; }
+
 .tree-toolbar {
+  display: flex;
+  gap: 4px;
   padding: 4px 6px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -559,11 +565,21 @@ body {
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--text);
-  white-space: pre-wrap;
   min-height: 0;
 }
+
+.console-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.console-line.line-err { color: var(--error); }
+.console-line.line-ok { color: var(--success); }
+.console-line.line-warn { color: var(--warn); }
+.console-line.line-info { color: var(--text-muted); }
+.console-line.line-trace { color: #f48771; opacity: 0.85; font-size: 11px; }
 
 .console-output .line-err { color: var(--error); }
 .console-output .line-ok { color: var(--success); }

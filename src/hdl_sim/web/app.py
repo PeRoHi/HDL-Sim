@@ -14,9 +14,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
+from pydantic import BaseModel, Field
 
-UI_BUILD = "0.2.1"
+from hdl_sim import __version__
+from hdl_sim.engine.elaborator import elaborate
+from hdl_sim.engine.simulator import Simulator
+from hdl_sim.parser.ast import Design, Module, PortDirection
+from hdl_sim.parser.loader import load_design_with_meta
+from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
+
+from hdl_sim.web.paths import examples_dir, ui_dir
+
+UI_BUILD = "0.3.0"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
+
+# Multi-file example bundles (paths relative to examples/)
+EXAMPLE_BUNDLES: dict[str, list[str]] = {
+    "tb_multi.v": ["lib/and2.v", "tb_multi.v"],
+}
+
+EXAMPLE_TOPS: dict[str, str] = {
+    "tb_multi.v": "tb_multi",
+    "silos_regression.v": "silos_regression_tb",
+    "hierarchy.v": "tb",
+}
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -28,16 +49,7 @@ class NoCacheStaticFiles(StaticFiles):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             response.headers["Pragma"] = "no-cache"
         return response
-from pydantic import BaseModel, Field
 
-from hdl_sim import __version__
-from hdl_sim.engine.elaborator import elaborate
-from hdl_sim.engine.simulator import Simulator
-from hdl_sim.parser.ast import Design, Module, PortDirection
-from hdl_sim.parser.loader import load_design_with_meta
-from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
-
-from hdl_sim.web.paths import examples_dir, ui_dir
 
 UI_DIR = ui_dir()
 EXAMPLES_DIR = examples_dir()
@@ -201,6 +213,25 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
     return loaded, base, tmp
 
 
+def _read_example_bundle(example_id: str) -> tuple[list[dict[str, str]], str | None]:
+    """Load one example, including companion files for multi-file testbenches."""
+
+    root = EXAMPLES_DIR.resolve()
+    rel_paths = EXAMPLE_BUNDLES.get(example_id, [example_id])
+    files: list[dict[str, str]] = []
+    for rel in rel_paths:
+        path = (EXAMPLES_DIR / rel).resolve()
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"example file not found: {rel}")
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="example not found") from exc
+        files.append({"path": rel, "content": path.read_text(encoding="utf-8")})
+    top = EXAMPLE_TOPS.get(example_id)
+    return files, top
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="HDL-Sim UI", version=__version__)
     app.add_middleware(
@@ -244,19 +275,15 @@ def create_app() -> FastAPI:
         return items
 
     @app.get("/api/examples/{example_id:path}")
-    def get_example(example_id: str) -> dict[str, str]:
-        root = EXAMPLES_DIR.resolve()
-        path = (EXAMPLES_DIR / example_id).resolve()
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="example not found")
-        try:
-            path.relative_to(root)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail="example not found") from exc
+    def get_example(example_id: str) -> dict[str, Any]:
+        files, top = _read_example_bundle(example_id)
+        main = next((f for f in files if f["path"] == example_id), files[-1])
         return {
             "id": example_id,
             "path": example_id,
-            "content": path.read_text(encoding="utf-8"),
+            "content": main["content"],
+            "files": files,
+            "top": top,
         }
 
     @app.post("/api/elaborate")
@@ -271,6 +298,7 @@ def create_app() -> FastAPI:
             return {
                 "ok": True,
                 "top": elaborated.top_module,
+                "module_names": design_overview(design)["module_names"],
                 "overview": design_overview(design),
                 "hierarchy": hierarchy_tree(design, top=top),
                 "net_count": len(elaborated.nets),
@@ -324,6 +352,8 @@ def create_app() -> FastAPI:
                 "signals": nets_overview(sim),
                 "hierarchy": hierarchy_tree(design, top=top),
                 "overview": design_overview(design),
+                "module_names": design_overview(design)["module_names"],
+                "files_loaded": [f.path for f in req.files],
             }
         except Exception as exc:
             return {
