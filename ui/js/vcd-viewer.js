@@ -71,10 +71,67 @@
     }
   }
 
-  function yForLevel(level, y0, y1) {
-    const mid = (y0 + y1) / 2;
-    if (level === "bus" || level === "x" || level === "z") return mid;
-    return level === "high" ? y0 : y1;
+  function formatBusValue(v, width) {
+    const s = String(v);
+    if (/^[01xzXZ]+$/.test(s)) {
+      const n = parseInt(s.replace(/x/gi, "0").replace(/z/gi, "0"), 2);
+      if (!Number.isNaN(n)) {
+        const hex = n.toString(16).toUpperCase();
+        return width > 4 ? `'h${hex}` : `'h${hex}`;
+      }
+    }
+    return s;
+  }
+
+  function drawScalarWave(ctx, points, y0, y1) {
+    ctx.lineWidth = 2;
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const p = points[i];
+      const color = colorForLevel(p.level);
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(p.x, prev.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+  }
+
+  function drawBusWave(ctx, points, y0, y1, mid, width) {
+    const railTop = y0 + 2;
+    const railBot = y1 - 2;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = COLORS.bus;
+    ctx.fillStyle = COLORS.bus;
+
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const nextX = i < points.length - 1 ? points[i + 1].x : p.x;
+
+      if (i > 0) {
+        ctx.beginPath();
+        ctx.moveTo(p.x, railTop);
+        ctx.lineTo(p.x, railBot);
+        ctx.stroke();
+      }
+
+      if (nextX > p.x) {
+        ctx.beginPath();
+        ctx.moveTo(p.x, railTop);
+        ctx.lineTo(nextX, railTop);
+        ctx.moveTo(p.x, railBot);
+        ctx.lineTo(nextX, railBot);
+        ctx.stroke();
+
+        const segW = nextX - p.x;
+        if (segW > 16 && p.v != null) {
+          ctx.font = "9px monospace";
+          ctx.textAlign = "center";
+          ctx.fillText(formatBusValue(p.v, width), p.x + segW / 2, mid + 3);
+        }
+      }
+    }
   }
 
   function drawWaveform(canvas, waveform, options = {}) {
@@ -177,33 +234,10 @@
       }
 
       // Draw waveform
-      ctx.lineWidth = row.width > 1 ? 1.5 : 2;
-      for (let i = 0; i < points.length; i++) {
-        const p = points[i];
-        const color = colorForLevel(p.level);
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-
-        if (i > 0) {
-          const prev = points[i - 1];
-          ctx.beginPath();
-          ctx.moveTo(prev.x, prev.y);
-          ctx.lineTo(p.x, prev.y);
-          ctx.lineTo(p.x, p.y);
-          ctx.stroke();
-        }
-
-        // Bus / multi-bit: show value text at transitions
-        if (row.width > 1 && p.v && p.v !== "0" && p.v !== "1") {
-          const nextX = i < points.length - 1 ? points[i + 1].x : plotLeft + maxTime * scale;
-          const segW = nextX - p.x;
-          if (segW > 18) {
-            ctx.font = "9px monospace";
-            ctx.textAlign = "center";
-            ctx.fillStyle = COLORS.bus;
-            ctx.fillText(p.v, p.x + segW / 2, mid - 2);
-          }
-        }
+      if (row.width > 1) {
+        drawBusWave(ctx, points, y0, y1, mid, row.width);
+      } else {
+        drawScalarWave(ctx, points, y0, y1);
       }
     });
 

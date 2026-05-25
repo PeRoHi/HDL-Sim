@@ -872,7 +872,6 @@ function initMonaco() {
     renderFileTree();
     loadExamples();
     loadProjects();
-    runElaborate();
     verifyUiBuild();
   });
 }

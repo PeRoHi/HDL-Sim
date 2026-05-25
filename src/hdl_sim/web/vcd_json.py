@@ -25,6 +25,7 @@ _VAR_RE = re.compile(
     r"^\$var\s+(wire|reg|integer)\s+(\d+)\s+(\S+)\s+(.+?)\s+\$end\s*$"
 )
 _TIMESCALE_RE = re.compile(r"^\$timescale\s+(\S+)\s+\$end\s*$")
+_BUS_VAL_RE = re.compile(r"^b([0-9a-zA-ZxzXZ]+)(\S+)$")
 
 
 def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
@@ -68,10 +69,14 @@ def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
             value = line[0]
             code = line[1:]
         elif line[0] == "b":
-            parts = line.split(maxsplit=1)
-            if len(parts) != 2:
-                continue
-            value, code = parts[0][1:], parts[1]
+            match = _BUS_VAL_RE.match(line)
+            if not match:
+                parts = line.split(maxsplit=1)
+                if len(parts) != 2:
+                    continue
+                value, code = parts[0][1:], parts[1]
+            else:
+                value, code = match.group(1), match.group(2)
         else:
             continue
         if code in changes:
