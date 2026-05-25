@@ -78,8 +78,10 @@
           <div class="pane-body">
             <div id="view-files" class="pane-view active" role="tabpanel">
               <div class="tree-toolbar">
-                <button type="button" id="btn-new-file" class="mini-btn" title="新規ファイル">+ File</button>
-                <button type="button" id="btn-delete-file" class="mini-btn danger" title="選択ファイルを削除">− File</button>
+                <button type="button" id="btn-open-files" class="mini-btn" title="ローカル .v / .sv ファイルを開く">Open</button>
+                <button type="button" id="btn-new-file" class="mini-btn" title="空のファイルを新規作成">+ New</button>
+                <button type="button" id="btn-delete-file" class="mini-btn danger" title="選択ファイルを削除">− Del</button>
+                <input type="file" id="file-import-input" class="visually-hidden" multiple accept=".v,.sv,.vh,.svh,text/plain" tabindex="-1" aria-hidden="true" />
               </div>
               <div id="file-tree" class="tree-view" tabindex="0"></div>
             </div>
@@ -130,7 +132,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.3.0"></script>
-  <script src="/assets/js/app.js?v=0.3.0" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.3.1"></script>
+  <script src="/assets/js/app.js?v=0.3.1" type="module"></script>
 </body>
 </html>

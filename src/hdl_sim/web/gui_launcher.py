@@ -12,6 +12,7 @@ from hdl_sim.web.launcher import (
     RunningServer,
     dependency_help,
     install_dependencies,
+    is_frozen,
     missing_dependencies,
     open_browser_later,
     start_server,
@@ -59,7 +60,8 @@ class HDLSimGuiLauncher:
         self.btn_open.pack(side=tk.LEFT)
 
         self.btn_install = ttk.Button(buttons, text="依存関係をインストール", command=self.install_deps)
-        self.btn_install.pack(side=tk.LEFT, padx=(8, 0))
+        if not is_frozen():
+            self.btn_install.pack(side=tk.LEFT, padx=(8, 0))
 
         self.btn_quit = ttk.Button(buttons, text="終了", command=self.on_close)
         self.btn_quit.pack(side=tk.RIGHT)
@@ -75,6 +77,10 @@ class HDLSimGuiLauncher:
         self.log.configure(state=tk.DISABLED)
 
     def bootstrap(self) -> None:
+        if is_frozen():
+            self.append_log("同梱版: 依存関係チェックをスキップして起動します")
+            self.start()
+            return
         missing = missing_dependencies()
         if missing:
             self.status.set("初回セットアップが必要です")
@@ -128,7 +134,12 @@ class HDLSimGuiLauncher:
         )
         if isinstance(result, int):
             self.status.set("起動に失敗しました")
-            messagebox.showerror("HDL-Sim", dependency_help())
+            msg = (
+                "サーバーの起動に失敗しました。ログを確認してください。"
+                if is_frozen()
+                else dependency_help()
+            )
+            messagebox.showerror("HDL-Sim", msg)
             return
         self.server = result
         self.status.set("起動しました")

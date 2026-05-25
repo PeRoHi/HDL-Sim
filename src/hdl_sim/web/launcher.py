@@ -24,6 +24,12 @@ DEFAULT_PORT = DEFAULT_UI_PORT
 REQUIRED_PACKAGES = ("fastapi", "uvicorn", "lark")
 
 
+def is_frozen() -> bool:
+    """True when running as a PyInstaller (or similar) bundled executable."""
+
+    return getattr(sys, "frozen", False)
+
+
 def ensure_src_on_path() -> None:
     if getattr(sys, "frozen", False):
         return
@@ -54,6 +60,8 @@ def prepare_ui_port(
 
 
 def missing_dependencies() -> list[str]:
+    if is_frozen():
+        return []
     missing: list[str] = []
     for package in REQUIRED_PACKAGES:
         try:
@@ -73,6 +81,11 @@ def dependency_help() -> str:
 
 
 def install_dependencies(*, on_line: Callable[[str], None] | None = None) -> tuple[bool, str]:
+    if is_frozen():
+        msg = "PyInstaller 版では依存関係は同梱済みです（pip install は不要）。"
+        if on_line is not None:
+            on_line(msg)
+        return True, msg
     cmd = [sys.executable, "-m", "pip", "install", *REQUIRED_PACKAGES]
     try:
         proc = subprocess.run(
@@ -135,11 +148,12 @@ def start_server(
         print(str(exc), file=sys.stderr)
         return 2
     url = f"http://{host}:{port}"
-    missing = missing_dependencies()
-    if missing:
-        print(dependency_help(), file=sys.stderr)
-        print(f"Missing: {', '.join(missing)}", file=sys.stderr)
-        return 2
+    if not is_frozen():
+        missing = missing_dependencies()
+        if missing:
+            print(dependency_help(), file=sys.stderr)
+            print(f"Missing: {', '.join(missing)}", file=sys.stderr)
+            return 2
 
     import uvicorn
 

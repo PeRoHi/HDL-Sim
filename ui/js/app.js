@@ -369,14 +369,58 @@ function addFile(name) {
   let path = name || prompt("ファイル名 (例: dut.v または lib/and2.v):", "dut.v");
   if (!path) return;
   path = path.trim().replace(/\\/g, "/");
-  if (!path.endsWith(".v")) path += ".v";
-  if (fileStore.has(path)) {
-    openFile(path);
-    return;
-  }
-  fileStore.set(path, { content: `// ${path}\n`, model: null });
+  if (!path.endsWith(".v") && !path.endsWith(".sv")) path += ".v";
+  putFileContent(path, `// ${path}\n`);
   openFile(path);
   switchExplorerTab("files");
+}
+
+function putFileContent(path, content) {
+  const existing = fileStore.get(path);
+  if (existing?.model) {
+    existing.model.dispose();
+  }
+  fileStore.set(path, { content, model: null });
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error || new Error(`read failed: ${file.name}`));
+    reader.readAsText(file);
+  });
+}
+
+async function importLocalFiles(fileList) {
+  if (!fileList?.length) return;
+
+  const files = Array.from(fileList);
+  const loaded = [];
+
+  for (const file of files) {
+    const path = file.name.replace(/\\/g, "/");
+    try {
+      const content = await readFileAsText(file);
+      putFileContent(path, content);
+      loaded.push(path);
+    } catch (err) {
+      appendConsole(`Failed to read ${path}: ${err}`, "err");
+    }
+  }
+
+  if (!loaded.length) return;
+
+  openFile(loaded[loaded.length - 1]);
+  switchExplorerTab("files");
+  renderEditorTabs();
+  renderFileTree();
+  appendConsole(`[open] ${loaded.join(", ")}`, "info");
+  setStatus(`${loaded.length} file(s) opened`, "ok");
+}
+
+function openFilePicker() {
+  $("file-import-input")?.click();
 }
 
 function deleteFile(path, { confirmDelete = true } = {}) {
@@ -717,8 +761,13 @@ function bindUi() {
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
   $("btn-wave-close").addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit").addEventListener("click", () => drawWave(lastWaveform));
+  $("btn-open-files").addEventListener("click", () => openFilePicker());
   $("btn-new-file").addEventListener("click", () => addFile());
   $("btn-delete-file").addEventListener("click", () => deleteFile());
+  $("file-import-input")?.addEventListener("change", (e) => {
+    importLocalFiles(e.target.files);
+    e.target.value = "";
+  });
   $("select-example").addEventListener("change", (e) => openExample(e.target.value));
 
   document.querySelectorAll(".pane-tab").forEach((tab) => {
