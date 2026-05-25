@@ -1,7 +1,13 @@
 """Tests for user-friendly UI launcher helpers."""
 
 from hdl_sim.web import create_app
-from hdl_sim.web.launcher import build_parser, dependency_help, find_free_port
+from hdl_sim.web.launcher import (
+    build_parser,
+    dependency_help,
+    find_free_port,
+    missing_dependencies,
+)
+from hdl_sim.web.paths import examples_dir, project_root, ui_dir
 
 
 def test_web_package_create_app_is_lazy_and_works() -> None:
@@ -14,6 +20,12 @@ def test_launcher_parser_defaults() -> None:
     assert args.host == "127.0.0.1"
     assert args.port == 8765
     assert args.no_open is False
+    assert args.gui is False
+
+
+def test_launcher_parser_gui_flag() -> None:
+    args = build_parser().parse_args(["--gui"])
+    assert args.gui is True
 
 
 def test_find_free_port_returns_int() -> None:
@@ -24,3 +36,14 @@ def test_dependency_help_is_plain_language() -> None:
     text = dependency_help()
     assert "pip install" in text
     assert "fastapi" in text
+
+
+def test_missing_dependencies_reports_list() -> None:
+    missing = missing_dependencies()
+    assert isinstance(missing, list)
+
+
+def test_project_paths_exist_in_dev_tree() -> None:
+    assert project_root().is_dir()
+    assert ui_dir().is_dir()
+    assert examples_dir().is_dir()

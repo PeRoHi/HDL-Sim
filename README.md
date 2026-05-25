@@ -68,21 +68,19 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 
 ブラウザで **編集・階層確認・実行・波形・コンソール** を一体で操作できます。
 
-### 一般向けの起動
+### 一般向けの起動（ターミナル不要）
 
-最初に一度だけ依存関係を入れます。
+**Windows（おすすめ）**
 
-```bash
-python3 -m pip install fastapi uvicorn lark pytest
-```
+1. Python 3.12 を [python.org](https://www.python.org/downloads/) からインストール（PATH に追加）
+2. 次をダブルクリック: **`start-ui.vbs`** または **`start_ui_gui.pyw`**
+3. 初回だけ GUI の **「依存関係をインストール」** を押す
 
-その後は次のどれかを開くだけです。
+**Python なし配布**: `packaging/build_windows.bat` で `dist/HDL-Sim.exe` を作成
 
-- macOS / Linux: `start-ui.command` をダブルクリック、または `./start-ui.sh`
-- Windows: `start-ui.bat` をダブルクリック
-- 共通: `python3 start_ui.py`
+**macOS / Linux**: `start-ui.command` または `./start-ui.sh`
 
-起動するとブラウザが自動で開きます。詳しくは [docs/UI_QUICKSTART.md](docs/UI_QUICKSTART.md) を参照してください。
+詳しくは [docs/UI_QUICKSTART.md](docs/UI_QUICKSTART.md)
 
 ### 開発者向け
 
