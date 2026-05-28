@@ -166,6 +166,12 @@ function syncDeleteButton() {
 }
 
 function loadWorkspaceFiles(fileEntries, top) {
+  if (!fileEntries?.length) {
+    appendConsole("[load] 読み込むファイルがありません", "warn");
+    setStatus("No files loaded", "warn");
+    return;
+  }
+
   for (const [, entry] of fileStore) {
     entry.model?.dispose();
   }
@@ -215,7 +221,13 @@ async function openProject(name) {
   setStatus("Loading project…", "busy");
   try {
     const data = await api(`/api/projects/${encodeURIComponent(name)}`);
+    if (!data.files?.length) {
+      appendConsole(`[project] ${data.name}: ファイルがありません`, "warn");
+      setStatus("Empty project", "warn");
+      return;
+    }
     currentProject = data.name;
+    $("select-example").value = "";
     loadWorkspaceFiles(data.files, data.top || "");
     $("select-project").value = data.name;
     appendConsole(`[project] opened: ${data.name} (${data.files.length} files)`, "info");
@@ -656,12 +668,18 @@ function highlightSignal(name) {
 }
 
 function drawWave(waveform) {
-  if (!waveform) return;
+  if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
   const canvas = $("waveform-canvas");
   window.HDLSimWaveform.drawWaveform(canvas, waveform, {
     wrap: $("waveform-wrap"),
     autoScroll: $("chk-auto-scroll")?.checked,
   });
+}
+
+function fitWaveform() {
+  const wrap = $("waveform-wrap");
+  if (wrap) wrap.scrollLeft = 0;
+  drawWave(lastWaveform);
 }
 
 /* ── API ── */
@@ -676,7 +694,21 @@ async function api(path, body, signal, method) {
     init.method = method || "GET";
   }
   const res = await fetch(path, init);
-  return res.json();
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* non-JSON body */
+  }
+  if (!res.ok) {
+    const detail = data?.detail ?? data?.error ?? `HTTP ${res.status}`;
+    const message = typeof detail === "string" ? detail : JSON.stringify(detail);
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 }
 
 function setRunning(running) {
@@ -726,17 +758,26 @@ async function loadExamples() {
 async function openExample(id) {
   if (!id) return;
   setStatus("Loading…", "busy");
-  const data = await api(`/api/examples/${encodeURIComponent(id)}`);
-  const files = data.files?.length
-    ? data.files
-    : [{ path: id.includes("/") ? id.split("/").pop() : id, content: data.content }];
+  try {
+    const data = await api(`/api/examples/${encodeURIComponent(id)}`);
+    const files = data.files?.length
+      ? data.files
+      : [{ path: id.includes("/") ? id.split("/").pop() : id, content: data.content }];
 
-  loadWorkspaceFiles(files, data.top || "");
-  const label = data.label || id;
-  setStatus(`Loaded: ${label} (${files.length} files)`, "ok");
-  appendConsole(`[project] ${label}`, "info");
-  appendConsole(`[load] ${files.map((f) => f.path).join(", ")}`, "info");
-  runElaborate();
+    currentProject = "";
+    $("select-project").value = "";
+    loadWorkspaceFiles(files, data.top || "");
+    const label = data.label || id;
+    setStatus(`Loaded: ${label} (${files.length} files)`, "ok");
+    appendConsole(`[example] ${label}`, "info");
+    appendConsole(`[load] ${files.map((f) => f.path).join(", ")}`, "info");
+    runElaborate();
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("Example load failed", "err");
+  } finally {
+    $("select-example").value = "";
+  }
 }
 
 async function runElaborate() {
@@ -748,6 +789,8 @@ async function runElaborate() {
     if (!data.ok) {
       appendConsole(data.error, "err");
       if (data.trace) appendConsole(data.trace, "err");
+      renderHierarchy(null);
+      renderSignalList([]);
       setStatus("Elab error", "err");
       switchExplorerTab("hierarchy");
       return;
@@ -782,6 +825,8 @@ async function runSimulate() {
       appendConsole(data.error, "err");
       if (data.trace) appendConsole(data.trace, "err");
       if (data.console) appendConsole(data.console);
+      renderHierarchy(null);
+      renderSignalList([]);
       setStatus("Sim failed", "err");
       return;
     }
@@ -870,6 +915,7 @@ function initMonaco() {
 
     renderEditorTabs();
     renderFileTree();
+    renderHierarchy(null);
     loadExamples();
     loadProjects();
     verifyUiBuild();
@@ -884,7 +930,7 @@ function bindUi() {
   $("btn-clear-console").addEventListener("click", clearConsole);
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
   $("btn-wave-close").addEventListener("click", () => toggleWaveform(false));
-  $("btn-wave-fit").addEventListener("click", () => drawWave(lastWaveform));
+  $("btn-wave-fit").addEventListener("click", fitWaveform);
   $("btn-open-files").addEventListener("click", () => openFilePicker());
   $("btn-new-file").addEventListener("click", () => addFile());
   $("btn-delete-file").addEventListener("click", () => deleteFile());
@@ -907,10 +953,11 @@ function bindUi() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "F5") {
-      e.preventDefault();
-      runSimulate();
-    }
+    if (e.key !== "F5") return;
+    const tag = e.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    e.preventDefault();
+    runSimulate();
   });
 
   $("chk-auto-scroll")?.addEventListener("change", () => {
