@@ -44,9 +44,13 @@ const $ = (id) => document.getElementById(id);
 const fileStore = new Map();
 let activeFile = "design.v";
 let editor = null;
+const fileEditors = new Map();
+const mdiWindows = new Map();
+let mdiZ = 10;
 let lastWaveform = null;
 let selectedSignal = null;
 let waveformVisible = false;
+let waveZoom = 1;
 let abortController = null;
 
 /** @type {Split.Instance | null} */
@@ -72,7 +76,7 @@ function setStatus(text, kind = "") {
 }
 
 function appendConsole(text, kind = "") {
-  const el = $("console-output");
+  const targets = [$("console-output"), $("mdi-console-output")].filter(Boolean);
   if (text == null || text === "") return;
 
   const prefix =
@@ -101,19 +105,21 @@ function appendConsole(text, kind = "") {
     const row = document.createElement("div");
     row.className = "console-line" + (lineKind ? ` line-${lineKind}` : "");
     row.textContent = (index === 0 ? prefix : "") + line;
-    el.appendChild(row);
+    targets.forEach((el) => el.appendChild(row.cloneNode(true)));
   });
-  el.scrollTop = el.scrollHeight;
+  targets.forEach((el) => { el.scrollTop = el.scrollHeight; });
 }
 
 function clearConsole() {
   $("console-output").innerHTML = "";
+  const mdiOut = $("mdi-console-output");
+  if (mdiOut) mdiOut.innerHTML = "";
 }
 
 function saveActiveEditor() {
-  if (!editor || !activeFile) return;
-  const entry = fileStore.get(activeFile);
-  if (entry) entry.content = editor.getValue();
+  for (const [, entry] of fileStore) {
+    if (entry.model) entry.content = entry.model.getValue();
+  }
 }
 
 function getPayload() {
@@ -165,6 +171,145 @@ function syncDeleteButton() {
   if (btn) btn.disabled = fileStore.size <= 1;
 }
 
+function mdiCanvas() {
+  return $("mdi-canvas");
+}
+
+function bringMdiToFront(win) {
+  if (!win) return;
+  mdiZ += 1;
+  win.style.zIndex = String(mdiZ);
+  document.querySelectorAll(".mdi-window").forEach((node) => node.classList.remove("active"));
+  win.classList.add("active");
+}
+
+function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "" } = {}) {
+  const existing = mdiWindows.get(id);
+  if (existing) {
+    existing.hidden = false;
+    bringMdiToFront(existing);
+    return existing;
+  }
+
+  const win = document.createElement("section");
+  win.className = "mdi-window";
+  win.dataset.mdiId = id;
+  win.style.left = `${x}px`;
+  win.style.top = `${y}px`;
+  win.style.width = `${width}px`;
+  win.style.height = `${height}px`;
+
+  const titlebar = document.createElement("div");
+  titlebar.className = "mdi-titlebar";
+  const titleEl = document.createElement("span");
+  titleEl.className = "mdi-title";
+  titleEl.textContent = title;
+  titlebar.appendChild(titleEl);
+
+  const controls = document.createElement("div");
+  controls.className = "mdi-controls";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "mdi-btn close";
+  close.title = "閉じる";
+  close.textContent = "×";
+  close.addEventListener("click", (e) => {
+    e.stopPropagation();
+    win.hidden = true;
+    if (id === "waveform") {
+      waveformVisible = false;
+      $("btn-wave-toggle")?.classList.remove("active");
+    }
+  });
+  controls.appendChild(close);
+  titlebar.appendChild(controls);
+
+  const body = document.createElement("div");
+  body.className = `mdi-body ${bodyClass}`.trim();
+
+  win.appendChild(titlebar);
+  win.appendChild(body);
+  mdiCanvas().appendChild(win);
+  mdiWindows.set(id, win);
+  bringMdiToFront(win);
+
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+  titlebar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    bringMdiToFront(win);
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = win.offsetLeft;
+    startTop = win.offsetTop;
+    titlebar.setPointerCapture(e.pointerId);
+  });
+  titlebar.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
+    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
+  });
+  titlebar.addEventListener("pointerup", (e) => {
+    dragging = false;
+    titlebar.releasePointerCapture(e.pointerId);
+  });
+  win.addEventListener("pointerdown", () => bringMdiToFront(win));
+
+  return win;
+}
+
+function initMdiPan() {
+  const desktop = $("mdi-desktop");
+  if (!desktop) return;
+
+  let panning = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  desktop.addEventListener("pointerdown", (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    panning = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = desktop.scrollLeft;
+    startTop = desktop.scrollTop;
+    desktop.classList.add("panning");
+    desktop.setPointerCapture(e.pointerId);
+  });
+
+  desktop.addEventListener("pointermove", (e) => {
+    if (!panning) return;
+    desktop.scrollLeft = startLeft - (e.clientX - startX);
+    desktop.scrollTop = startTop - (e.clientY - startY);
+  });
+
+  desktop.addEventListener("pointerup", (e) => {
+    if (!panning) return;
+    panning = false;
+    desktop.classList.remove("panning");
+    desktop.releasePointerCapture(e.pointerId);
+  });
+
+  desktop.addEventListener("auxclick", (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
+}
+
+function tileFileWindows() {
+  let index = 0;
+  for (const path of fileStore.keys()) {
+    openFile(path, { focus: index === 0, x: 36 + index * 34, y: 32 + index * 34 });
+    index += 1;
+  }
+}
+
 function loadWorkspaceFiles(fileEntries, top) {
   if (!fileEntries?.length) {
     appendConsole("[load] 読み込むファイルがありません", "warn");
@@ -172,8 +317,15 @@ function loadWorkspaceFiles(fileEntries, top) {
     return;
   }
 
-  for (const [, entry] of fileStore) {
-    entry.model?.dispose();
+  for (const [, view] of fileEditors) view.editor?.dispose();
+  fileEditors.clear();
+  editor = null;
+  for (const [, entry] of fileStore) entry.model?.dispose();
+  for (const [id, win] of mdiWindows) {
+    if (id.startsWith("file:")) {
+      win.remove();
+      mdiWindows.delete(id);
+    }
   }
   fileStore.clear();
 
@@ -182,14 +334,11 @@ function loadWorkspaceFiles(fileEntries, top) {
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
-  if (editor) {
-    const entry = fileStore.get(activeFile);
-    editor.setModel(getOrCreateModel(activeFile, entry.content));
-  }
   if (top != null) $("input-top").value = top;
   renderEditorTabs();
   renderFileTree();
   syncDeleteButton();
+  if (window.monaco) tileFileWindows();
 }
 
 async function loadProjects() {
@@ -294,6 +443,90 @@ async function saveCurrentProject(showPrompt = true) {
   }
 }
 
+function currentProjectFileName() {
+  const base = currentProject || $("input-top").value.trim() || "hdl_sim_project";
+  return `${base.replace(/[^A-Za-z0-9_-]+/g, "_")}.spj`;
+}
+
+function buildSpjPayload() {
+  const payload = getPayload();
+  return {
+    format: "hdl-sim-project",
+    version: 1,
+    name: currentProject || currentProjectFileName().replace(/\.spj$/i, ""),
+    top: payload.top,
+    until: payload.until,
+    max_events: payload.max_events,
+    files: payload.files,
+  };
+}
+
+async function saveProjectFile() {
+  try {
+    const data = buildSpjPayload();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const suggestedName = currentProjectFileName();
+
+    if (window.showSaveFilePicker) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [
+          {
+            description: "HDL-Sim / Silos-like Project (*.spj)",
+            accept: { "application/json": [".spj"] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      appendConsole(`[project] saved file: ${handle.name}`, "ok");
+      setStatus(`Saved: ${handle.name}`, "ok");
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = suggestedName;
+    a.click();
+    URL.revokeObjectURL(url);
+    appendConsole(`[project] downloaded: ${suggestedName}`, "ok");
+    setStatus(`Downloaded: ${suggestedName}`, "ok");
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    appendConsole(String(e), "err");
+    setStatus("SPJ save failed", "err");
+  }
+}
+
+function openProjectFilePicker() {
+  $("project-import-input")?.click();
+}
+
+async function importProjectFile(file) {
+  if (!file) return;
+  try {
+    const raw = await readFileAsText(file);
+    const data = JSON.parse(raw);
+    if (data.format !== "hdl-sim-project" || !Array.isArray(data.files)) {
+      throw new Error("HDL-Sim project fileではありません");
+    }
+    currentProject = data.name || file.name.replace(/\.spj$/i, "");
+    $("select-project").value = "";
+    $("select-example").value = "";
+    if (data.until != null) $("input-until").value = data.until;
+    if (data.max_events != null) $("input-max-events").value = data.max_events;
+    loadWorkspaceFiles(data.files, data.top || "");
+    appendConsole(`[project] opened file: ${file.name} (${data.files.length} files)`, "ok");
+    setStatus(`Opened: ${file.name}`, "ok");
+    runElaborate();
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("SPJ open failed", "err");
+  }
+}
+
 /* ── Split.js layout ── */
 
 function initSplits() {
@@ -306,22 +539,21 @@ function initSplits() {
     onDragEnd: (sizes) => {
       SPLIT_SIZES.v.main = sizes[0];
       SPLIT_SIZES.v.console = sizes[1];
-      editor?.layout();
+      layoutAllEditors();
       if (lastWaveform) drawWave(lastWaveform);
     },
   });
 
-  splitH = Split(["#pane-explorer", "#pane-editor", "#pane-waveform"], {
+  splitH = Split(["#pane-explorer", "#pane-editor"], {
     direction: "horizontal",
-    sizes: [SPLIT_SIZES.h.explorer, SPLIT_SIZES.h.editor, 0],
-    minSize: [140, 280, 0],
+    sizes: [SPLIT_SIZES.h.explorer, SPLIT_SIZES.h.editor],
+    minSize: [140, 360],
     gutterSize: 4,
     snapOffset: 0,
     onDragEnd: (sizes) => {
       SPLIT_SIZES.h.explorer = sizes[0];
       SPLIT_SIZES.h.editor = sizes[1];
-      SPLIT_SIZES.h.wave = sizes[2];
-      editor?.layout();
+      layoutAllEditors();
       if (lastWaveform) drawWave(lastWaveform);
     },
   });
@@ -332,22 +564,15 @@ function toggleWaveform(show) {
   const btn = $("btn-wave-toggle");
 
   if (waveformVisible) {
-    const wave = Math.max(SPLIT_SIZES.h.wave || 28, 22);
-    const explorer = SPLIT_SIZES.h.explorer;
-    const editor = 100 - explorer - wave;
-    splitH.setSizes([explorer, editor, wave]);
-    SPLIT_SIZES.h.wave = wave;
+    createWaveformWindow();
     btn.classList.add("active");
     if (lastWaveform) drawWave(lastWaveform);
   } else {
-    const sizes = splitH.getSizes();
-    SPLIT_SIZES.h.explorer = sizes[0];
-    SPLIT_SIZES.h.editor = sizes[1] + sizes[2];
-    SPLIT_SIZES.h.wave = 0;
-    splitH.setSizes([SPLIT_SIZES.h.explorer, SPLIT_SIZES.h.editor, 0]);
+    const win = mdiWindows.get("waveform");
+    if (win) win.hidden = true;
     btn.classList.remove("active");
   }
-  editor?.layout();
+  layoutAllEditors();
 }
 
 /* ── Explorer tabs ── */
@@ -465,12 +690,63 @@ function getOrCreateModel(path, content) {
   return model;
 }
 
-function openFile(path) {
+function layoutAllEditors() {
+  for (const [, view] of fileEditors) view.editor?.layout();
+}
+
+function fileWindowId(path) {
+  return `file:${path}`;
+}
+
+function openFile(path, options = {}) {
   if (!fileStore.has(path)) return;
   saveActiveEditor();
   activeFile = path;
   const entry = fileStore.get(path);
-  editor.setModel(getOrCreateModel(path, entry.content));
+  const id = fileWindowId(path);
+  const index = [...fileStore.keys()].indexOf(path);
+  const win = createMdiWindow(id, path, {
+    x: options.x ?? 40 + Math.max(index, 0) * 28,
+    y: options.y ?? 38 + Math.max(index, 0) * 28,
+    width: 560,
+    height: 390,
+    bodyClass: "mdi-editor",
+  });
+  win.hidden = false;
+
+  let view = fileEditors.get(path);
+  if (!view) {
+    const body = win.querySelector(".mdi-body");
+    const model = getOrCreateModel(path, entry.content);
+    const ed = monaco.editor.create(body, {
+      model,
+      theme: "hdl-dark",
+      automaticLayout: true,
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Consolas', 'Source Code Pro', monospace",
+      lineNumbers: "on",
+      minimap: { enabled: true, scale: 1, maxColumn: 80 },
+      scrollBeyondLastLine: false,
+      wordWrap: "off",
+      renderWhitespace: "selection",
+      tabSize: 4,
+      insertSpaces: true,
+      folding: true,
+      glyphMargin: true,
+    });
+    ed.onDidFocusEditorText(() => {
+      activeFile = path;
+      editor = ed;
+      renderEditorTabs();
+      renderFileTree();
+      bringMdiToFront(win);
+    });
+    view = { editor: ed, window: win };
+    fileEditors.set(path, view);
+  }
+  editor = view.editor;
+  bringMdiToFront(win);
+  view.editor.layout();
   renderEditorTabs();
   renderFileTree();
 }
@@ -521,7 +797,7 @@ async function importLocalFiles(fileList) {
 
   if (!loaded.length) return;
 
-  openFile(loaded[loaded.length - 1]);
+  loaded.forEach((path, index) => openFile(path, { focus: index === loaded.length - 1 }));
   switchExplorerTab("files");
   renderEditorTabs();
   renderFileTree();
@@ -540,6 +816,15 @@ function deleteFile(path, { confirmDelete = true } = {}) {
   if (confirmDelete && !window.confirm(`「${target}」を削除しますか？`)) return;
 
   const entry = fileStore.get(target);
+  const view = fileEditors.get(target);
+  if (editor === view?.editor) editor = null;
+  if (view?.editor) view.editor.dispose();
+  fileEditors.delete(target);
+  const win = mdiWindows.get(fileWindowId(target));
+  if (win) {
+    win.remove();
+    mdiWindows.delete(fileWindowId(target));
+  }
   if (entry?.model) {
     entry.content = entry.model.getValue();
     entry.model.dispose();
@@ -667,18 +952,86 @@ function highlightSignal(name) {
   drawWave(filtered);
 }
 
+function createOutputWindow() {
+  const win = createMdiWindow("output", "Output", {
+    x: 70,
+    y: 330,
+    width: 640,
+    height: 250,
+    bodyClass: "mdi-output",
+  });
+  const body = win.querySelector(".mdi-body");
+  if (!body.id) {
+    body.id = "mdi-console-output";
+    body.classList.add("console-output");
+  }
+  win.hidden = false;
+  bringMdiToFront(win);
+  return win;
+}
+
+function createWaveformWindow() {
+  const win = createMdiWindow("waveform", "Waveform", {
+    x: 760,
+    y: 80,
+    width: 720,
+    height: 360,
+    bodyClass: "mdi-waveform",
+  });
+  const body = win.querySelector(".mdi-body");
+  if (!body.querySelector("#waveform-canvas")) {
+    body.innerHTML = `
+      <div class="wave-toolbar">
+        <button type="button" id="btn-wave-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
+        <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
+        <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
+        <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
+      </div>
+      <div id="waveform-wrap" class="waveform-wrap">
+        <canvas id="waveform-canvas"></canvas>
+      </div>
+    `;
+    body.querySelector("#btn-wave-fit")?.addEventListener("click", fitWaveform);
+    body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
+    body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
+    body.querySelector("#chk-auto-scroll")?.addEventListener("change", () => {
+      if (lastWaveform) drawWave(lastWaveform);
+    });
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(() => {
+        if (!win.hidden && lastWaveform) drawWave(lastWaveform);
+      });
+      observer.observe(body);
+    }
+  }
+  win.hidden = false;
+  waveformVisible = true;
+  bringMdiToFront(win);
+  return win;
+}
+
 function drawWave(waveform) {
   if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
+  createWaveformWindow();
   const canvas = $("waveform-canvas");
   window.HDLSimWaveform.drawWaveform(canvas, waveform, {
     wrap: $("waveform-wrap"),
     autoScroll: $("chk-auto-scroll")?.checked,
+    zoom: waveZoom,
   });
 }
 
 function fitWaveform() {
+  waveZoom = 1;
   const wrap = $("waveform-wrap");
   if (wrap) wrap.scrollLeft = 0;
+  drawWave(lastWaveform);
+}
+
+function setWaveZoom(nextZoom) {
+  waveZoom = Math.min(32, Math.max(1, nextZoom));
+  const auto = $("chk-auto-scroll");
+  if (auto) auto.checked = false;
   drawWave(lastWaveform);
 }
 
@@ -782,6 +1135,7 @@ async function openExample(id) {
 
 async function runElaborate() {
   setStatus("Elaborating…", "busy");
+  createOutputWindow();
   try {
     const payload = getPayload();
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
@@ -811,6 +1165,7 @@ async function runElaborate() {
 async function runSimulate() {
   setStatus("Running…", "busy");
   setRunning(true);
+  createOutputWindow();
   clearConsole();
   abortController = new AbortController();
 
@@ -891,28 +1246,7 @@ function initMonaco() {
       },
     });
 
-    editor = monaco.editor.create($("editor-host"), {
-      model: getOrCreateModel(activeFile, fileStore.get(activeFile).content),
-      theme: "hdl-dark",
-      automaticLayout: true,
-      fontSize: 13,
-      fontFamily: "'Cascadia Code', 'Consolas', 'Source Code Pro', monospace",
-      lineNumbers: "on",
-      minimap: { enabled: true, scale: 1, maxColumn: 80 },
-      scrollBeyondLastLine: false,
-      wordWrap: "off",
-      renderWhitespace: "selection",
-      tabSize: 4,
-      insertSpaces: true,
-      folding: true,
-      glyphMargin: true,
-    });
-
-    editor.onDidChangeModelContent(() => {
-      const entry = fileStore.get(activeFile);
-      if (entry) entry.content = editor.getValue();
-    });
-
+    tileFileWindows();
     renderEditorTabs();
     renderFileTree();
     renderHierarchy(null);
@@ -929,8 +1263,8 @@ function bindUi() {
   $("btn-elab").addEventListener("click", runElaborate);
   $("btn-clear-console").addEventListener("click", clearConsole);
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
-  $("btn-wave-close").addEventListener("click", () => toggleWaveform(false));
-  $("btn-wave-fit").addEventListener("click", fitWaveform);
+  $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
+  $("btn-wave-fit")?.addEventListener("click", fitWaveform);
   $("btn-open-files").addEventListener("click", () => openFilePicker());
   $("btn-new-file").addEventListener("click", () => addFile());
   $("btn-delete-file").addEventListener("click", () => deleteFile());
@@ -942,14 +1276,20 @@ function bindUi() {
   $("select-project")?.addEventListener("change", (e) => openProject(e.target.value));
   $("btn-new-project")?.addEventListener("click", () => createProject());
   $("btn-save-project")?.addEventListener("click", () => saveCurrentProject());
+  $("btn-open-spj")?.addEventListener("click", openProjectFilePicker);
+  $("btn-save-spj")?.addEventListener("click", saveProjectFile);
+  $("project-import-input")?.addEventListener("change", (e) => {
+    importProjectFile(e.target.files?.[0]);
+    e.target.value = "";
+  });
 
   document.querySelectorAll(".pane-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchExplorerTab(tab.dataset.pane));
   });
 
   window.addEventListener("resize", () => {
-    editor?.layout();
-    if (lastWaveform) drawWave(lastWaveform);
+    layoutAllEditors();
+    if (lastWaveform && waveformVisible) drawWave(lastWaveform);
   });
 
   document.addEventListener("keydown", (e) => {
@@ -990,4 +1330,5 @@ async function verifyUiBuild() {
 initFiles();
 initSplits();
 bindUi();
+initMdiPan();
 initMonaco();

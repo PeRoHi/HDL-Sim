@@ -78,6 +78,9 @@
             </select>
             <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
             <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
+            <button type="button" id="btn-open-spj" class="mini-btn" title=".spj プロジェクトを開く">Open .spj</button>
+            <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として場所を指定して保存">Save .spj</button>
+            <input type="file" id="project-import-input" class="visually-hidden" accept=".spj,application/json,text/plain" tabindex="-1" aria-hidden="true" />
           </div>
           <div class="pane-tabs" role="tablist">
             <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
@@ -103,28 +106,14 @@
           </div>
         </aside>
 
-        <!-- Center: Editor -->
+        <!-- Center: MDI workspace -->
         <section id="pane-editor" class="pane pane-editor" aria-label="エディタ">
-          <div id="editor-tabs" class="editor-tabs" role="tablist"></div>
-          <div id="editor-host" class="editor-host"></div>
+          <div id="mdi-desktop" class="mdi-desktop" aria-label="ワークスペース">
+            <div id="mdi-canvas" class="mdi-canvas"></div>
+          </div>
+          <div id="editor-tabs" class="editor-tabs visually-hidden" role="tablist"></div>
+          <div id="editor-host" class="editor-host visually-hidden"></div>
         </section>
-
-        <!-- Right: Waveform (collapsible) -->
-        <aside id="pane-waveform" class="pane pane-waveform" aria-label="波形">
-          <div class="pane-header-bar">
-            <span class="pane-title">Waveform</span>
-            <div class="pane-header-actions">
-              <button type="button" id="btn-wave-fit" class="mini-btn" title="先頭へスクロールして再描画">Fit</button>
-              <button type="button" id="btn-wave-close" class="mini-btn icon-only" title="閉じる" aria-label="波形を閉じる">×</button>
-            </div>
-          </div>
-          <div class="wave-toolbar">
-            <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
-          </div>
-          <div id="waveform-wrap" class="waveform-wrap">
-            <canvas id="waveform-canvas"></canvas>
-          </div>
-        </aside>
       </div>
 
       <!-- Bottom: Console -->

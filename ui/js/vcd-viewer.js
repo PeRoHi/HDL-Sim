@@ -157,11 +157,13 @@
     }
 
     const maxTime = timeRange(rows);
+    const zoom = Math.max(1, Number(options.zoom) || 1);
     const viewWidth = Math.max(wrap?.clientWidth || 400, 400);
-    const plotWidth = viewWidth - LABEL_WIDTH - PADDING * 2;
+    const plotWidth = (viewWidth - LABEL_WIDTH - PADDING * 2) * zoom;
+    const canvasWidth = LABEL_WIDTH + PADDING * 2 + plotWidth;
     const bodyHeight = rows.length * ROW_HEIGHT + PADDING;
     const height = bodyHeight + HEADER_H + PADDING;
-    canvas.width = viewWidth;
+    canvas.width = canvasWidth;
     canvas.height = height;
 
     const ctx = canvas.getContext("2d");
@@ -194,7 +196,7 @@
       ctx.fillStyle = COLORS.labelDim;
       ctx.font = "9px monospace";
       ctx.textAlign = "right";
-      ctx.fillText(waveform.timescale, viewWidth - 6, HEADER_H - 4);
+      ctx.fillText(waveform.timescale, canvasWidth - 6, HEADER_H - 4);
     }
 
     // Signal rows
