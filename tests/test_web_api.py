@@ -107,8 +107,8 @@ def test_ui_info_reports_ide_layout() -> None:
     ).endpoint
     data = handler()
     assert data["ide_layout"] is True
-    assert data["version"] == "0.4.4"
-    assert data["version_label"] == "Ver 0.4.4"
+    assert data["version"] == "0.4.5"
+    assert data["version_label"] == "Ver 0.4.5"
     assert "spj_dir" in data
 
 

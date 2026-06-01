@@ -23,10 +23,15 @@ Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dis
 1. [Inno Setup 6](https://jrsoftware.org/isdl.php) をインストール
 2. `packaging\build_windows.bat` で exe をビルド
 3. `packaging\build_installer.bat` を実行
-4. 完成: `dist\HDL-Sim-Setup-0.4.4.exe`
+4. 完成: `dist\HDL-Sim-Setup-0.4.5.exe`
 
-インストール時に **保存フォルダ**（`.spj` / `projects/`）を選択できます。
-既定は `ドキュメント\HDL-Sim` です。後から変更する場合は、インストール先の `data_dir.txt` を編集してください。
+インストール時に次を選択できます:
+
+- **デスクトップにショートカット**（オン/オフ）
+- **スタートメニュー**（フォルダ名も選択可）
+- **保存フォルダ**（`.spj` / `projects/`、既定: `ドキュメント\HDL-Sim`）
+
+アンインストールは Windows の **設定 → アプリ → インストールされているアプリ** から「HDL-Sim」を選んで実行できます。ユーザーデータ（プロジェクト）を残すか削除するかも選べます。
 
 ## macOS / Linux
 
