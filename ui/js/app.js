@@ -2,6 +2,8 @@
  * HDL-Sim IDE-style web UI
  */
 
+import { createWorkspaceTree, scanModulesInWorkspace } from "./workspace-tree.js";
+
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
 \`timescale 1ns/1ps
 
@@ -77,6 +79,11 @@ const viewState = {
 let simRunning = false;
 let debugSingleStep = false;
 
+/** @type {ReturnType<typeof createWorkspaceTree> | null} */
+let workspaceTree = null;
+
+const UI_VERSION_KEY = "hdl-sim-ui-version";
+
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
 }
@@ -134,9 +141,13 @@ function saveActiveEditor() {
   }
 }
 
+function getSelectedTop() {
+  return $("select-top")?.value.trim() || "";
+}
+
 function getPayload() {
   saveActiveEditor();
-  const top = $("input-top").value.trim();
+  const top = getSelectedTop();
   const files = [];
   for (const [path, entry] of fileStore) {
     files.push({ path, content: entry.content });
@@ -151,31 +162,30 @@ function getPayload() {
   };
 }
 
-function updateTopModuleList(moduleNames, suggestedTop) {
-  const datalist = $("top-module-list");
-  datalist.innerHTML = "";
-  if (!moduleNames?.length) return;
-
-  const sorted = [...moduleNames].sort((a, b) => {
-    const score = (n) => {
-      let s = n.length * 0.001;
-      if (n === suggestedTop) s -= 10;
-      if (n.endsWith("_tb") || n === "tb") s -= 5;
-      return s;
-    };
-    return score(a) - score(b) || a.localeCompare(b);
-  });
-
-  sorted.forEach((name) => {
+function refreshTopModulePicker(suggestedTop) {
+  const sel = $("select-top");
+  if (!sel) return;
+  const current = sel.value;
+  const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
+  sel.innerHTML = '<option value="">(auto)</option>';
+  modules.forEach(({ name, path }) => {
     const opt = document.createElement("option");
     opt.value = name;
-    datalist.appendChild(opt);
+    opt.textContent = `${name}  —  ${path}`;
+    sel.appendChild(opt);
   });
-
-  const input = $("input-top");
-  if (!input.value.trim() && suggestedTop) {
-    input.value = suggestedTop;
+  const has = (name) => modules.some((m) => m.name === name);
+  if (current && has(current)) sel.value = current;
+  else if (suggestedTop && has(suggestedTop)) sel.value = suggestedTop;
+  else if (has("tb")) sel.value = "tb";
+  else {
+    const tb = modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_"));
+    if (tb) sel.value = tb.name;
   }
+}
+
+function scheduleTopModuleRefresh() {
+  refreshTopModulePicker();
 }
 
 function syncDeleteButton() {
@@ -346,9 +356,13 @@ function loadWorkspaceFiles(fileEntries, top) {
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
-  if (top != null) $("input-top").value = top;
+  if (top != null && top !== "") {
+    const sel = $("select-top");
+    if (sel) sel.value = top;
+  }
   renderEditorTabs();
-  renderFileTree();
+  workspaceTree?.render();
+  refreshTopModulePicker(top || undefined);
   syncDeleteButton();
   if (window.monaco) tileFileWindows();
 }
@@ -405,7 +419,7 @@ async function createProject() {
   if (!name?.trim()) return;
   try {
     saveActiveEditor();
-    const top = $("input-top").value.trim() || null;
+    const top = getSelectedTop() || null;
     await api("/api/projects", { name: name.trim(), top });
     currentProject = name.trim();
     await loadProjects();
@@ -425,7 +439,7 @@ async function saveCurrentProject(showPrompt = true) {
     if (!name?.trim()) return;
     name = name.trim();
     try {
-      await api("/api/projects", { name, top: $("input-top").value.trim() || null });
+      await api("/api/projects", { name, top: getSelectedTop() || null });
       currentProject = name;
       await loadProjects();
       $("select-project").value = name;
@@ -456,7 +470,7 @@ async function saveCurrentProject(showPrompt = true) {
 }
 
 function currentProjectFileName() {
-  const base = currentProject || $("input-top").value.trim() || "hdl_sim_project";
+  const base = currentProject || getSelectedTop() || "hdl_sim_project";
   return `${base.replace(/[^A-Za-z0-9_-]+/g, "_")}.spj`;
 }
 
@@ -650,8 +664,8 @@ async function menuProjectFiles() {
 }
 
 function menuProjectSettings() {
-  const top = prompt("Top module:", $("input-top").value.trim());
-  if (top != null) $("input-top").value = top;
+  const top = prompt("Top module:", getSelectedTop());
+  if (top != null && $("select-top")) $("select-top").value = top;
 }
 
 function getWindowFileList() {
@@ -733,7 +747,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.4.5\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.0\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -890,71 +904,128 @@ function renderEditorTabs() {
 }
 
 function renderFileTree() {
-  const root = $("file-tree");
-  root.innerHTML = "";
-
-  const header = document.createElement("div");
-  header.className = "tree-node";
-  header.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">WORKSPACE</span>`;
-  root.appendChild(header);
-
-  const body = document.createElement("div");
-  body.className = "tree-children";
-  renderFileTreeNode(body, buildFileTree(), 0);
-  root.appendChild(body);
-  syncDeleteButton();
+  workspaceTree?.render();
 }
 
-function buildFileTree() {
-  /** @type {Map<string, { dirs: Map<string, any>, files: string[] }>} */
-  const root = { dirs: new Map(), files: [] };
+function initWorkspaceTreeView() {
+  workspaceTree = createWorkspaceTree({
+    fileStore,
+    getRootElement: () => $("file-tree"),
+    getActiveFile: () => activeFile,
+    onOpenFile: (path) => openFile(path),
+    onDeleteFile: (path) => deleteFile(path),
+    onNewFile: (folder) => addFileInFolder(folder),
+    onNewFolder: (parent) => createFolder(parent),
+    onRenameFile: (path) => renameFilePrompt(path),
+    onRenameFolder: (path) => renameFolderPrompt(path),
+    onDeleteFolder: (path) => deleteFolder(path),
+    onMovePath: (from, to) => moveFilePath(from, to),
+    onAfterRender: () => syncDeleteButton(),
+  });
+  workspaceTree.render();
+}
 
-  for (const path of fileStore.keys()) {
-    const parts = path.split("/");
-    let node = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const dir = parts[i];
-      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
-      node = node.dirs.get(dir);
-    }
-    node.files.push(path);
+function renameFilePath(oldPath, newPath) {
+  oldPath = oldPath.replace(/\\/g, "/");
+  newPath = newPath.replace(/\\/g, "/");
+  if (oldPath === newPath || !fileStore.has(oldPath) || fileStore.has(newPath)) return false;
+
+  const entry = fileStore.get(oldPath);
+  const view = fileEditors.get(oldPath);
+  const oldWinId = fileWindowId(oldPath);
+  const win = mdiWindows.get(oldWinId);
+
+  fileStore.delete(oldPath);
+  fileStore.set(newPath, entry);
+
+  if (view) {
+    fileEditors.delete(oldPath);
+    fileEditors.set(newPath, view);
   }
-  return root;
+  if (win) {
+    mdiWindows.delete(oldWinId);
+    win.dataset.mdiId = fileWindowId(newPath);
+    const title = win.querySelector(".mdi-title");
+    if (title) title.textContent = newPath;
+    mdiWindows.set(fileWindowId(newPath), win);
+  }
+  if (entry?.model) {
+    const uri = monaco.Uri.parse(`file:///${newPath}`);
+    monaco.editor.setModelLanguage(entry.model, "verilog");
+    // keep same model, update uri by recreating if needed
+  }
+  if (activeFile === oldPath) activeFile = newPath;
+  renderEditorTabs();
+  workspaceTree?.render();
+  refreshTopModulePicker();
+  return true;
 }
 
-function renderFileTreeNode(parentEl, node, depth) {
-  const sortedDirs = [...node.dirs.keys()].sort();
-  sortedDirs.forEach((dirName) => {
-    const dirNode = node.dirs.get(dirName);
-    const row = document.createElement("div");
-    row.className = "tree-node";
-    row.style.paddingLeft = `${depth * 12 + 4}px`;
-    row.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">${dirName}</span>`;
-    parentEl.appendChild(row);
+function moveFilePath(from, to) {
+  if (renameFilePath(from, to)) {
+    appendConsole(`[files] moved: ${from} → ${to}`, "info");
+    return true;
+  }
+  appendConsole(`[files] move failed: ${from} → ${to}`, "warn");
+  return false;
+}
 
-    const childWrap = document.createElement("div");
-    childWrap.className = "tree-children";
-    renderFileTreeNode(childWrap, dirNode, depth + 1);
-    parentEl.appendChild(childWrap);
+function renameFilePrompt(path) {
+  const base = path.includes("/") ? path.split("/").pop() : path;
+  const next = prompt("新しいファイル名:", base);
+  if (!next?.trim()) return;
+  let fileName = next.trim().replace(/\\/g, "/");
+  if (!fileName.endsWith(".v") && !fileName.endsWith(".sv")) fileName += ".v";
+  fileName = fileName.split("/").pop();
+  const folder = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+  const dest = folder ? `${folder}/${fileName}` : fileName;
+  if (moveFilePath(path, dest)) runElaborate();
+}
 
-    const twist = row.querySelector(".twist");
-    twist.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const collapsed = childWrap.classList.toggle("collapsed");
-      twist.textContent = collapsed ? "▶" : "▼";
-    });
-  });
+function renameFolderPrompt(folderPath) {
+  const name = folderPath.includes("/") ? folderPath.split("/").pop() : folderPath;
+  const next = prompt("新しいフォルダ名:", name);
+  if (!next?.trim()) return;
+  const parent = folderPath.includes("/") ? folderPath.split("/").slice(0, -1).join("/") : "";
+  const newName = next.trim().replace(/\\/g, "/").split("/").pop();
+  const newFolder = parent ? `${parent}/${newName}` : newName;
+  if (newFolder === folderPath) return;
 
-  node.files.sort().forEach((path) => {
-    const row = document.createElement("div");
-    row.className = "tree-node" + (path === activeFile ? " selected" : "");
-    row.style.paddingLeft = `${depth * 12 + 4}px`;
-    const name = path.includes("/") ? path.split("/").pop() : path;
-    row.innerHTML = `<span class="twist empty"></span><span class="icon">📄</span><span class="label">${name}</span>`;
-    row.title = path;
-    row.addEventListener("click", () => openFile(path));
-    parentEl.appendChild(row);
-  });
+  const paths = [...fileStore.keys()].filter((p) => p.startsWith(`${folderPath}/`));
+  for (const p of paths) {
+    const dest = newFolder + p.slice(folderPath.length);
+    renameFilePath(p, dest);
+  }
+  workspaceTree?.removeVirtualFolderPrefix(folderPath);
+  workspaceTree?.addVirtualFolder(newFolder);
+  workspaceTree?.setContextFolder(newFolder);
+  workspaceTree?.render();
+}
+
+function deleteFolder(folderPath) {
+  const paths = [...fileStore.keys()].filter((p) => p.startsWith(`${folderPath}/`));
+  if (paths.length && !window.confirm(`「${folderPath}」内の ${paths.length} ファイルを削除しますか？`)) {
+    return;
+  }
+  paths.forEach((p) => deleteFile(p, { confirmDelete: false }));
+  workspaceTree?.removeVirtualFolderPrefix(folderPath);
+  workspaceTree?.render();
+}
+
+function createFolder(parent) {
+  const name = prompt("フォルダ名:", "src");
+  if (!name?.trim()) return;
+  const cleaned = name.trim().replace(/\\/g, "/").split("/").pop();
+  const folder = parent ? `${parent}/${cleaned}` : cleaned;
+  workspaceTree?.addVirtualFolder(folder);
+  workspaceTree?.setContextFolder(folder);
+  workspaceTree?.render();
+  appendConsole(`[files] folder: ${folder}`, "info");
+}
+
+function addFileInFolder(folder) {
+  const defaultName = folder ? `${folder}/design.v` : "design.v";
+  addFile(defaultName, { skipPrompt: false, defaultName });
 }
 
 function getOrCreateModel(path, content) {
@@ -1014,8 +1085,11 @@ function openFile(path, options = {}) {
       activeFile = path;
       editor = ed;
       renderEditorTabs();
-      renderFileTree();
+      workspaceTree?.render();
       bringMdiToFront(win);
+    });
+    ed.onDidChangeModelContent(() => {
+      scheduleTopModuleRefresh();
     });
     view = { editor: ed, window: win };
     fileEditors.set(path, view);
@@ -1027,14 +1101,20 @@ function openFile(path, options = {}) {
   renderFileTree();
 }
 
-function addFile(name) {
-  let path = name || prompt("ファイル名 (例: dut.v または lib/and2.v):", "dut.v");
+function addFile(name, options = {}) {
+  const folder = workspaceTree?.getContextFolder() || "";
+  const defaultName = options.defaultName || (folder ? `${folder}/design.v` : "design.v");
+  let path = name;
+  if (!options.skipPrompt) {
+    path = prompt("ファイル名 (フォルダ/ファイル.v):", defaultName);
+  }
   if (!path) return;
   path = path.trim().replace(/\\/g, "/");
   if (!path.endsWith(".v") && !path.endsWith(".sv")) path += ".v";
-  putFileContent(path, `// ${path}\n`);
+  putFileContent(path, `// ${path}\nmodule ${path.split("/").pop().replace(/\.(v|sv)$/i, "")};\nendmodule\n`);
   openFile(path);
   switchExplorerTab("files");
+  refreshTopModulePicker();
 }
 
 function putFileContent(path, content) {
@@ -1076,7 +1156,8 @@ async function importLocalFiles(fileList) {
   loaded.forEach((path, index) => openFile(path, { focus: index === loaded.length - 1 }));
   switchExplorerTab("files");
   renderEditorTabs();
-  renderFileTree();
+  workspaceTree?.render();
+  refreshTopModulePicker();
   appendConsole(`[open] ${loaded.join(", ")}`, "info");
   setStatus(`${loaded.length} file(s) opened`, "ok");
 }
@@ -1428,8 +1509,7 @@ async function runElaborate() {
       return;
     }
     renderHierarchy(data.hierarchy);
-    updateTopModuleList(data.module_names || data.overview?.module_names, data.top);
-    if (data.top) $("input-top").placeholder = data.top;
+    refreshTopModulePicker(data.top);
     setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
   } catch (e) {
@@ -1465,7 +1545,7 @@ async function runSimulate() {
     }
     if (data.console) appendConsole(data.console);
     appendConsole(`time=${data.stop_time} events=${data.events_processed} top=${data.top_module}`, "ok");
-    updateTopModuleList(data.module_names || data.overview?.module_names, data.top_module);
+    refreshTopModulePicker(data.top_module);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
     lastWaveform = data.waveform;
@@ -1524,9 +1604,10 @@ function initMonaco() {
       },
     });
 
+    initWorkspaceTreeView();
     tileFileWindows();
     renderEditorTabs();
-    renderFileTree();
+    refreshTopModulePicker();
     renderHierarchy(null);
     loadExamples();
     loadProjects();
@@ -1544,7 +1625,7 @@ function bindUi() {
   $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit")?.addEventListener("click", fitWaveform);
   $("btn-open-files").addEventListener("click", () => openFilePicker());
-  $("btn-new-file").addEventListener("click", () => addFile());
+  $("btn-new-file").addEventListener("click", () => addFileInFolder(workspaceTree?.getContextFolder() || ""));
   $("btn-delete-file").addEventListener("click", () => deleteFile());
   $("file-import-input")?.addEventListener("change", (e) => {
     importLocalFiles(e.target.files);
@@ -1584,7 +1665,7 @@ function initMenuBar() {
   window.HDLSimMenuBar?.init({
     getMenuContext,
     actions: {
-      "file.new": () => createProject(),
+      "file.new": () => addFileInFolder(workspaceTree?.getContextFolder() || ""),
       "file.open": () => openProjectFilePicker(),
       "file.save": () => saveProjectFile(),
       "file.save-as": () => saveProjectFileAs(),
@@ -1696,6 +1777,44 @@ function handleMenuShortcut(e) {
   return false;
 }
 
+function compareSemver(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i += 1) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
+
+function showUpdateBanner(info, previousVersion) {
+  const banner = $("update-banner");
+  if (!banner) return;
+  const url = info.release_url || "https://github.com/PeRoHi/HDL-Sim/releases";
+  banner.innerHTML =
+    `<span><strong>更新あり:</strong> HDL-Sim ${info.version} ` +
+    `(前回 ${previousVersion})。` +
+    ` ブラウザの再読み込み、または exe / インストーラーの再取得が必要です。</span>` +
+    `<a href="${url}" target="_blank" rel="noopener">リリースを見る</a>` +
+    `<button type="button" id="btn-dismiss-update">閉じる</button>`;
+  banner.hidden = false;
+  $("btn-dismiss-update")?.addEventListener("click", () => {
+    banner.hidden = true;
+    localStorage.setItem(UI_VERSION_KEY, info.version);
+  });
+}
+
+function checkForUpdates(info) {
+  if (!info?.version) return;
+  const previous = localStorage.getItem(UI_VERSION_KEY);
+  localStorage.setItem(UI_VERSION_KEY, info.version);
+  if (previous && compareSemver(info.version, previous) > 0) {
+    showUpdateBanner(info, previous);
+    appendConsole(`[update] ${previous} → ${info.version}`, "info");
+  }
+}
+
 async function verifyUiBuild() {
   const badge = $("app-version");
   try {
@@ -1716,6 +1835,7 @@ async function verifyUiBuild() {
       spjDirPath = info.spj_dir;
       appendConsole(`[spj] folder: ${spjDirPath}`, "info");
     }
+    checkForUpdates(info);
     await loadSpjFileList();
     setStatus("Ready", "ok");
   } catch {

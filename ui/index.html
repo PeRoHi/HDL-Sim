@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.4.5" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.4.5" />
+  <meta name="hdl-sim-ui-build" content="0.5.0" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.0" />
 </head>
 <body>
   <!-- Silos-style menu bar -->
   <nav id="menubar" class="menubar" aria-label="メインメニュー">
     <div class="menubar-brand" title="HDL-Sim UI バージョン">
-      <span id="app-version" class="brand-ver">Ver 0.4.5</span>
+      <span id="app-version" class="brand-ver">Ver 0.5.0</span>
       <span class="brand-name">HDL-Sim</span>
     </div>
     <button type="button" class="menubar-btn" data-menu="file">File</button>
@@ -23,6 +23,7 @@
     <button type="button" class="menubar-btn" data-menu="help">Help</button>
   </nav>
   <div id="menu-dropdown" class="menu-dropdown" role="menu" hidden></div>
+  <div id="update-banner" class="update-banner" hidden role="status"></div>
 
   <!-- Simulation toolbar -->
   <header class="toolbar" role="banner">
@@ -54,8 +55,9 @@
     <div class="toolbar-center">
       <label class="tb-field tb-field-top">
         <span class="tb-field-label">Top</span>
-        <input type="text" id="input-top" list="top-module-list" placeholder="auto" spellcheck="false" autocomplete="off" />
-        <datalist id="top-module-list"></datalist>
+        <select id="select-top" title="開いている .v ファイル内の module 名">
+          <option value="">(auto)</option>
+        </select>
       </label>
       <label class="tb-field">
         <span class="tb-field-label">Until</span>
@@ -109,7 +111,7 @@
                 <button type="button" id="btn-delete-file" class="mini-btn danger" title="選択ファイルを削除">− Del</button>
                 <input type="file" id="file-import-input" class="visually-hidden" multiple accept=".v,.sv,.vh,.svh,text/plain" tabindex="-1" aria-hidden="true" />
               </div>
-              <div id="file-tree" class="tree-view" tabindex="0"></div>
+              <div id="file-tree" class="tree-view" tabindex="0" aria-label="ワークスペースファイル"></div>
             </div>
             <div id="view-hierarchy" class="pane-view" role="tabpanel" hidden>
               <div id="hierarchy-tree" class="tree-view" tabindex="0"></div>
@@ -144,8 +146,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.4.5"></script>
-  <script src="/assets/js/menu-bar.js?v=0.4.5"></script>
-  <script src="/assets/js/app.js?v=0.4.5" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.5.0"></script>
+  <script src="/assets/js/menu-bar.js?v=0.5.0"></script>
+  <script src="/assets/js/app.js?v=0.5.0" type="module"></script>
 </body>
 </html>

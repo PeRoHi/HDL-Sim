@@ -2,7 +2,7 @@
 ; Build: packaging\build_installer.bat
 
 #define AppName "HDL-Sim"
-#define AppVersion "0.4.5"
+#define AppVersion "0.5.0"
 #define AppPublisher "HDL-Sim"
 #define AppExeName "HDL-Sim.exe"
 
