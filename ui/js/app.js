@@ -83,6 +83,7 @@ let debugSingleStep = false;
 let workspaceTree = null;
 
 const UI_VERSION_KEY = "hdl-sim-ui-version";
+const DISMISS_UPDATE_KEY = "hdl-sim-dismiss-update";
 
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
@@ -747,7 +748,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.0\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.1\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1788,30 +1789,81 @@ function compareSemver(a, b) {
   return 0;
 }
 
-function showUpdateBanner(info, previousVersion) {
+function showUpdateBanner(options) {
   const banner = $("update-banner");
   if (!banner) return;
-  const url = info.release_url || "https://github.com/PeRoHi/HDL-Sim/releases";
+
+  const {
+    latestVersion,
+    currentVersion,
+    releaseUrl,
+    downloadUrl,
+    mode = "remote",
+  } = options;
+
+  const url = downloadUrl || releaseUrl || "https://github.com/PeRoHi/HDL-Sim/releases/latest";
+  const linkLabel = downloadUrl ? "インストーラーをダウンロード" : "リリースを見る";
+
+  let message;
+  if (mode === "local") {
+    message =
+      `<strong>更新あり:</strong> HDL-Sim ${latestVersion} ` +
+      `(前回 ${currentVersion})。ページを再読み込みしてください。`;
+  } else {
+    message =
+      `<strong>新しいバージョンがあります:</strong> ${latestVersion} ` +
+      `(現在 ${currentVersion})。` +
+      ` インストール済みの exe も、新しい Setup を取得して更新できます。`;
+  }
+
   banner.innerHTML =
-    `<span><strong>更新あり:</strong> HDL-Sim ${info.version} ` +
-    `(前回 ${previousVersion})。` +
-    ` ブラウザの再読み込み、または exe / インストーラーの再取得が必要です。</span>` +
-    `<a href="${url}" target="_blank" rel="noopener">リリースを見る</a>` +
-    `<button type="button" id="btn-dismiss-update">閉じる</button>`;
+    `<span>${message}</span>` +
+    `<a href="${url}" target="_blank" rel="noopener">${linkLabel}</a>` +
+    `<button type="button" id="btn-dismiss-update">後で</button>`;
   banner.hidden = false;
+
   $("btn-dismiss-update")?.addEventListener("click", () => {
     banner.hidden = true;
-    localStorage.setItem(UI_VERSION_KEY, info.version);
+    localStorage.setItem(DISMISS_UPDATE_KEY, latestVersion);
+    if (mode === "local") {
+      localStorage.setItem(UI_VERSION_KEY, latestVersion);
+    }
   });
 }
 
-function checkForUpdates(info) {
+function checkForLocalUpdates(info) {
   if (!info?.version) return;
   const previous = localStorage.getItem(UI_VERSION_KEY);
   localStorage.setItem(UI_VERSION_KEY, info.version);
-  if (previous && compareSemver(info.version, previous) > 0) {
-    showUpdateBanner(info, previous);
-    appendConsole(`[update] ${previous} → ${info.version}`, "info");
+  if (!previous || compareSemver(info.version, previous) <= 0) return;
+  if (localStorage.getItem(DISMISS_UPDATE_KEY) === info.version) return;
+  showUpdateBanner({
+    latestVersion: info.version,
+    currentVersion: previous,
+    releaseUrl: info.release_url,
+    mode: "local",
+  });
+  appendConsole(`[update] ${previous} → ${info.version}`, "info");
+}
+
+async function checkForRemoteUpdates(currentVersion) {
+  try {
+    const data = await api("/api/update-check");
+    if (!data.ok || !data.update_available) return;
+    if (localStorage.getItem(DISMISS_UPDATE_KEY) === data.latest_version) return;
+    showUpdateBanner({
+      latestVersion: data.latest_version,
+      currentVersion: data.current_version || currentVersion,
+      releaseUrl: data.release_url,
+      downloadUrl: data.download_url,
+      mode: "remote",
+    });
+    appendConsole(
+      `[update] 新しいリリース ${data.latest_version} があります (現在 ${data.current_version})`,
+      "info"
+    );
+  } catch {
+    /* offline or GitHub unreachable */
   }
 }
 
@@ -1835,7 +1887,8 @@ async function verifyUiBuild() {
       spjDirPath = info.spj_dir;
       appendConsole(`[spj] folder: ${spjDirPath}`, "info");
     }
-    checkForUpdates(info);
+    checkForLocalUpdates(info);
+    await checkForRemoteUpdates(info.version);
     await loadSpjFileList();
     setStatus("Ready", "ok");
   } catch {

@@ -27,8 +27,9 @@ from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 from hdl_sim.web.paths import examples_dir, ui_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
+from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.0"
+UI_BUILD = "0.5.1"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -303,10 +304,25 @@ def create_app() -> FastAPI:
             "ui_dir": str(UI_DIR.resolve()),
             "spj_dir": str(spj_store.spj_dir().resolve()),
             "data_dir": str(spj_store.spj_dir().resolve().parent),
-            "release_url": "https://github.com/PeRoHi/HDL-Sim/releases",
+            "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
             "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
         }
+
+    @app.get("/api/update-check")
+    def api_update_check(refresh: bool = False) -> dict[str, Any]:
+        try:
+            return check_for_updates(__version__, force_refresh=refresh)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "current_version": __version__,
+                "latest_version": __version__,
+                "update_available": False,
+                "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
+                "download_url": None,
+                "error": str(exc),
+            }
 
     @app.get("/api/examples")
     def list_examples() -> list[dict[str, Any]]:

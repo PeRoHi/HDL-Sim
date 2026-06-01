@@ -34,7 +34,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo 完成: dist\HDL-Sim-Setup-0.5.0.exe
+echo 完成: dist\HDL-Sim-Setup-0.5.1.exe
 echo インストール時にショートカット作成や保存フォルダを選択できます.
 echo アンインストールは Windows の「アプリと機能」から実行できます.
 pause
