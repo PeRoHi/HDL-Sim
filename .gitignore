@@ -7,3 +7,5 @@ dist/
 *.vcd
 projects/*
 !projects/.gitkeep
+spj/*
+!spj/.gitkeep

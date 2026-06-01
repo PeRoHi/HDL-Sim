@@ -64,6 +64,15 @@ const SPLIT_SIZES = {
 };
 
 let currentProject = "";
+let spjDirPath = "";
+
+const SPJ_IDB_NAME = "hdl-sim-ui";
+const SPJ_IDB_STORE = "fs-handles";
+const SPJ_DIR_KEY = "spj-dir";
+const SPJ_PICKER_TYPES = [{
+  description: "HDL-Sim Project (*.spj)",
+  accept: { "application/json": [".spj"] },
+}];
 
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
@@ -461,38 +470,125 @@ function buildSpjPayload() {
   };
 }
 
+function openSpjIdb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SPJ_IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(SPJ_IDB_STORE)) {
+        req.result.createObjectStore(SPJ_IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadSpjDirectoryHandle() {
+  try {
+    const db = await openSpjIdb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(SPJ_IDB_STORE, "readonly");
+      const req = tx.objectStore(SPJ_IDB_STORE).get(SPJ_DIR_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function storeSpjDirectoryHandle(handle) {
+  const db = await openSpjIdb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(SPJ_IDB_STORE, "readwrite");
+    tx.objectStore(SPJ_IDB_STORE).put(handle, SPJ_DIR_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function queryDirPermission(handle, mode = "readwrite") {
+  if (!handle?.queryPermission) return "denied";
+  const state = await handle.queryPermission({ mode });
+  if (state === "granted") return "granted";
+  if (handle.requestPermission) {
+    return handle.requestPermission({ mode });
+  }
+  return state;
+}
+
+async function ensureSpjDirectoryHandle() {
+  const info = await api("/api/spj/info");
+  spjDirPath = info.path || spjDirPath;
+
+  if (!window.showDirectoryPicker) return null;
+
+  let handle = await loadSpjDirectoryHandle();
+  if (handle) {
+    const perm = await queryDirPermission(handle);
+    if (perm === "granted") return handle;
+  }
+
+  const message =
+    "SPJプロジェクト用フォルダを選択してください。\n\n" +
+    `推奨フォルダ:\n${spjDirPath}\n\n` +
+    "次回以降、Open/Save .spj のダイアログはこのフォルダから始まります。";
+  if (!window.confirm(message)) return null;
+
+  handle = await window.showDirectoryPicker({
+    id: "hdl-sim-spj-dir",
+    mode: "readwrite",
+  });
+  await storeSpjDirectoryHandle(handle);
+  return handle;
+}
+
+function applySpjData(data, filename) {
+  if (data.format !== "hdl-sim-project" || !Array.isArray(data.files)) {
+    throw new Error("HDL-Sim project fileではありません");
+  }
+  currentProject = data.name || String(filename || "").replace(/\.spj$/i, "");
+  $("select-project").value = "";
+  $("select-example").value = "";
+  if (data.until != null) $("input-until").value = data.until;
+  if (data.max_events != null) $("input-max-events").value = data.max_events;
+  loadWorkspaceFiles(data.files, data.top || "");
+}
+
 async function saveProjectFile() {
   try {
     const data = buildSpjPayload();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const suggestedName = currentProjectFileName();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+
+    const saved = await api(
+      `/api/spj/${encodeURIComponent(suggestedName)}`,
+      data,
+      undefined,
+      "PUT"
+    );
+    appendConsole(`[spj] saved to ${saved.path}`, "info");
 
     if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({
-        suggestedName,
-        types: [
-          {
-            description: "HDL-Sim / Silos-like Project (*.spj)",
-            accept: { "application/json": [".spj"] },
-          },
-        ],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      appendConsole(`[project] saved file: ${handle.name}`, "ok");
-      setStatus(`Saved: ${handle.name}`, "ok");
-      return;
+      const dirHandle = await ensureSpjDirectoryHandle();
+      if (dirHandle) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName,
+          startIn: dirHandle,
+          types: SPJ_PICKER_TYPES,
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        appendConsole(`[spj] exported: ${handle.name}`, "ok");
+        setStatus(`Saved: ${handle.name}`, "ok");
+        return;
+      }
     }
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = suggestedName;
-    a.click();
-    URL.revokeObjectURL(url);
-    appendConsole(`[project] downloaded: ${suggestedName}`, "ok");
-    setStatus(`Downloaded: ${suggestedName}`, "ok");
+    appendConsole(`[spj] saved: ${saved.filename}`, "ok");
+    setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
     if (e.name === "AbortError") return;
     appendConsole(String(e), "err");
@@ -500,8 +596,46 @@ async function saveProjectFile() {
   }
 }
 
-function openProjectFilePicker() {
-  $("project-import-input")?.click();
+async function openProjectFilePicker() {
+  try {
+    if (window.showOpenFilePicker) {
+      const dirHandle = await ensureSpjDirectoryHandle();
+      if (dirHandle) {
+        const [handle] = await window.showOpenFilePicker({
+          startIn: dirHandle,
+          types: SPJ_PICKER_TYPES,
+          multiple: false,
+        });
+        await importProjectFile(await handle.getFile());
+        return;
+      }
+    }
+
+    const info = await api("/api/spj/info");
+    spjDirPath = info.path || spjDirPath;
+    if (info.files?.length) {
+      const names = info.files.map((f) => f.name);
+      const selected = window.prompt(
+        `開く .spj を選択してください (${spjDirPath}):\n${names.join("\n")}`,
+        names[0]
+      );
+      if (selected) {
+        const data = await api(`/api/spj/${encodeURIComponent(selected.trim())}`);
+        applySpjData(data, selected);
+        appendConsole(`[spj] opened: ${selected} (${data.files.length} files)`, "ok");
+        setStatus(`Opened: ${selected}`, "ok");
+        runElaborate();
+        return;
+      }
+    }
+
+    appendConsole(`[spj] open from ${spjDirPath}`, "info");
+    $("project-import-input")?.click();
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    appendConsole(String(e), "err");
+    setStatus("SPJ open failed", "err");
+  }
 }
 
 async function importProjectFile(file) {
@@ -509,16 +643,8 @@ async function importProjectFile(file) {
   try {
     const raw = await readFileAsText(file);
     const data = JSON.parse(raw);
-    if (data.format !== "hdl-sim-project" || !Array.isArray(data.files)) {
-      throw new Error("HDL-Sim project fileではありません");
-    }
-    currentProject = data.name || file.name.replace(/\.spj$/i, "");
-    $("select-project").value = "";
-    $("select-example").value = "";
-    if (data.until != null) $("input-until").value = data.until;
-    if (data.max_events != null) $("input-max-events").value = data.max_events;
-    loadWorkspaceFiles(data.files, data.top || "");
-    appendConsole(`[project] opened file: ${file.name} (${data.files.length} files)`, "ok");
+    applySpjData(data, file.name);
+    appendConsole(`[spj] opened: ${file.name} (${data.files.length} files)`, "ok");
     setStatus(`Opened: ${file.name}`, "ok");
     runElaborate();
   } catch (e) {
@@ -1320,6 +1446,10 @@ async function verifyUiBuild() {
         "warn"
       );
       return;
+    }
+    if (info.spj_dir) {
+      spjDirPath = info.spj_dir;
+      appendConsole(`[spj] folder: ${spjDirPath}`, "info");
     }
     setStatus("Ready", "ok");
   } catch {

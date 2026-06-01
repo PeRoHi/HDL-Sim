@@ -109,3 +109,28 @@ def test_ui_info_reports_ide_layout() -> None:
     assert data["ide_layout"] is True
     assert data["version"] == "0.4.0"
     assert data["version_label"] == "Ver 0.4.0"
+    assert "spj_dir" in data
+
+
+def test_spj_api_roundtrip() -> None:
+    app = create_app()
+    save_handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/spj/{filename}"
+        and "PUT" in getattr(r, "methods", set())
+    ).endpoint
+    load_handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/spj/{filename}"
+        and "GET" in getattr(r, "methods", set())
+    ).endpoint
+    payload = {
+        "format": "hdl-sim-project",
+        "version": 1,
+        "name": "api_demo",
+        "top": "tb",
+        "files": [{"path": "tb.v", "content": "module tb; endmodule"}],
+    }
+    saved = save_handler("api_demo.spj", payload)
+    assert saved["ok"] is True
+    loaded = load_handler("api_demo.spj")
+    assert loaded["top"] == "tb"
+    assert loaded["files"][0]["path"] == "tb.v"

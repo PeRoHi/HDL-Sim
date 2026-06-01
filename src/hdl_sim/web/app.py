@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import tempfile
 import traceback
 from pathlib import Path
@@ -25,6 +26,7 @@ from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir
 from hdl_sim.web import projects as project_store
+from hdl_sim.web import spj_store
 
 UI_BUILD = "0.4.0"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
@@ -299,6 +301,7 @@ def create_app() -> FastAPI:
             "version_label": f"Ver {__version__}",
             "build": UI_BUILD,
             "ui_dir": str(UI_DIR.resolve()),
+            "spj_dir": str(spj_store.spj_dir().resolve()),
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
             "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
         }
@@ -390,6 +393,38 @@ def create_app() -> FastAPI:
                 top=req.top,
                 label=req.label,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/spj/info")
+    def api_spj_info() -> dict[str, Any]:
+        try:
+            return {
+                "path": str(spj_store.spj_dir().resolve()),
+                "files": spj_store.list_spj_files(),
+            }
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/spj/{filename}")
+    def api_load_spj(filename: str) -> dict[str, Any]:
+        try:
+            loaded = spj_store.load_spj_file(filename)
+            return {"filename": loaded["filename"], **loaded["data"]}
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="spj file not found") from exc
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/spj/{filename}")
+    def api_save_spj(filename: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("format") != "hdl-sim-project":
+            raise HTTPException(status_code=400, detail="invalid spj format")
+        if not payload.get("files"):
+            raise HTTPException(status_code=400, detail="files required")
+        try:
+            saved = spj_store.save_spj_file(filename, payload)
+            return {"ok": True, **saved}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
