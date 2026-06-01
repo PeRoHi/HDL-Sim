@@ -68,6 +68,12 @@ let spjDirPath = "";
 const RECENT_SPJ_KEY = "hdl-sim-recent-spj";
 const RECENT_SPJ_MAX = 8;
 
+const viewState = {
+  mainToolbar: true,
+  analyzerToolbar: true,
+  fsmToolbar: true,
+};
+
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
 }
@@ -567,6 +573,115 @@ function rememberRecentSpj(filename) {
 function menuFileExit() {
   window.close();
   appendConsole("ブラウザタブを閉じて終了してください", "info");
+}
+
+function currentSpjFilename() {
+  const selected = $("select-spj")?.value;
+  if (selected) return selected;
+  return currentProjectFileName();
+}
+
+function getActiveMonacoEditor() {
+  if (editor) return editor;
+  return fileEditors.get(activeFile)?.editor || null;
+}
+
+function triggerEditor(action) {
+  const ed = getActiveMonacoEditor();
+  if (!ed) {
+    appendConsole("[edit] エディタにフォーカスがありません", "warn");
+    return false;
+  }
+  ed.focus();
+  ed.trigger("keyboard", action, null);
+  return true;
+}
+
+function getEditMenuContext() {
+  const ed = getActiveMonacoEditor();
+  const noSelection = !ed || ed.getSelection()?.isEmpty();
+  return {
+    "edit.cut": noSelection,
+    "edit.copy": noSelection,
+    "edit.clear": noSelection,
+    "edit.find-next": true,
+  };
+}
+
+function applyViewState() {
+  document.body.classList.toggle("view-hide-main-toolbar", !viewState.mainToolbar);
+  document.body.classList.toggle("view-hide-analyzer-toolbar", !viewState.analyzerToolbar);
+  document.body.classList.toggle("view-hide-fsm-toolbar", !viewState.fsmToolbar);
+  layoutAllEditors();
+  if (lastWaveform && waveformVisible) drawWave(lastWaveform);
+}
+
+function toggleViewMenu(id) {
+  if (id === "view.main-toolbar") viewState.mainToolbar = !viewState.mainToolbar;
+  if (id === "view.analyzer-toolbar") viewState.analyzerToolbar = !viewState.analyzerToolbar;
+  if (id === "view.fsm-toolbar") viewState.fsmToolbar = !viewState.fsmToolbar;
+  applyViewState();
+  window.HDLSimMenuBar?.refresh();
+}
+
+function menuProjectClose() {
+  currentProject = "";
+  $("select-project").value = "";
+  $("select-spj").value = "";
+  appendConsole("[project] closed", "info");
+  setStatus("Project closed", "ok");
+}
+
+async function menuProjectFiles() {
+  const name = currentSpjFilename();
+  try {
+    const info = await api("/api/spj/info");
+    if (info.files?.some((f) => f.name === name)) {
+      await openSelectedSpjFile(name);
+      return;
+    }
+    appendConsole(`[project] ${name} が ${spjDirPath} にありません`, "warn");
+  } catch (e) {
+    appendConsole(String(e), "err");
+  }
+}
+
+function menuProjectRestoreState() {
+  appendConsole("[project] Restore Project State は未実装です", "warn");
+}
+
+function menuProjectSettings() {
+  const top = prompt("Top module:", $("input-top").value.trim());
+  if (top != null) $("input-top").value = top;
+}
+
+function menuProjectFilters() {
+  appendConsole("[project] Filters は未実装です", "warn");
+}
+
+function menuProjectListSize() {
+  const n = prompt("Recent list size (1-20):", String(RECENT_SPJ_MAX));
+  if (n != null && !Number.isNaN(Number(n))) {
+    appendConsole(`[project] list size = ${n} (次回保存時に反映予定)`, "info");
+  }
+}
+
+function getMenuContext() {
+  return {
+    checked: {
+      "view.main-toolbar": viewState.mainToolbar,
+      "view.analyzer-toolbar": viewState.analyzerToolbar,
+      "view.fsm-toolbar": viewState.fsmToolbar,
+    },
+    disabled: getEditMenuContext(),
+    hints: {
+      currentSpj: currentSpjFilename(),
+    },
+    recent: {
+      fileRecent: getRecentSpjFiles(),
+      projectRecent: getRecentSpjFiles(),
+    },
+  };
 }
 
 async function openSelectedSpjFile(name) {
@@ -1390,7 +1505,7 @@ function bindUi() {
 
 function initMenuBar() {
   window.HDLSimMenuBar?.init({
-    getRecentFiles: getRecentSpjFiles,
+    getMenuContext,
     actions: {
       "file.new": () => createProject(),
       "file.open": () => openProjectFilePicker(),
@@ -1398,28 +1513,67 @@ function initMenuBar() {
       "file.save-as": () => saveProjectFileAs(),
       "file.recent": (filename) => openSelectedSpjFile(filename),
       "file.exit": () => menuFileExit(),
+      "edit.undo": () => triggerEditor("undo"),
+      "edit.cut": () => triggerEditor("editor.action.clipboardCutAction"),
+      "edit.copy": () => triggerEditor("editor.action.clipboardCopyAction"),
+      "edit.paste": () => triggerEditor("editor.action.clipboardPasteAction"),
+      "edit.clear": () => {
+        const ed = getActiveMonacoEditor();
+        if (!ed || ed.getSelection()?.isEmpty()) return;
+        ed.executeEdits("clear", [{ range: ed.getSelection(), text: "", forceMoveMarkers: true }]);
+      },
+      "edit.select-all": () => triggerEditor("editor.action.selectAll"),
+      "edit.find": () => triggerEditor("actions.find"),
+      "edit.find-next": () => triggerEditor("editor.action.nextMatchFindAction"),
+      "edit.replace": () => triggerEditor("editor.action.startFindReplaceAction"),
+      "edit.goto-line": () => triggerEditor("editor.action.gotoLine"),
+      "view.main-toolbar": () => toggleViewMenu("view.main-toolbar"),
+      "view.analyzer-toolbar": () => toggleViewMenu("view.analyzer-toolbar"),
+      "view.fsm-toolbar": () => toggleViewMenu("view.fsm-toolbar"),
+      "project.new": () => createProject(),
+      "project.open": () => openProjectFilePicker(),
+      "project.files": () => menuProjectFiles(),
+      "project.save-as": () => saveProjectFileAs(),
+      "project.close": () => menuProjectClose(),
+      "project.restore-state": () => menuProjectRestoreState(),
+      "project.reload-files": () => runElaborate(),
+      "project.settings": () => menuProjectSettings(),
+      "project.filters": () => menuProjectFilters(),
+      "project.list-size": () => menuProjectListSize(),
+      "project.recent": (filename) => openSelectedSpjFile(filename),
     },
   });
+  applyViewState();
 }
 
 function handleMenuShortcut(e) {
+  if (e.altKey && e.key === "F5") {
+    e.preventDefault();
+    runElaborate().then(() => runSimulate());
+    return true;
+  }
   if (!(e.ctrlKey || e.metaKey)) return false;
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
+
   const key = e.key.toLowerCase();
-  if (key === "n") {
+  const map = {
+    n: () => createProject(),
+    o: () => openProjectFilePicker(),
+    s: () => saveProjectFile(),
+    z: () => triggerEditor("undo"),
+    x: () => triggerEditor("editor.action.clipboardCutAction"),
+    c: () => triggerEditor("editor.action.clipboardCopyAction"),
+    v: () => triggerEditor("editor.action.clipboardPasteAction"),
+    a: () => triggerEditor("editor.action.selectAll"),
+    f: () => triggerEditor("actions.find"),
+    h: () => triggerEditor("editor.action.startFindReplaceAction"),
+    g: () => triggerEditor("editor.action.gotoLine"),
+    l: () => runElaborate(),
+  };
+  if (map[key]) {
     e.preventDefault();
-    createProject();
-    return true;
-  }
-  if (key === "o") {
-    e.preventDefault();
-    openProjectFilePicker();
-    return true;
-  }
-  if (key === "s") {
-    e.preventDefault();
-    saveProjectFile();
+    map[key]();
     return true;
   }
   return false;

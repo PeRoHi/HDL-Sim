@@ -15,14 +15,58 @@
         { id: "file.print-preview", label: "Print Preview", disabled: true },
         { id: "file.print-setup", label: "Print Setup...", disabled: true },
         { type: "sep" },
-        { type: "recent" },
+        { type: "recent", recentKey: "fileRecent" },
         { type: "sep" },
         { id: "file.exit", label: "Exit" },
       ],
     },
-    edit: { label: "Edit", items: [] },
-    view: { label: "View", items: [] },
-    project: { label: "Project", items: [] },
+    edit: {
+      label: "Edit",
+      items: [
+        { id: "edit.undo", label: "Undo", shortcut: "Ctrl+Z" },
+        { type: "sep" },
+        { id: "edit.cut", label: "Cut", shortcut: "Ctrl+X", disabledKey: "edit.cut" },
+        { id: "edit.copy", label: "Copy", shortcut: "Ctrl+C", disabledKey: "edit.copy" },
+        { id: "edit.paste", label: "Paste", shortcut: "Ctrl+V" },
+        { id: "edit.clear", label: "Clear", shortcut: "Del", disabledKey: "edit.clear" },
+        { id: "edit.select-all", label: "Select All", shortcut: "Ctrl+A" },
+        { type: "sep" },
+        { id: "edit.find", label: "Find...", shortcut: "Ctrl+F" },
+        { id: "edit.find-next", label: "Find Next", shortcut: "F3", disabledKey: "edit.find-next" },
+        { id: "edit.replace", label: "Replace...", shortcut: "Ctrl+H" },
+        { id: "edit.goto-line", label: "Goto Line...", shortcut: "Ctrl+G" },
+      ],
+    },
+    view: {
+      label: "View",
+      items: [
+        { id: "view.main-toolbar", label: "Main Toolbar", checkKey: "view.main-toolbar" },
+        { id: "view.analyzer-toolbar", label: "Analyzer Toolbar", checkKey: "view.analyzer-toolbar" },
+        { id: "view.fsm-toolbar", label: "FSM Toolbar", checkKey: "view.fsm-toolbar" },
+      ],
+    },
+    project: {
+      label: "Project",
+      items: [
+        { id: "project.new", label: "New..." },
+        { id: "project.open", label: "Open..." },
+        { id: "project.files", label: "Files...", hintKey: "currentSpj" },
+        { id: "project.save-as", label: "Save As..." },
+        { id: "project.close", label: "Close" },
+        { type: "sep" },
+        { id: "project.save-state", label: "Save Project State", disabled: true },
+        { id: "project.restore-state", label: "Restore Project State" },
+        { type: "sep" },
+        { id: "project.reload-files", label: "Load/Reload Input Files", shortcut: "Ctrl+L" },
+        { id: "project.reload-go", label: "Reload and Go", shortcut: "Alt+F5", disabled: true },
+        { type: "sep" },
+        { id: "project.settings", label: "Project Settings..." },
+        { id: "project.filters", label: "Filters..." },
+        { id: "project.list-size", label: "Project List Size..." },
+        { type: "sep" },
+        { type: "recent", recentKey: "projectRecent" },
+      ],
+    },
     "code-coverage": { label: "Code Coverage", items: [] },
     debug: { label: "Debug", items: [] },
     "state-machine": { label: "State Machine", items: [] },
@@ -34,7 +78,7 @@
   };
 
   let actions = {};
-  let getRecentFiles = () => [];
+  let getMenuContext = () => ({});
   let openMenuId = null;
   let barEl = null;
   let dropdownEl = null;
@@ -51,10 +95,60 @@
     });
   }
 
+  function isItemDisabled(item, ctx) {
+    if (item.disabled) return true;
+    if (item.disabledKey && ctx.disabled?.[item.disabledKey]) return true;
+    return false;
+  }
+
+  function renderMenuRow(item, ctx) {
+    if (item.type === "sep") {
+      const sep = document.createElement("div");
+      sep.className = "menu-sep";
+      sep.setAttribute("role", "separator");
+      return sep;
+    }
+
+    if (item.type === "recent") {
+      const key = item.recentKey || "fileRecent";
+      const recent = ctx.recent?.[key] || [];
+      const frag = document.createDocumentFragment();
+      if (!recent.length) return frag;
+      recent.forEach((name, index) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "menu-item";
+        row.dataset.action = key === "projectRecent" ? "project.recent" : "file.recent";
+        row.dataset.filename = name;
+        row.innerHTML = `<span class="menu-check"></span><span class="menu-label">${index + 1} ${name}</span>`;
+        frag.appendChild(row);
+      });
+      return frag;
+    }
+
+    const disabled = isItemDisabled(item, ctx);
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "menu-item" + (disabled ? " disabled" : "");
+    row.dataset.action = item.id;
+    row.disabled = disabled;
+
+    const checked = item.checkKey && ctx.checked?.[item.checkKey];
+    const hint = item.hintKey ? ctx.hints?.[item.hintKey] : "";
+
+    row.innerHTML =
+      `<span class="menu-check">${checked ? "✓" : ""}</span>` +
+      `<span class="menu-label">${item.label}</span>` +
+      (hint ? `<span class="menu-hint">${hint}</span>` : "") +
+      (item.shortcut ? `<span class="menu-shortcut">${item.shortcut}</span>` : "");
+    return row;
+  }
+
   function renderDropdown(menuId, anchor) {
     const def = MENU_DEFS[menuId];
     if (!def || !dropdownEl) return;
 
+    const ctx = getMenuContext();
     dropdownEl.innerHTML = "";
     const items = def.items || [];
 
@@ -65,43 +159,7 @@
       dropdownEl.appendChild(empty);
     } else {
       items.forEach((item) => {
-        if (item.type === "sep") {
-          const sep = document.createElement("div");
-          sep.className = "menu-sep";
-          sep.setAttribute("role", "separator");
-          dropdownEl.appendChild(sep);
-          return;
-        }
-        if (item.type === "recent") {
-          const recent = getRecentFiles();
-          if (!recent.length) {
-            const row = document.createElement("div");
-            row.className = "menu-item disabled";
-            row.textContent = "(最近のファイルなし)";
-            dropdownEl.appendChild(row);
-            return;
-          }
-          recent.forEach((name, index) => {
-            const row = document.createElement("button");
-            row.type = "button";
-            row.className = "menu-item";
-            row.dataset.action = "file.recent";
-            row.dataset.filename = name;
-            row.innerHTML = `<span class="menu-label">${index + 1} ${name}</span>`;
-            dropdownEl.appendChild(row);
-          });
-          return;
-        }
-
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "menu-item" + (item.disabled ? " disabled" : "");
-        row.dataset.action = item.id;
-        row.disabled = !!item.disabled;
-        row.innerHTML =
-          `<span class="menu-label">${item.label}</span>` +
-          (item.shortcut ? `<span class="menu-shortcut">${item.shortcut}</span>` : "");
-        dropdownEl.appendChild(row);
+        dropdownEl.appendChild(renderMenuRow(item, ctx));
       });
     }
 
@@ -118,9 +176,10 @@
   }
 
   function runAction(actionId, el) {
-    if (!actionId || actionId === "file.recent") {
+    if (actionId === "file.recent" || actionId === "project.recent") {
       const filename = el?.dataset?.filename;
-      if (filename && actions["file.recent"]) actions["file.recent"](filename);
+      const key = actionId === "project.recent" ? "project.recent" : "file.recent";
+      if (filename && actions[key]) actions[key](filename);
       closeMenu();
       return;
     }
@@ -168,7 +227,7 @@
 
   function init(config = {}) {
     actions = config.actions || {};
-    getRecentFiles = config.getRecentFiles || (() => []);
+    getMenuContext = config.getMenuContext || (() => ({}));
     bindMenuBar();
   }
 
