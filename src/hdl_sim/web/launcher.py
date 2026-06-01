@@ -11,6 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+# Source checkout: allow `python -m hdl_sim.web.launcher` without pip install.
+if not getattr(sys, "frozen", False):
+    try:
+        import hdl_sim  # noqa: F401
+    except ModuleNotFoundError:
+        _src = Path(__file__).resolve().parents[2]
+        if (_src / "hdl_sim").is_dir():
+            sys.path.insert(0, str(_src))
+
 from hdl_sim.web.port_util import (
     DEFAULT_UI_PORT,
     ensure_default_port,
@@ -19,6 +28,7 @@ from hdl_sim.web.port_util import (
     wait_for_server,
 )
 from hdl_sim.web.paths import project_root
+from hdl_sim.web.runtime import ensure_stdio, prepare_runtime
 
 DEFAULT_PORT = DEFAULT_UI_PORT
 REQUIRED_PACKAGES = ("fastapi", "uvicorn", "lark")
@@ -170,6 +180,7 @@ def start_server(
     blocking: bool = True,
     on_log: Callable[[str], None] | None = None,
 ) -> RunningServer | int:
+    prepare_runtime()
     ensure_src_on_path()
     try:
         port = prepare_ui_port(host, port, on_log=on_log)
@@ -186,8 +197,15 @@ def start_server(
 
     import uvicorn
 
+    if is_frozen():
+        from hdl_sim.web.app import create_app
+
+        app_target = create_app
+    else:
+        app_target = "hdl_sim.web.app:create_app"
+
     config = uvicorn.Config(
-        "hdl_sim.web.app:create_app",
+        app_target,
         factory=True,
         host=host,
         port=port,
@@ -271,6 +289,7 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    prepare_runtime()
     args = build_parser().parse_args(argv)
     return run(
         host=args.host,

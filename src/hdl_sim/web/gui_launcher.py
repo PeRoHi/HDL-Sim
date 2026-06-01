@@ -18,6 +18,7 @@ from hdl_sim.web.launcher import (
 )
 from hdl_sim.web.native_window import pywebview_available, pywebview_help
 from hdl_sim.web.paths import ui_dir
+from hdl_sim.web.runtime import ensure_stdio, prepare_runtime
 
 tk = messagebox = scrolledtext = ttk = None  # lazy-loaded for dev GUI only
 
@@ -213,6 +214,7 @@ def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = 
 
 
 def main() -> int:
+    prepare_runtime()
     if is_frozen():
         return run_frozen_desktop()
     run_gui()
@@ -222,6 +224,7 @@ def main() -> int:
 def run_frozen_desktop(*, host: str = "127.0.0.1", port: int = 8765) -> int:
     """PyInstaller .exe: start server and open the native IDE window directly."""
 
+    ensure_stdio()
     result = start_server(
         host,
         port,

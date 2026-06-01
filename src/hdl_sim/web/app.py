@@ -28,7 +28,7 @@ from hdl_sim.web.paths import examples_dir, ui_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 
-UI_BUILD = "0.4.2"
+UI_BUILD = "0.4.3"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
