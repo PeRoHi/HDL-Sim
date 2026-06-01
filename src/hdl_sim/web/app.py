@@ -28,7 +28,7 @@ from hdl_sim.web.paths import examples_dir, ui_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 
-UI_BUILD = "0.4.3"
+UI_BUILD = "0.4.4"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -302,6 +302,7 @@ def create_app() -> FastAPI:
             "build": UI_BUILD,
             "ui_dir": str(UI_DIR.resolve()),
             "spj_dir": str(spj_store.spj_dir().resolve()),
+            "data_dir": str(spj_store.spj_dir().resolve().parent),
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
             "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
         }

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 from importlib import resources
+from pathlib import Path
+import sys
 from typing import Any
 
 from lark import Lark, Token, Transformer, Tree, v_args
@@ -967,8 +969,29 @@ class VerilogTransformer(Transformer):
 
 
 @lru_cache(maxsize=1)
+def _grammar_text() -> str:
+    try:
+        return resources.files("hdl_sim.parser").joinpath("verilog.lark").read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError, TypeError):
+        pass
+
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        candidates.append(meipass / "hdl_sim" / "parser" / "verilog.lark")
+    candidates.append(Path(__file__).resolve().parent / "verilog.lark")
+
+    for path in candidates:
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+
+    msg = "verilog.lark grammar file not found (dev tree or PyInstaller bundle)"
+    raise FileNotFoundError(msg)
+
+
+@lru_cache(maxsize=1)
 def _build_parser() -> Lark:
-    grammar = resources.files("hdl_sim.parser").joinpath("verilog.lark").read_text(encoding="utf-8")
+    grammar = _grammar_text()
     return Lark(
         grammar,
         parser="lalr",

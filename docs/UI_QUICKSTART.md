@@ -18,6 +18,16 @@ Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dis
 この exe を配るだけで、受け取った人は Python もターミナルも不要です。
 **exe は Chrome ではなく専用ウィンドウで IDE が開きます**（Windows 11 では WebView2 が標準搭載）。
 
+### インストーラー版（保存フォルダを選べる）
+
+1. [Inno Setup 6](https://jrsoftware.org/isdl.php) をインストール
+2. `packaging\build_windows.bat` で exe をビルド
+3. `packaging\build_installer.bat` を実行
+4. 完成: `dist\HDL-Sim-Setup-0.4.4.exe`
+
+インストール時に **保存フォルダ**（`.spj` / `projects/`）を選択できます。
+既定は `ドキュメント\HDL-Sim` です。後から変更する場合は、インストール先の `data_dir.txt` を編集してください。
+
 ## macOS / Linux
 
 `start-ui.command` または `./start-ui.sh` をダブルクリック

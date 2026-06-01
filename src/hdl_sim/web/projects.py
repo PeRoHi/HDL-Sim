@@ -7,14 +7,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.paths import project_root
+from hdl_sim.web.paths import user_data_dir
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 META_FILE = ".hdl_sim_project.json"
 
 
 def projects_dir() -> Path:
-    root = project_root() / "projects"
+    root = user_data_dir() / "projects"
     root.mkdir(parents=True, exist_ok=True)
     return root
 

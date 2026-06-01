@@ -2,14 +2,20 @@
 # Build on Windows:
 #   py -3.12 -m pip install pyinstaller pywebview fastapi uvicorn lark
 #   py -3.12 -m PyInstaller packaging/hdl_sim_ui.spec
+#
+# Installer (after exe build):
+#   packaging\build_installer.bat
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 root = Path(SPECPATH).resolve().parent
 
 webview_hidden = collect_submodules("webview")
+parser_data = [
+    (str(root / "src" / "hdl_sim" / "parser" / "verilog.lark"), "hdl_sim/parser"),
+]
 
 a = Analysis(
     [str(root / 'start_ui_gui.pyw')],
@@ -18,6 +24,8 @@ a = Analysis(
     datas=[
         (str(root / 'ui'), 'ui'),
         (str(root / 'examples'), 'examples'),
+        *parser_data,
+        *collect_data_files('lark'),
     ],
     hiddenimports=[
         'uvicorn.logging',
@@ -33,6 +41,7 @@ a = Analysis(
         'fastapi',
         'lark',
         'webview',
+        'hdl_sim.parser',
         'hdl_sim.web.app',
         'hdl_sim.web.gui_launcher',
         'hdl_sim.web.launcher',
