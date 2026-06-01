@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import sys
-import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
 
 from hdl_sim import __version__
 from hdl_sim.web.launcher import (
@@ -21,9 +19,24 @@ from hdl_sim.web.launcher import (
 from hdl_sim.web.native_window import pywebview_available, pywebview_help
 from hdl_sim.web.paths import ui_dir
 
+tk = messagebox = scrolledtext = ttk = None  # lazy-loaded for dev GUI only
+
+
+def _load_tk():
+    global tk, messagebox, scrolledtext, ttk
+    if tk is None:
+        import tkinter as _tk
+        from tkinter import messagebox as _messagebox
+        from tkinter import scrolledtext as _scrolledtext
+        from tkinter import ttk as _ttk
+
+        tk, messagebox, scrolledtext, ttk = _tk, _messagebox, _scrolledtext, _ttk
+    return tk, messagebox, scrolledtext, ttk
+
 
 class HDLSimGuiLauncher:
     def __init__(self, *, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+        _load_tk()
         self.host = host
         self.port = port
         self.native_window = native_window
@@ -195,12 +208,57 @@ class HDLSimGuiLauncher:
 
 
 def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+    _load_tk()
     HDLSimGuiLauncher(host=host, port=port, native_window=native_window).run()
 
 
 def main() -> int:
+    if is_frozen():
+        return run_frozen_desktop()
     run_gui()
     return 0
+
+
+def run_frozen_desktop(*, host: str = "127.0.0.1", port: int = 8765) -> int:
+    """PyInstaller .exe: start server and open the native IDE window directly."""
+
+    result = start_server(
+        host,
+        port,
+        open_browser=False,
+        native_window=False,
+        blocking=False,
+    )
+    if isinstance(result, int):
+        _frozen_error("HDL-Sim の起動に失敗しました。")
+        return result
+
+    if pywebview_available():
+        try:
+            open_ui_window(result.url, server=result, native=True)
+            return 0
+        except Exception as exc:
+            _frozen_error(f"専用ウィンドウを開けませんでした。\n{exc}\n\nブラウザで開きます。")
+
+    open_browser_later(result.url)
+    try:
+        result.thread.join()
+    except KeyboardInterrupt:
+        result.stop()
+    return 0
+
+
+def _frozen_error(message: str) -> None:
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("HDL-Sim", message)
+        root.destroy()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

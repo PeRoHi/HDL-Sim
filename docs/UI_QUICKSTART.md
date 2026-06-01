@@ -16,6 +16,7 @@
 
 Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dist/HDL-Sim.exe` ができます。
 この exe を配るだけで、受け取った人は Python もターミナルも不要です。
+**exe は Chrome ではなく専用ウィンドウで IDE が開きます**（Windows 11 では WebView2 が標準搭載）。
 
 ## macOS / Linux
 

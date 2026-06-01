@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Build on Windows:
-#   py -3.12 -m pip install pyinstaller
+#   py -3.12 -m pip install pyinstaller pywebview fastapi uvicorn lark
 #   py -3.12 -m PyInstaller packaging/hdl_sim_ui.spec
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 root = Path(SPECPATH).resolve().parent
+
+webview_hidden = collect_submodules("webview")
 
 a = Analysis(
     [str(root / 'start_ui_gui.pyw')],
@@ -28,11 +32,14 @@ a = Analysis(
         'uvicorn.lifespan.on',
         'fastapi',
         'lark',
+        'webview',
         'hdl_sim.web.app',
         'hdl_sim.web.gui_launcher',
         'hdl_sim.web.launcher',
+        'hdl_sim.web.native_window',
         'hdl_sim.web.paths',
         'hdl_sim.web.vcd_json',
+        *webview_hidden,
     ],
     hookspath=[],
     hooksconfig={},
