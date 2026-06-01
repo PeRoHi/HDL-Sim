@@ -164,7 +164,8 @@
     }
 
     const rect = anchor.getBoundingClientRect();
-    dropdownEl.style.left = `${rect.left}px`;
+    const padL = parseFloat(getComputedStyle(anchor).paddingLeft) || 0;
+    dropdownEl.style.left = `${rect.left + padL}px`;
     dropdownEl.style.top = `${rect.bottom}px`;
     dropdownEl.hidden = false;
     openMenuId = menuId;
