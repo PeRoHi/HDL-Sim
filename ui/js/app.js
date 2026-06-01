@@ -65,15 +65,6 @@ const SPLIT_SIZES = {
 
 let currentProject = "";
 let spjDirPath = "";
-let cachedSpjDirHandle = null;
-
-const SPJ_IDB_NAME = "hdl-sim-ui";
-const SPJ_IDB_STORE = "fs-handles";
-const SPJ_DIR_KEY = "spj-dir";
-const SPJ_PICKER_TYPES = [{
-  description: "HDL-Sim Project (*.spj)",
-  accept: { "application/json": [".spj"] },
-}];
 
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
@@ -471,70 +462,6 @@ function buildSpjPayload() {
   };
 }
 
-function openSpjIdb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(SPJ_IDB_NAME, 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(SPJ_IDB_STORE)) {
-        req.result.createObjectStore(SPJ_IDB_STORE);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function loadSpjDirectoryHandle() {
-  try {
-    const db = await openSpjIdb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(SPJ_IDB_STORE, "readonly");
-      const req = tx.objectStore(SPJ_IDB_STORE).get(SPJ_DIR_KEY);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function storeSpjDirectoryHandle(handle) {
-  const db = await openSpjIdb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(SPJ_IDB_STORE, "readwrite");
-    tx.objectStore(SPJ_IDB_STORE).put(handle, SPJ_DIR_KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function initSpjStorage() {
-  try {
-    cachedSpjDirHandle = await loadSpjDirectoryHandle();
-  } catch {
-    cachedSpjDirHandle = null;
-  }
-}
-
-async function resolveSpjDirHandleForUserGesture() {
-  if (!window.showDirectoryPicker) return null;
-  if (cachedSpjDirHandle) return cachedSpjDirHandle;
-
-  const message =
-    "SPJプロジェクト用フォルダを選択してください。\n\n" +
-    `推奨フォルダ:\n${spjDirPath || "./spj/"}\n\n` +
-    "次回以降、Open/Save .spj のダイアログはこのフォルダから始まります。";
-  if (!window.confirm(message)) return false;
-
-  const handle = await window.showDirectoryPicker({
-    id: "hdl-sim-spj-dir",
-    mode: "readwrite",
-  });
-  cachedSpjDirHandle = handle;
-  void storeSpjDirectoryHandle(handle);
-  return handle;
-}
-
 function applySpjData(data, filename) {
   if (data.format !== "hdl-sim-project" || !Array.isArray(data.files)) {
     throw new Error("HDL-Sim project fileではありません");
@@ -547,100 +474,79 @@ function applySpjData(data, filename) {
   loadWorkspaceFiles(data.files, data.top || "");
 }
 
+async function loadSpjFileList(selectName) {
+  const sel = $("select-spj");
+  if (!sel) return;
+  try {
+    const info = await api("/api/spj/info");
+    spjDirPath = info.path || spjDirPath;
+    const keep = selectName || sel.value;
+    sel.innerHTML = '<option value="">— .spj —</option>';
+    for (const file of info.files || []) {
+      const opt = document.createElement("option");
+      opt.value = file.name;
+      opt.textContent = file.label || file.name;
+      sel.appendChild(opt);
+    }
+    if (keep && [...sel.options].some((o) => o.value === keep)) {
+      sel.value = keep;
+    }
+  } catch (e) {
+    appendConsole(String(e), "err");
+  }
+}
+
 async function saveProjectFile() {
   try {
     const data = buildSpjPayload();
-    const suggestedName = currentProjectFileName();
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-
-    if (window.showSaveFilePicker) {
-      const dirHandle = await resolveSpjDirHandleForUserGesture();
-      if (dirHandle === false) return;
-      if (dirHandle) {
-        const handle = await window.showSaveFilePicker({
-          suggestedName,
-          startIn: dirHandle,
-          types: SPJ_PICKER_TYPES,
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        appendConsole(`[spj] saved: ${handle.name}`, "ok");
-        setStatus(`Saved: ${handle.name}`, "ok");
-      }
-    }
-
+    const filename = currentProjectFileName();
     const saved = await api(
-      `/api/spj/${encodeURIComponent(suggestedName)}`,
+      `/api/spj/${encodeURIComponent(filename)}`,
       data,
       undefined,
       "PUT"
     );
-    appendConsole(`[spj] saved to ${saved.path}`, "info");
-    if (!window.showSaveFilePicker) {
-      appendConsole(`[spj] saved: ${saved.filename}`, "ok");
-      setStatus(`Saved: ${saved.filename}`, "ok");
-    }
+    await loadSpjFileList(saved.filename);
+    appendConsole(`[spj] saved: ${saved.path}`, "ok");
+    setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
-    if (e.name === "AbortError") return;
     appendConsole(String(e), "err");
     setStatus("SPJ save failed", "err");
   }
 }
 
-async function openProjectFilePicker() {
-  try {
-    if (window.showOpenFilePicker) {
-      const dirHandle = await resolveSpjDirHandleForUserGesture();
-      if (dirHandle === false) return;
-      if (dirHandle) {
-        const [handle] = await window.showOpenFilePicker({
-          startIn: dirHandle,
-          types: SPJ_PICKER_TYPES,
-          multiple: false,
-        });
-        await importProjectFile(await handle.getFile());
-        return;
-      }
-    }
-
-    const info = await api("/api/spj/info");
-    spjDirPath = info.path || spjDirPath;
-    if (info.files?.length) {
-      const names = info.files.map((f) => f.name);
-      const selected = window.prompt(
-        `開く .spj を選択してください (${spjDirPath}):\n${names.join("\n")}`,
-        names[0]
-      );
-      if (selected) {
-        const data = await api(`/api/spj/${encodeURIComponent(selected.trim())}`);
-        applySpjData(data, selected);
-        appendConsole(`[spj] opened: ${selected} (${data.files.length} files)`, "ok");
-        setStatus(`Opened: ${selected}`, "ok");
-        runElaborate();
-        return;
-      }
-    }
-
-    appendConsole(`[spj] open from ${spjDirPath}`, "info");
-    $("project-import-input")?.click();
-  } catch (e) {
-    if (e.name === "AbortError") return;
-    appendConsole(String(e), "err");
-    setStatus("SPJ open failed", "err");
+async function openSelectedSpjFile(name) {
+  const filename = (name || $("select-spj")?.value || "").trim();
+  if (!filename) {
+    appendConsole(`[spj] 開くファイルを一覧から選んでください (${spjDirPath})`, "warn");
+    return;
   }
+  const data = await api(`/api/spj/${encodeURIComponent(filename)}`);
+  applySpjData(data, filename);
+  $("select-spj").value = filename;
+  appendConsole(`[spj] opened: ${filename} (${data.files.length} files)`, "ok");
+  setStatus(`Opened: ${filename}`, "ok");
+  runElaborate();
 }
 
-async function importProjectFile(file) {
-  if (!file) return;
+async function openProjectFilePicker() {
   try {
-    const raw = await readFileAsText(file);
-    const data = JSON.parse(raw);
-    applySpjData(data, file.name);
-    appendConsole(`[spj] opened: ${file.name} (${data.files.length} files)`, "ok");
-    setStatus(`Opened: ${file.name}`, "ok");
-    runElaborate();
+    await loadSpjFileList();
+    const sel = $("select-spj");
+    if (sel?.value) {
+      await openSelectedSpjFile(sel.value);
+      return;
+    }
+    const info = await api("/api/spj/info");
+    if (!info.files?.length) {
+      appendConsole(`[spj] ${spjDirPath} に .spj がありません`, "warn");
+      return;
+    }
+    if (info.files.length === 1) {
+      await openSelectedSpjFile(info.files[0].name);
+      return;
+    }
+    appendConsole(`[spj] 一覧から .spj を選んで Open .spj を押してください`, "info");
   } catch (e) {
     appendConsole(String(e), "err");
     setStatus("SPJ open failed", "err");
@@ -1398,9 +1304,8 @@ function bindUi() {
   $("btn-save-project")?.addEventListener("click", () => saveCurrentProject());
   $("btn-open-spj")?.addEventListener("click", openProjectFilePicker);
   $("btn-save-spj")?.addEventListener("click", saveProjectFile);
-  $("project-import-input")?.addEventListener("change", (e) => {
-    importProjectFile(e.target.files?.[0]);
-    e.target.value = "";
+  $("select-spj")?.addEventListener("change", (e) => {
+    if (e.target.value) openSelectedSpjFile(e.target.value);
   });
 
   document.querySelectorAll(".pane-tab").forEach((tab) => {
@@ -1445,7 +1350,7 @@ async function verifyUiBuild() {
       spjDirPath = info.spj_dir;
       appendConsole(`[spj] folder: ${spjDirPath}`, "info");
     }
-    await initSpjStorage();
+    await loadSpjFileList();
     setStatus("Ready", "ok");
   } catch {
     /* keep static badge */

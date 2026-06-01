@@ -78,9 +78,12 @@
             </select>
             <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
             <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
-            <button type="button" id="btn-open-spj" class="mini-btn" title=".spj プロジェクトを開く (./spj/)">Open .spj</button>
-            <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として ./spj/ に保存">Save .spj</button>
-            <input type="file" id="project-import-input" class="visually-hidden" accept=".spj,application/json,text/plain" tabindex="-1" aria-hidden="true" />
+            <label class="project-label" for="select-spj">SPJ</label>
+            <select id="select-spj" title="HDL-Sim/spj 内のプロジェクト">
+              <option value="">— .spj —</option>
+            </select>
+            <button type="button" id="btn-open-spj" class="mini-btn" title=".spj を開く (./spj/)">Open</button>
+            <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として ./spj/ に保存">Save</button>
           </div>
           <div class="pane-tabs" role="tablist">
             <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
