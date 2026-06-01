@@ -11,10 +11,6 @@
         { id: "file.save", label: "Save", shortcut: "Ctrl+S" },
         { id: "file.save-as", label: "Save As..." },
         { type: "sep" },
-        { id: "file.print", label: "Print...", shortcut: "Ctrl+P", disabled: true },
-        { id: "file.print-preview", label: "Print Preview", disabled: true },
-        { id: "file.print-setup", label: "Print Setup...", disabled: true },
-        { type: "sep" },
         { type: "recent", recentKey: "fileRecent" },
         { type: "sep" },
         { id: "file.exit", label: "Exit" },
@@ -41,8 +37,8 @@
       label: "View",
       items: [
         { id: "view.main-toolbar", label: "Main Toolbar", checkKey: "view.main-toolbar" },
-        { id: "view.analyzer-toolbar", label: "Analyzer Toolbar", checkKey: "view.analyzer-toolbar" },
-        { id: "view.fsm-toolbar", label: "FSM Toolbar", checkKey: "view.fsm-toolbar" },
+        { id: "view.output-panel", label: "Output Panel", checkKey: "view.output-panel" },
+        { id: "view.project-bar", label: "Project Bar", checkKey: "view.project-bar" },
       ],
     },
     project: {
@@ -54,27 +50,47 @@
         { id: "project.save-as", label: "Save As..." },
         { id: "project.close", label: "Close" },
         { type: "sep" },
-        { id: "project.save-state", label: "Save Project State", disabled: true },
-        { id: "project.restore-state", label: "Restore Project State" },
-        { type: "sep" },
         { id: "project.reload-files", label: "Load/Reload Input Files", shortcut: "Ctrl+L" },
-        { id: "project.reload-go", label: "Reload and Go", shortcut: "Alt+F5", disabled: true },
-        { type: "sep" },
         { id: "project.settings", label: "Project Settings..." },
-        { id: "project.filters", label: "Filters..." },
-        { id: "project.list-size", label: "Project List Size..." },
         { type: "sep" },
         { type: "recent", recentKey: "projectRecent" },
       ],
     },
-    "code-coverage": { label: "Code Coverage", items: [] },
-    debug: { label: "Debug", items: [] },
-    "state-machine": { label: "State Machine", items: [] },
-    explorer: { label: "Explorer", items: [] },
-    reports: { label: "Reports", items: [] },
-    options: { label: "Options", items: [] },
-    window: { label: "Window", items: [] },
-    help: { label: "Help", items: [] },
+    debug: {
+      label: "Debug",
+      items: [
+        { id: "debug.single-step", label: "Enable Single Step/Breakpoints", checkKey: "debug.single-step" },
+        { type: "sep" },
+        { id: "debug.go", label: "Go", shortcut: "F5" },
+        { id: "debug.break", label: "Break Simulation", shortcut: "Esc", disabledKey: "debug.break" },
+        { id: "debug.finish", label: "Finish Current Timepoint", disabledKey: "debug.finish" },
+        { id: "debug.restart", label: "Restart Simulation", shortcut: "Shift+F5", disabledKey: "debug.restart" },
+        { type: "sep" },
+        { id: "debug.step", label: "Step", shortcut: "F10", disabledKey: "debug.step" },
+        { type: "sep" },
+        { id: "debug.breakpoints", label: "Breakpoints...", shortcut: "Ctrl+B", disabled: true },
+      ],
+    },
+    window: {
+      label: "Window",
+      items: [
+        { id: "window.cascade", label: "Cascade" },
+        { id: "window.tile", label: "Tile" },
+        { id: "window.arrange-icons", label: "Arrange Icons", disabled: true },
+        { type: "sep" },
+        { id: "window.waveform", label: "Open Waveform", shortcut: "F6" },
+        { type: "sep" },
+        { type: "window-files" },
+      ],
+    },
+    help: {
+      label: "Help",
+      items: [
+        { id: "help.guide", label: "使い方..." },
+        { type: "sep" },
+        { id: "help.about", label: "About HDL-Sim..." },
+      ],
+    },
   };
 
   let actions = {};
@@ -126,6 +142,31 @@
       return frag;
     }
 
+    if (item.type === "window-files") {
+      const files = ctx.windowFiles || [];
+      const frag = document.createDocumentFragment();
+      if (!files.length) {
+        const row = document.createElement("div");
+        row.className = "menu-item disabled";
+        row.textContent = "(ウィンドウなし)";
+        frag.appendChild(row);
+        return frag;
+      }
+      files.forEach((entry, index) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "menu-item";
+        row.dataset.action = "window.open-file";
+        row.dataset.path = entry.path;
+        const checked = entry.path === ctx.activeWindow;
+        row.innerHTML =
+          `<span class="menu-check">${checked ? "✓" : ""}</span>` +
+          `<span class="menu-label">${index + 1} ${entry.label}</span>`;
+        frag.appendChild(row);
+      });
+      return frag;
+    }
+
     const disabled = isItemDisabled(item, ctx);
     const row = document.createElement("button");
     row.type = "button";
@@ -152,16 +193,9 @@
     dropdownEl.innerHTML = "";
     const items = def.items || [];
 
-    if (!items.length) {
-      const empty = document.createElement("div");
-      empty.className = "menu-item disabled";
-      empty.textContent = "(準備中)";
-      dropdownEl.appendChild(empty);
-    } else {
-      items.forEach((item) => {
-        dropdownEl.appendChild(renderMenuRow(item, ctx));
-      });
-    }
+    items.forEach((item) => {
+      dropdownEl.appendChild(renderMenuRow(item, ctx));
+    });
 
     const rect = anchor.getBoundingClientRect();
     const padL = parseFloat(getComputedStyle(anchor).paddingLeft) || 0;
@@ -181,6 +215,12 @@
       const filename = el?.dataset?.filename;
       const key = actionId === "project.recent" ? "project.recent" : "file.recent";
       if (filename && actions[key]) actions[key](filename);
+      closeMenu();
+      return;
+    }
+    if (actionId === "window.open-file") {
+      const path = el?.dataset?.path;
+      if (path && actions["window.open-file"]) actions["window.open-file"](path);
       closeMenu();
       return;
     }

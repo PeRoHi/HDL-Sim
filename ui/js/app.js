@@ -70,9 +70,12 @@ const RECENT_SPJ_MAX = 8;
 
 const viewState = {
   mainToolbar: true,
-  analyzerToolbar: true,
-  fsmToolbar: true,
+  outputPanel: true,
+  projectBar: true,
 };
+
+let simRunning = false;
+let debugSingleStep = false;
 
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
@@ -610,16 +613,16 @@ function getEditMenuContext() {
 
 function applyViewState() {
   document.body.classList.toggle("view-hide-main-toolbar", !viewState.mainToolbar);
-  document.body.classList.toggle("view-hide-analyzer-toolbar", !viewState.analyzerToolbar);
-  document.body.classList.toggle("view-hide-fsm-toolbar", !viewState.fsmToolbar);
+  document.body.classList.toggle("view-hide-output-panel", !viewState.outputPanel);
+  document.body.classList.toggle("view-hide-project-bar", !viewState.projectBar);
   layoutAllEditors();
   if (lastWaveform && waveformVisible) drawWave(lastWaveform);
 }
 
 function toggleViewMenu(id) {
   if (id === "view.main-toolbar") viewState.mainToolbar = !viewState.mainToolbar;
-  if (id === "view.analyzer-toolbar") viewState.analyzerToolbar = !viewState.analyzerToolbar;
-  if (id === "view.fsm-toolbar") viewState.fsmToolbar = !viewState.fsmToolbar;
+  if (id === "view.output-panel") viewState.outputPanel = !viewState.outputPanel;
+  if (id === "view.project-bar") viewState.projectBar = !viewState.projectBar;
   applyViewState();
   window.HDLSimMenuBar?.refresh();
 }
@@ -646,23 +649,91 @@ async function menuProjectFiles() {
   }
 }
 
-function menuProjectRestoreState() {
-  appendConsole("[project] Restore Project State は未実装です", "warn");
-}
-
 function menuProjectSettings() {
   const top = prompt("Top module:", $("input-top").value.trim());
   if (top != null) $("input-top").value = top;
 }
 
-function menuProjectFilters() {
-  appendConsole("[project] Filters は未実装です", "warn");
+function getWindowFileList() {
+  const list = [];
+  for (const path of fileStore.keys()) {
+    list.push({ path, label: path.includes("/") ? path.split("/").pop() : path });
+  }
+  const out = mdiWindows.get("output");
+  if (out && !out.hidden) list.push({ path: "__output__", label: "Output" });
+  const wave = mdiWindows.get("waveform");
+  if (wave && !wave.hidden) list.push({ path: "__waveform__", label: "Waveform" });
+  return list;
 }
 
-function menuProjectListSize() {
-  const n = prompt("Recent list size (1-20):", String(RECENT_SPJ_MAX));
-  if (n != null && !Number.isNaN(Number(n))) {
-    appendConsole(`[project] list size = ${n} (次回保存時に反映予定)`, "info");
+function windowCascade() {
+  let i = 0;
+  for (const [, win] of mdiWindows) {
+    if (win.hidden) continue;
+    win.style.left = `${36 + i * 28}px`;
+    win.style.top = `${32 + i * 28}px`;
+    i += 1;
+  }
+}
+
+function windowTile() {
+  const canvas = mdiCanvas();
+  if (!canvas) return;
+  const visible = [...mdiWindows.entries()].filter(([, w]) => !w.hidden);
+  const n = visible.length;
+  if (!n) return;
+  const cols = Math.ceil(Math.sqrt(n));
+  const pad = 8;
+  const cellW = Math.max(280, Math.floor((canvas.clientWidth - pad * (cols + 1)) / cols));
+  const cellH = Math.max(180, Math.floor((canvas.clientHeight - pad * 2) / Math.ceil(n / cols)));
+  visible.forEach(([, win], index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    win.style.left = `${pad + col * (cellW + pad)}px`;
+    win.style.top = `${pad + row * (cellH + pad)}px`;
+    win.style.width = `${cellW}px`;
+    win.style.height = `${cellH}px`;
+    win.querySelector(".mdi-body")?.firstElementChild?.dispatchEvent(new Event("resize"));
+  });
+  layoutAllEditors();
+}
+
+function windowOpenFile(path) {
+  if (path === "__output__") {
+    createOutputWindow();
+    return;
+  }
+  if (path === "__waveform__") {
+    toggleWaveform(true);
+    return;
+  }
+  openFile(path);
+}
+
+function toggleDebugSingleStep() {
+  debugSingleStep = !debugSingleStep;
+  appendConsole(`[debug] Single step/breakpoints ${debugSingleStep ? "enabled" : "disabled"}`, "info");
+  window.HDLSimMenuBar?.refresh();
+}
+
+async function debugRestart() {
+  await runElaborate();
+  await runSimulate();
+}
+
+function menuHelpGuide() {
+  appendConsole(
+    "[help] Run(F5) でシミュレーション / Save .spj で ./spj/ に保存 / 中クリック長押しでワークスペース移動",
+    "info"
+  );
+}
+
+async function menuHelpAbout() {
+  try {
+    const info = await api("/api/ui-info");
+    alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
+  } catch {
+    alert("HDL-Sim 0.4.0\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -670,10 +741,17 @@ function getMenuContext() {
   return {
     checked: {
       "view.main-toolbar": viewState.mainToolbar,
-      "view.analyzer-toolbar": viewState.analyzerToolbar,
-      "view.fsm-toolbar": viewState.fsmToolbar,
+      "view.output-panel": viewState.outputPanel,
+      "view.project-bar": viewState.projectBar,
+      "debug.single-step": debugSingleStep,
     },
-    disabled: getEditMenuContext(),
+    disabled: {
+      ...getEditMenuContext(),
+      "debug.break": !simRunning,
+      "debug.finish": true,
+      "debug.restart": false,
+      "debug.step": !debugSingleStep,
+    },
     hints: {
       currentSpj: currentSpjFilename(),
     },
@@ -681,6 +759,8 @@ function getMenuContext() {
       fileRecent: getRecentSpjFiles(),
       projectRecent: getRecentSpjFiles(),
     },
+    windowFiles: getWindowFileList(),
+    activeWindow: activeFile,
   };
 }
 
@@ -1261,10 +1341,12 @@ async function api(path, body, signal, method) {
 }
 
 function setRunning(running) {
+  simRunning = running;
   $("btn-run").disabled = running;
   $("btn-stop").disabled = !running;
   $("btn-elab").disabled = running;
   $("btn-step").disabled = running;
+  window.HDLSimMenuBar?.refresh();
 }
 
 async function loadExamples() {
@@ -1489,11 +1571,6 @@ function bindUi() {
 
   document.addEventListener("keydown", (e) => {
     if (handleMenuShortcut(e)) return;
-    if (e.key !== "F5") return;
-    const tag = e.target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    e.preventDefault();
-    runSimulate();
   });
 
   $("chk-auto-scroll")?.addEventListener("change", () => {
@@ -1528,33 +1605,73 @@ function initMenuBar() {
       "edit.replace": () => triggerEditor("editor.action.startFindReplaceAction"),
       "edit.goto-line": () => triggerEditor("editor.action.gotoLine"),
       "view.main-toolbar": () => toggleViewMenu("view.main-toolbar"),
-      "view.analyzer-toolbar": () => toggleViewMenu("view.analyzer-toolbar"),
-      "view.fsm-toolbar": () => toggleViewMenu("view.fsm-toolbar"),
+      "view.output-panel": () => toggleViewMenu("view.output-panel"),
+      "view.project-bar": () => toggleViewMenu("view.project-bar"),
       "project.new": () => createProject(),
       "project.open": () => openProjectFilePicker(),
       "project.files": () => menuProjectFiles(),
       "project.save-as": () => saveProjectFileAs(),
       "project.close": () => menuProjectClose(),
-      "project.restore-state": () => menuProjectRestoreState(),
       "project.reload-files": () => runElaborate(),
       "project.settings": () => menuProjectSettings(),
-      "project.filters": () => menuProjectFilters(),
-      "project.list-size": () => menuProjectListSize(),
       "project.recent": (filename) => openSelectedSpjFile(filename),
+      "debug.single-step": () => toggleDebugSingleStep(),
+      "debug.go": () => runSimulate(),
+      "debug.break": () => stopSimulation(),
+      "debug.restart": () => debugRestart(),
+      "debug.step": () => runStep(),
+      "window.cascade": () => windowCascade(),
+      "window.tile": () => windowTile(),
+      "window.waveform": () => toggleWaveform(true),
+      "window.open-file": (path) => windowOpenFile(path),
+      "help.guide": () => menuHelpGuide(),
+      "help.about": () => menuHelpAbout(),
     },
   });
   applyViewState();
 }
 
 function handleMenuShortcut(e) {
+  const tag = e.target?.tagName;
+  const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+  if (e.key === "F5" && !e.shiftKey && !e.altKey) {
+    if (inField) return false;
+    e.preventDefault();
+    runSimulate();
+    return true;
+  }
+  if (e.key === "F5" && e.shiftKey) {
+    if (inField) return false;
+    e.preventDefault();
+    debugRestart();
+    return true;
+  }
+  if (e.key === "F6") {
+    if (inField) return false;
+    e.preventDefault();
+    toggleWaveform(true);
+    return true;
+  }
+  if (e.key === "F10") {
+    if (inField) return false;
+    e.preventDefault();
+    runStep();
+    return true;
+  }
+  if (e.key === "Escape") {
+    if (inField) return false;
+    stopSimulation();
+    window.HDLSimMenuBar?.close();
+    return true;
+  }
   if (e.altKey && e.key === "F5") {
     e.preventDefault();
     runElaborate().then(() => runSimulate());
     return true;
   }
   if (!(e.ctrlKey || e.metaKey)) return false;
-  const tag = e.target?.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
+  if (inField) return false;
 
   const key = e.key.toLowerCase();
   const map = {

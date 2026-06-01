@@ -156,8 +156,8 @@ body {
 }
 
 body.view-hide-main-toolbar .toolbar { display: none; }
-body.view-hide-analyzer-toolbar #pane-console { display: none; }
-body.view-hide-fsm-toolbar .project-bar { display: none; }
+body.view-hide-output-panel #pane-console { display: none; }
+body.view-hide-project-bar .project-bar { display: none; }
 .toolbar {
   display: flex;
   align-items: center;
