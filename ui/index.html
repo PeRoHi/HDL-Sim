@@ -8,7 +8,24 @@
   <link rel="stylesheet" href="/assets/css/app.css?v=0.4.0" />
 </head>
 <body>
-  <!-- Compact toolbar -->
+  <!-- Silos-style menu bar -->
+  <nav id="menubar" class="menubar" aria-label="メインメニュー">
+    <button type="button" class="menubar-btn" data-menu="file">File</button>
+    <button type="button" class="menubar-btn" data-menu="edit">Edit</button>
+    <button type="button" class="menubar-btn" data-menu="view">View</button>
+    <button type="button" class="menubar-btn" data-menu="project">Project</button>
+    <button type="button" class="menubar-btn" data-menu="code-coverage">Code Coverage</button>
+    <button type="button" class="menubar-btn" data-menu="debug">Debug</button>
+    <button type="button" class="menubar-btn" data-menu="state-machine">State Machine</button>
+    <button type="button" class="menubar-btn" data-menu="explorer">Explorer</button>
+    <button type="button" class="menubar-btn" data-menu="reports">Reports</button>
+    <button type="button" class="menubar-btn" data-menu="options">Options</button>
+    <button type="button" class="menubar-btn" data-menu="window">Window</button>
+    <button type="button" class="menubar-btn" data-menu="help">Help</button>
+  </nav>
+  <div id="menu-dropdown" class="menu-dropdown" role="menu" hidden></div>
+
+  <!-- Simulation toolbar -->
   <header class="toolbar" role="banner">
     <div class="toolbar-left">
       <div class="brand-block">
@@ -133,6 +150,7 @@
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
   <script src="/assets/js/vcd-viewer.js?v=0.4.0"></script>
+  <script src="/assets/js/menu-bar.js?v=0.4.0"></script>
   <script src="/assets/js/app.js?v=0.4.0" type="module"></script>
 </body>
 </html>

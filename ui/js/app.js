@@ -65,6 +65,8 @@ const SPLIT_SIZES = {
 
 let currentProject = "";
 let spjDirPath = "";
+const RECENT_SPJ_KEY = "hdl-sim-recent-spj";
+const RECENT_SPJ_MAX = 8;
 
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
@@ -507,12 +509,64 @@ async function saveProjectFile() {
       "PUT"
     );
     await loadSpjFileList(saved.filename);
+    rememberRecentSpj(saved.filename);
     appendConsole(`[spj] saved: ${saved.path}`, "ok");
     setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
     appendConsole(String(e), "err");
     setStatus("SPJ save failed", "err");
   }
+}
+
+function normalizeSpjFilename(name) {
+  let cleaned = name.trim().replace(/\\/g, "/").split("/").pop() || "project.spj";
+  if (!cleaned.toLowerCase().endsWith(".spj")) cleaned += ".spj";
+  return cleaned.replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+
+async function saveProjectFileAs() {
+  const suggested = currentProjectFileName();
+  const name = prompt("Save As (.spj):", suggested);
+  if (!name?.trim()) return;
+  try {
+    const data = buildSpjPayload();
+    const filename = normalizeSpjFilename(name);
+    data.name = filename.replace(/\.spj$/i, "");
+    const saved = await api(
+      `/api/spj/${encodeURIComponent(filename)}`,
+      data,
+      undefined,
+      "PUT"
+    );
+    await loadSpjFileList(saved.filename);
+    rememberRecentSpj(saved.filename);
+    appendConsole(`[spj] saved as: ${saved.path}`, "ok");
+    setStatus(`Saved: ${saved.filename}`, "ok");
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("SPJ save failed", "err");
+  }
+}
+
+function getRecentSpjFiles() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_SPJ_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecentSpj(filename) {
+  if (!filename) return;
+  const list = getRecentSpjFiles().filter((name) => name !== filename);
+  list.unshift(filename);
+  localStorage.setItem(RECENT_SPJ_KEY, JSON.stringify(list.slice(0, RECENT_SPJ_MAX)));
+  window.HDLSimMenuBar?.refresh();
+}
+
+function menuFileExit() {
+  window.close();
+  appendConsole("ブラウザタブを閉じて終了してください", "info");
 }
 
 async function openSelectedSpjFile(name) {
@@ -524,6 +578,7 @@ async function openSelectedSpjFile(name) {
   const data = await api(`/api/spj/${encodeURIComponent(filename)}`);
   applySpjData(data, filename);
   $("select-spj").value = filename;
+  rememberRecentSpj(filename);
   appendConsole(`[spj] opened: ${filename} (${data.files.length} files)`, "ok");
   setStatus(`Opened: ${filename}`, "ok");
   runElaborate();
@@ -1318,6 +1373,7 @@ function bindUi() {
   });
 
   document.addEventListener("keydown", (e) => {
+    if (handleMenuShortcut(e)) return;
     if (e.key !== "F5") return;
     const tag = e.target?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -1328,6 +1384,45 @@ function bindUi() {
   $("chk-auto-scroll")?.addEventListener("change", () => {
     if (lastWaveform) drawWave(lastWaveform);
   });
+
+  initMenuBar();
+}
+
+function initMenuBar() {
+  window.HDLSimMenuBar?.init({
+    getRecentFiles: getRecentSpjFiles,
+    actions: {
+      "file.new": () => createProject(),
+      "file.open": () => openProjectFilePicker(),
+      "file.save": () => saveProjectFile(),
+      "file.save-as": () => saveProjectFileAs(),
+      "file.recent": (filename) => openSelectedSpjFile(filename),
+      "file.exit": () => menuFileExit(),
+    },
+  });
+}
+
+function handleMenuShortcut(e) {
+  if (!(e.ctrlKey || e.metaKey)) return false;
+  const tag = e.target?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
+  const key = e.key.toLowerCase();
+  if (key === "n") {
+    e.preventDefault();
+    createProject();
+    return true;
+  }
+  if (key === "o") {
+    e.preventDefault();
+    openProjectFilePicker();
+    return true;
+  }
+  if (key === "s") {
+    e.preventDefault();
+    saveProjectFile();
+    return true;
+  }
+  return false;
 }
 
 async function verifyUiBuild() {

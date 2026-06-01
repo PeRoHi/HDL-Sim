@@ -27,6 +27,7 @@
   --font-ui: "Segoe UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", "Source Code Pro", monospace;
   --toolbar-h: 36px;
+  --menubar-h: 24px;
   --tab-h: 28px;
   --pane-header-h: 26px;
 }
@@ -46,6 +47,91 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+}
+
+/* ── Silos-style menu bar ── */
+.menubar {
+  display: flex;
+  align-items: stretch;
+  height: var(--menubar-h);
+  min-height: var(--menubar-h);
+  padding: 0 2px;
+  background: linear-gradient(#f6f4ec, #e3e0d4);
+  border-bottom: 1px solid #8a867a;
+  flex-shrink: 0;
+  user-select: none;
+  z-index: 1000;
+}
+
+.menubar-btn {
+  border: none;
+  background: transparent;
+  color: #111;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 0 10px;
+  cursor: default;
+  line-height: var(--menubar-h);
+}
+
+.menubar-btn:hover,
+.menubar-btn.active {
+  background: #316ac5;
+  color: #fff;
+}
+
+.menu-dropdown {
+  position: fixed;
+  min-width: 200px;
+  background: #fff;
+  border: 1px solid #8a867a;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.25);
+  padding: 2px 0;
+  z-index: 10001;
+}
+
+.menu-dropdown[hidden] {
+  display: none;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #111;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-align: left;
+  padding: 3px 18px 3px 8px;
+  cursor: default;
+}
+
+.menu-item:hover:not(.disabled):not(:disabled) {
+  background: #316ac5;
+  color: #fff;
+}
+
+.menu-item.disabled,
+.menu-item:disabled {
+  color: #808080;
+  cursor: default;
+}
+
+.menu-shortcut {
+  color: inherit;
+  opacity: 0.85;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 3px 2px;
+  background: #c0c0c0;
 }
 
 /* ── Toolbar ── */
