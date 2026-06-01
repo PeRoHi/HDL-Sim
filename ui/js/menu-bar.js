@@ -106,6 +106,7 @@
   function closeMenu() {
     openMenuId = null;
     if (dropdownEl) dropdownEl.hidden = true;
+    barEl?.classList.remove("menu-open");
     document.querySelectorAll(".menubar-btn").forEach((btn) => {
       btn.classList.remove("active");
     });
@@ -203,7 +204,10 @@
     dropdownEl.style.top = `${rect.bottom}px`;
     dropdownEl.hidden = false;
     openMenuId = menuId;
-    anchor.classList.add("active");
+    barEl?.classList.add("menu-open");
+    document.querySelectorAll(".menubar-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn === anchor);
+    });
   }
 
   function openMenu(menuId, anchor) {
