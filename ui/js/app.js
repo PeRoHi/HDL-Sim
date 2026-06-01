@@ -65,6 +65,7 @@ const SPLIT_SIZES = {
 
 let currentProject = "";
 let spjDirPath = "";
+let cachedSpjDirHandle = null;
 
 const SPJ_IDB_NAME = "hdl-sim-ui";
 const SPJ_IDB_STORE = "fs-handles";
@@ -507,39 +508,30 @@ async function storeSpjDirectoryHandle(handle) {
   });
 }
 
-async function queryDirPermission(handle, mode = "readwrite") {
-  if (!handle?.queryPermission) return "denied";
-  const state = await handle.queryPermission({ mode });
-  if (state === "granted") return "granted";
-  if (handle.requestPermission) {
-    return handle.requestPermission({ mode });
+async function initSpjStorage() {
+  try {
+    cachedSpjDirHandle = await loadSpjDirectoryHandle();
+  } catch {
+    cachedSpjDirHandle = null;
   }
-  return state;
 }
 
-async function ensureSpjDirectoryHandle() {
-  const info = await api("/api/spj/info");
-  spjDirPath = info.path || spjDirPath;
-
+async function resolveSpjDirHandleForUserGesture() {
   if (!window.showDirectoryPicker) return null;
-
-  let handle = await loadSpjDirectoryHandle();
-  if (handle) {
-    const perm = await queryDirPermission(handle);
-    if (perm === "granted") return handle;
-  }
+  if (cachedSpjDirHandle) return cachedSpjDirHandle;
 
   const message =
     "SPJプロジェクト用フォルダを選択してください。\n\n" +
-    `推奨フォルダ:\n${spjDirPath}\n\n` +
+    `推奨フォルダ:\n${spjDirPath || "./spj/"}\n\n` +
     "次回以降、Open/Save .spj のダイアログはこのフォルダから始まります。";
-  if (!window.confirm(message)) return null;
+  if (!window.confirm(message)) return false;
 
-  handle = await window.showDirectoryPicker({
+  const handle = await window.showDirectoryPicker({
     id: "hdl-sim-spj-dir",
     mode: "readwrite",
   });
-  await storeSpjDirectoryHandle(handle);
+  cachedSpjDirHandle = handle;
+  void storeSpjDirectoryHandle(handle);
   return handle;
 }
 
@@ -562,16 +554,9 @@ async function saveProjectFile() {
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
 
-    const saved = await api(
-      `/api/spj/${encodeURIComponent(suggestedName)}`,
-      data,
-      undefined,
-      "PUT"
-    );
-    appendConsole(`[spj] saved to ${saved.path}`, "info");
-
     if (window.showSaveFilePicker) {
-      const dirHandle = await ensureSpjDirectoryHandle();
+      const dirHandle = await resolveSpjDirHandleForUserGesture();
+      if (dirHandle === false) return;
       if (dirHandle) {
         const handle = await window.showSaveFilePicker({
           suggestedName,
@@ -581,14 +566,22 @@ async function saveProjectFile() {
         const writable = await handle.createWritable();
         await writable.write(blob);
         await writable.close();
-        appendConsole(`[spj] exported: ${handle.name}`, "ok");
+        appendConsole(`[spj] saved: ${handle.name}`, "ok");
         setStatus(`Saved: ${handle.name}`, "ok");
-        return;
       }
     }
 
-    appendConsole(`[spj] saved: ${saved.filename}`, "ok");
-    setStatus(`Saved: ${saved.filename}`, "ok");
+    const saved = await api(
+      `/api/spj/${encodeURIComponent(suggestedName)}`,
+      data,
+      undefined,
+      "PUT"
+    );
+    appendConsole(`[spj] saved to ${saved.path}`, "info");
+    if (!window.showSaveFilePicker) {
+      appendConsole(`[spj] saved: ${saved.filename}`, "ok");
+      setStatus(`Saved: ${saved.filename}`, "ok");
+    }
   } catch (e) {
     if (e.name === "AbortError") return;
     appendConsole(String(e), "err");
@@ -599,7 +592,8 @@ async function saveProjectFile() {
 async function openProjectFilePicker() {
   try {
     if (window.showOpenFilePicker) {
-      const dirHandle = await ensureSpjDirectoryHandle();
+      const dirHandle = await resolveSpjDirHandleForUserGesture();
+      if (dirHandle === false) return;
       if (dirHandle) {
         const [handle] = await window.showOpenFilePicker({
           startIn: dirHandle,
@@ -1451,6 +1445,7 @@ async function verifyUiBuild() {
       spjDirPath = info.spj_dir;
       appendConsole(`[spj] folder: ${spjDirPath}`, "info");
     }
+    await initSpjStorage();
     setStatus("Ready", "ok");
   } catch {
     /* keep static badge */
