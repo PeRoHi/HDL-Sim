@@ -37,7 +37,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "デスクトップにショートカットを作成する"; GroupDescription: "ショートカットの作成:"; Flags: checkedonce
 Name: "quicklaunchicon"; Description: "クイック起動にショートカットを作成する"; GroupDescription: "ショートカットの作成:"; Flags: checkedonce; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
-Name: "launchapp"; Description: "インストール完了後に {#AppName} を起動する"; GroupDescription: "その他:"; Flags: checkedonce postinstall
+Name: "launchapp"; Description: "インストール完了後に {#AppName} を起動する"; GroupDescription: "その他:"; Flags: checkedonce
 
 [Files]
 Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -49,7 +49,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: quicklaunchicon; Comment: "Verilog HDL シミュレータ IDE"
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent; Tasks: launchapp
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent; Tasks: launchapp
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden; RunOnceId: "KillHDL-Sim"
