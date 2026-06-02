@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0\.."
+rem フリー配布は ZIP を主とする（build_zip.bat）。インストーラーは当面停止。
 
 echo [HDL-Sim] Windows インストーラーをビルドします...
 echo.

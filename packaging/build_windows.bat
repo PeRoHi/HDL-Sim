@@ -23,5 +23,6 @@ echo.
 echo 完成: dist\HDL-Sim\HDL-Sim.exe
 echo dist\HDL-Sim フォルダ全体が実行に必要です。
 echo.
-echo インストーラー版: packaging\build_installer.bat （Inno Setup 6 が必要）
+echo ZIP 配布: packaging\build_zip.bat
+echo インストーラー: packaging\build_installer.bat （当面は未使用・Inno Setup 6）
 pause

@@ -12,28 +12,28 @@
 初回だけ GUI の **「依存関係をインストール」** ボタンを押してください。
 ターミナルは不要です。
 
-## Python なしで配布する場合
+## Python なしで配布する場合（ZIP 推奨）
 
-Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dist\HDL-Sim\HDL-Sim.exe` ができます。
-`dist\HDL-Sim` フォルダ全体が実行に必要です。配布はインストーラー版を推奨します。
-**exe は Chrome ではなく専用ウィンドウで IDE が開きます**（Windows 11 では WebView2 が標準搭載）。
+Windows PC で一度だけ:
 
-### インストーラー版（保存フォルダを選べる）
+```bat
+packaging\build_windows.bat
+packaging\build_zip.bat
+```
 
-1. [Inno Setup 6](https://jrsoftware.org/isdl.php) をインストール
-2. `packaging\build_windows.bat` で exe をビルド
-3. `packaging\build_installer.bat` を実行
-4. 完成: `dist\HDL-Sim-Setup-0.5.5.exe`
+- 実行物: `dist\HDL-Sim\` フォルダ一式（`HDL-Sim.exe` + `_internal\`）
+- 配布物: `dist\HDL-Sim-x.x.x-windows-x64.zip`（解凍して `HDL-Sim.exe` を起動）
+- **exe は Chrome ではなく専用ウィンドウで IDE が開きます**（WebView2 未導入時は [ランタイム](https://go.microsoft.com/fwlink/p/?LinkId=2124703)）
 
-インストール時に次を選択できます:
+### バージョンの確認（`HDL-Sim.exe`）
 
-- **デスクトップにショートカット**（オン/オフ）
-- **スタートメニュー**（フォルダ名も選択可）
-- **保存フォルダ**（`.spj` / `projects/`、既定: `ドキュメント\HDL-Sim`）
+1. **起動ウィンドウ** … 起動直後の小さな GUI に `Ver x.x.x` と表示
+2. **IDE** … 左上メニューバーの `Ver x.x.x` バッジ（サーバー `/api/version` と同期）
+3. **Help → About** … ダイアログでバージョン表示
 
-アンインストールは Windows の **設定 → アプリ → インストールされているアプリ** から「HDL-Sim」を選んで実行できます。ユーザーデータ（プロジェクト）を残すか削除するかも選べます。
+### インストーラー版（当面は使用停止）
 
-**スマート アプリ コントロール** が `unins000.exe` をブロックした場合は、発行元未署名の削除プログラムが止められただけです。`packaging/UNINSTALL_README.txt`（インストール先にも同梱）の手動削除手順を使うか、一時的に SAC をオフ/評価にしてから再度アンインストールしてください。
+Inno Setup 版（`build_installer.bat`）はスクリプトは残していますが、**フリー配布の主経路は ZIP** です。署名・スマート アプリ コントロールの都合で再開する場合は `packaging/SIGNING.md` を参照。
 
 ## macOS / Linux
 
