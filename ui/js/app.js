@@ -51,6 +51,7 @@ const mdiWindows = new Map();
 let mdiZ = 10;
 let lastWaveform = null;
 let lastWaveformFull = null;
+let lastTopModule = "";
 /** @type {string[]} */
 let waveformSelection = [];
 let selectedSignal = null;
@@ -822,7 +823,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.15\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.17\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1285,10 +1286,17 @@ function closeFile(path) {
 function resolveWaveformSignalNames(path) {
   if (!path || !lastWaveformFull?.signals) return [];
   const names = lastWaveformFull.signals.map((s) => s.name);
-  if (names.includes(path)) return [path];
-  const suffix = "." + path;
-  const matches = names.filter((n) => n === path || n.endsWith(suffix));
-  return matches.length ? matches : [];
+  const candidates = [path];
+  if (lastTopModule && !path.startsWith(`${lastTopModule}.`)) {
+    candidates.push(`${lastTopModule}.${path}`);
+  }
+  for (const candidate of candidates) {
+    if (names.includes(candidate)) return [candidate];
+    const suffix = `.${candidate}`;
+    const matches = names.filter((n) => n === candidate || n.endsWith(suffix));
+    if (matches.length) return matches;
+  }
+  return [];
 }
 
 function buildDisplayWaveform() {
@@ -1733,10 +1741,17 @@ async function runSimulate() {
     refreshTopModulePicker(data.top_module);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
+    lastTopModule = data.top_module || "";
     lastWaveformFull = data.waveform;
     waveformSelection = data.waveform?.signals?.map((s) => s.name) || [];
     applySuggestedUntil(data.suggested_until);
     refreshWaveformView();
+    const waveCount = data.waveform?.signals?.length || 0;
+    if (waveCount > 0) {
+      appendConsole(`[wave] ${waveCount} signals captured — Hierarchy または Signals から選択`, "info");
+    } else {
+      appendConsole("[wave] 波形データが空です。Run が成功していても VCD に信号がありません。", "warn");
+    }
     if (data.hints?.length) {
       data.hints.forEach((h) => appendConsole(`[hint] ${h}`, "warn"));
     }

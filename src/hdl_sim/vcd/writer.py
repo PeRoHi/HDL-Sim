@@ -55,8 +55,7 @@ class VCDWriter:
     def change(self, net: SimNet, time: SimTime) -> None:
         if net.name not in self._codes:
             return
-        if self._active_nets is not None and net.name not in self._active_nets:
-            return
+        # Record all net transitions; $dumpvars scope only affects dump_initial().
         value = net.vcd_value()
         if self._last_dumped.get(net.name) == value:
             return
@@ -71,9 +70,8 @@ class VCDWriter:
             self.change(net, time)
 
     def _nets_for_render(self) -> dict[str, SimNet]:
-        if self._active_nets is None:
-            return self.nets
-        return {name: self.nets[name] for name in self._active_nets if name in self.nets}
+        """Always emit the full elaborated netlist (web viewer + GTKWave)."""
+        return self.nets
 
     def render(self) -> str:
         nets = self._nets_for_render()

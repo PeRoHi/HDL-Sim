@@ -398,6 +398,7 @@ class Simulator:
         stop_time = self._queue.now
 
         if self._vcd_path is not None and self._vcd is not None:
+            self._vcd.set_active_nets(None)
             self._vcd.write(self._vcd_path)
 
         return SimulationResult(
