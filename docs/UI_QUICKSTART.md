@@ -35,6 +35,10 @@ packaging\build_zip.bat
 2. **IDE** … 左上メニューバーの `Ver x.x.x` バッジ（サーバー `/api/version` と同期）
 3. **Help → About** … ダイアログでバージョン表示
 
+### 課題 RTL をローカルでデバッグするとき
+
+Cursor などエディタ AI に渡す引き継ぎ文は [LOCAL_DEBUG_HANDOFF.md](LOCAL_DEBUG_HANDOFF.md)（コピペ用プロンプト付き）を参照してください。正式リリース用の修正は GitHub の Release / PR、手元の 6 ファイル確認はローカル、の役割分担を書いてあります。
+
 ### リリース時のバージョン上げ（開発者）
 
 1. `src/hdl_sim/__init__.py` の `__version__` を更新（ここが exe の正）
