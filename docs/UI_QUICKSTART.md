@@ -33,6 +33,8 @@ Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dis
 
 アンインストールは Windows の **設定 → アプリ → インストールされているアプリ** から「HDL-Sim」を選んで実行できます。ユーザーデータ（プロジェクト）を残すか削除するかも選べます。
 
+**スマート アプリ コントロール** が `unins000.exe` をブロックした場合は、発行元未署名の削除プログラムが止められただけです。`packaging/UNINSTALL_README.txt`（インストール先にも同梱）の手動削除手順を使うか、一時的に SAC をオフ/評価にしてから再度アンインストールしてください。
+
 ## macOS / Linux
 
 `start-ui.command` または `./start-ui.sh` をダブルクリック
