@@ -14,8 +14,8 @@
 
 ## Python なしで配布する場合
 
-Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dist/HDL-Sim.exe` ができます。
-この exe を配るだけで、受け取った人は Python もターミナルも不要です。
+Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dist\HDL-Sim\HDL-Sim.exe` ができます。
+`dist\HDL-Sim` フォルダ全体が実行に必要です。配布はインストーラー版を推奨します。
 **exe は Chrome ではなく専用ウィンドウで IDE が開きます**（Windows 11 では WebView2 が標準搭載）。
 
 ### インストーラー版（保存フォルダを選べる）
@@ -23,7 +23,7 @@ Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dis
 1. [Inno Setup 6](https://jrsoftware.org/isdl.php) をインストール
 2. `packaging\build_windows.bat` で exe をビルド
 3. `packaging\build_installer.bat` を実行
-4. 完成: `dist\HDL-Sim-Setup-0.4.5.exe`
+4. 完成: `dist\HDL-Sim-Setup-0.5.2.exe`
 
 インストール時に次を選択できます:
 

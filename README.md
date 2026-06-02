@@ -76,7 +76,7 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 2. 次をダブルクリック: **`start-ui.vbs`** または **`start_ui_gui.pyw`**
 3. 初回だけ GUI の **「依存関係をインストール」** を押す
 
-**Python なし配布**: `packaging/build_windows.bat` で `dist/HDL-Sim.exe` を作成
+**Python なし配布**: `packaging/build_windows.bat` で `dist/HDL-Sim/HDL-Sim.exe` を作成（配布は `packaging/build_installer.bat` のインストーラー版を推奨）
 
 **macOS / Linux**: `start-ui.command` または `./start-ui.sh`
 

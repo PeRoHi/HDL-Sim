@@ -2,7 +2,7 @@
 ; Build: packaging\build_installer.bat
 
 #define AppName "HDL-Sim"
-#define AppVersion "0.5.1"
+#define AppVersion "0.5.2"
 #define AppPublisher "HDL-Sim"
 #define AppExeName "HDL-Sim.exe"
 
@@ -40,7 +40,7 @@ Name: "quicklaunchicon"; Description: "クイック起動にショートカッ�
 Name: "launchapp"; Description: "インストール完了後に {#AppName} を起動する"; GroupDescription: "その他:"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\HDL-Sim\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

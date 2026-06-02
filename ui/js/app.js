@@ -748,7 +748,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.1\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.2\nVerilog シミュレータ + Web IDE");
   }
 }
 
