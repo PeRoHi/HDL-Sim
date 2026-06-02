@@ -996,10 +996,6 @@ class VerilogTransformer(Transformer):
     def default_pat(self) -> str:
         return "default"
 
-    @v_args(inline=True)
-    def case_pat_wait(self, token: Token) -> IdentRef:
-        return IdentRef(name=str(token))
-
     def expr_pat(self, children: list[Any]) -> tuple[Expr, ...]:
         return tuple(self._child_args(tuple(children)))
 

@@ -9,7 +9,7 @@ PORT_DIR.2: "input"i | "output"i | "inout"i
 INITIAL.2: "initial"i
 ALWAYS.2: "always"i
 ASSIGN.2: "assign"i
-WAIT.2: "wait"i
+WAIT.2: /wait(?=\s*\()/i
 BEGIN.2: "begin"i
 SYS_IDENT.0: /\$[A-Za-z_]\w+/
 IDENT: /[A-Za-z_]\w*/
@@ -207,10 +207,7 @@ case_stmt: "case"i "(" expr ")" case_item+ "endcase" [";"] -> case
 case_item: case_pattern ":" stmt
 
 case_pattern: "default"i -> default_pat
-             | case_pat_expr ("," case_pat_expr)* -> expr_pat
-
-case_pat_expr: WAIT -> case_pat_wait
-              | expr
+             | expr ("," expr)* -> expr_pat
 
 event_control: "@" "(" event_expr ("," event_expr)* ")" stmt
               | "@" event_expr stmt
