@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.17"
+UI_BUILD = "0.5.18"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -106,6 +106,33 @@ class SimulateRequest(BaseModel):
     until: int | None = 15000
     max_events: int | None = 2000
     generate_vcd: bool = True
+
+
+def resolve_top_module(design: Design, top: str | None) -> str:
+    """Pick elaboration top; ignore stale UI values like ``tb`` when absent from design."""
+
+    names = {m.name for m in design.modules}
+    requested = (top or "").strip()
+    if requested and requested in names:
+        return requested
+
+    for suffix in ("_tp", "_tb", "_test", "_testbench"):
+        for module in design.modules:
+            if module.name.endswith(suffix):
+                return module.name
+
+    for candidate in ("stimulus", "tb", "testbench", "top"):
+        if candidate in names:
+            return candidate
+
+    by_instances = sorted(design.modules, key=lambda m: len(m.instances), reverse=True)
+    if by_instances and by_instances[0].instances:
+        return by_instances[0].name
+
+    try:
+        return design.top.name
+    except ValueError:
+        return design.modules[-1].name
 
 
 def _port_dir_name(direction: PortDirection) -> str:
@@ -520,9 +547,10 @@ def create_app() -> FastAPI:
         try:
             loaded, _base, _tmp = load_design_from_files(req.files)
             design = loaded.design
-            top = req.top or design.modules[-1].name
+            requested_top = (req.top or "").strip() or None
+            top = resolve_top_module(design, req.top)
             elaborated = elaborate(design, top=top)
-            return {
+            payload: dict[str, Any] = {
                 "ok": True,
                 "top": elaborated.top_module,
                 "module_names": design_overview(design)["module_names"],
@@ -534,6 +562,10 @@ def create_app() -> FastAPI:
                 "always_blocks": len(elaborated.always_blocks),
                 "suggested_until": suggested_sim_until(design, top=top),
             }
+            if requested_top and requested_top != top:
+                payload["top_auto"] = top
+                payload["top_requested"] = requested_top
+            return payload
         except Exception as exc:
             return {
                 "ok": False,
@@ -548,9 +580,8 @@ def create_app() -> FastAPI:
         try:
             loaded, base, _tmp = load_design_from_files(req.files)
             design = loaded.design
-            top = req.top
-            if top is None:
-                top = design.modules[-1].name
+            requested_top = (req.top or "").strip() or None
+            top = resolve_top_module(design, req.top)
 
             vcd_path = base / "wave.vcd" if req.generate_vcd else None
             sim = Simulator(
@@ -569,9 +600,10 @@ def create_app() -> FastAPI:
                 vcd_text = vcd_path.read_text(encoding="utf-8")
                 waveform = timeline_to_json(parse_vcd_timeline(vcd_text))
 
-            return {
+            payload = {
                 "ok": True,
                 "top_module": result.top_module,
+                "top": top,
                 "stop_time": result.stop_time,
                 "events_processed": result.events_processed,
                 "console": console.getvalue(),
@@ -590,6 +622,10 @@ def create_app() -> FastAPI:
                     until=req.until,
                 ),
             }
+            if requested_top and requested_top != top:
+                payload["top_auto"] = top
+                payload["top_requested"] = requested_top
+            return payload
         except Exception as exc:
             return {
                 "ok": False,

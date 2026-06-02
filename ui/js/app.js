@@ -250,10 +250,13 @@ function refreshTopModulePicker(suggestedTop) {
   const has = (name) => modules.some((m) => m.name === name);
   if (current && has(current)) sel.value = current;
   else if (suggestedTop && has(suggestedTop)) sel.value = suggestedTop;
-  else if (has("tb")) sel.value = "tb";
   else {
-    const tb = modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_"));
-    if (tb) sel.value = tb.name;
+    const pick =
+      modules.find((m) => m.name.endsWith("_tp")) ||
+      modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_")) ||
+      modules.find((m) => m.name === "tb") ||
+      modules[0];
+    if (pick) sel.value = pick.name;
   }
 }
 
@@ -823,7 +826,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.17\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.18\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1703,6 +1706,12 @@ async function runElaborate() {
     refreshTopModulePicker(data.top);
     setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
+    if (data.top_requested && data.top_requested !== data.top) {
+      appendConsole(
+        `[hint] Top を ${data.top_requested} → ${data.top} に自動変更しました（モジュール一覧に合わせて選択）`,
+        "warn",
+      );
+    }
     if (data.suggested_until != null) {
       appendConsole(`[hint] Until の推奨値: ${data.suggested_until}（parameter STEP ベンチ向け）`, "info");
     }
@@ -1738,7 +1747,13 @@ async function runSimulate() {
     }
     if (data.console) appendConsole(data.console);
     appendConsole(`time=${data.stop_time} events=${data.events_processed} top=${data.top_module}`, "ok");
-    refreshTopModulePicker(data.top_module);
+    if (data.top_requested && data.top_requested !== data.top) {
+      appendConsole(
+        `[hint] Top を ${data.top_requested} → ${data.top} に自動変更しました`,
+        "warn",
+      );
+    }
+    refreshTopModulePicker(data.top_module || data.top);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
     lastTopModule = data.top_module || "";
