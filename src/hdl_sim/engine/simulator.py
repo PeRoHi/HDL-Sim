@@ -10,12 +10,12 @@ from hdl_sim.core.events import EventQueue, SimTime
 from hdl_sim.engine.delta import DeltaRegion
 from hdl_sim.engine.elaborator import ElaboratedDesign, ScopedContinuousAssign, ScopedProcess, elaborate
 from hdl_sim.engine.evaluator import ExpressionEvaluator
-from hdl_sim.engine.executor import ProcessContext, ProcessState
+from hdl_sim.engine.executor import ProcessContext, ProcessState, render_display_args
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.engine.trace import SimulationTracer
-from hdl_sim.parser.ast import AlwaysBlock, Design, DisplayArg, EdgeKind, Module
-from hdl_sim.parser.loader import load_design, load_design_with_meta
+from hdl_sim.parser.ast import AlwaysBlock, Design, DisplayArg, EdgeKind, Forever, Module
+from hdl_sim.parser.loader import load_design, load_design_with_meta, read_verilog_text
 from hdl_sim.parser.parser import parse_design, parse_module
 from hdl_sim.vcd.writer import VCDWriter
 
@@ -97,7 +97,7 @@ class Simulator:
         top: str | None = None,
     ) -> Simulator:
         return cls.from_source(
-            path.read_text(encoding="utf-8"),
+            read_verilog_text(path),
             timescale=timescale,
             vcd_path=vcd_path,
             top=top,
@@ -126,26 +126,13 @@ class Simulator:
             recompute(0)
 
     def _register_monitor(self, args: tuple[DisplayArg, ...], locals: dict[str, SimNet]) -> None:
-        self._monitors.append((args, locals))
+        merged = {**self._nets, **locals}
+        self._monitors.append((args, merged))
 
     def _check_monitors(self) -> None:
         for args, locals in self._monitors:
-            evaluator = ExpressionEvaluator(locals)
-            parts: list[str] = []
-            values: list[int] = []
-            for arg in args:
-                if arg.text is not None:
-                    parts.append(arg.text)
-                elif arg.expr is not None:
-                    values.append(evaluator.eval(arg.expr))
-            if parts and values:
-                message = parts[0] % tuple(values)
-            elif parts:
-                message = "".join(parts)
-            elif values:
-                message = " ".join(str(value) for value in values)
-            else:
-                message = ""
+            evaluator = ExpressionEvaluator(locals, queue=self._queue)
+            message = render_display_args(args, evaluator)
             print(message, flush=True)
             if self._tracer is not None:
                 self._tracer.log(f"#{self._queue.now} $monitor {message}")
@@ -269,6 +256,12 @@ class Simulator:
 
     def _start_always_blocks(self) -> None:
         for block, local_nets, params in self._elaborated.always_blocks:
+            if isinstance(block.body, Forever) and block.sensitivity == ():
+                self._spawn_process(
+                    ScopedProcess(body=block.body, locals=local_nets, params=params),
+                    time=self._queue.now,
+                )
+                continue
             if not block.sensitivity:
                 self._register_combinational_always(block, local_nets, params)
                 continue

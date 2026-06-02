@@ -10,7 +10,7 @@ INITIAL.2: "initial"i
 ALWAYS.2: "always"i
 ASSIGN.2: "assign"i
 BEGIN.2: "begin"i
-SYS_IDENT.2: /\$[A-Za-z_]\w+/
+SYS_IDENT.0: /\$[A-Za-z_]\w+/
 IDENT: /[A-Za-z_]\w*/
 
 design: module+
@@ -45,15 +45,20 @@ decl_or_stmt: port_body_decl
              | generate_block
              | module_instance
 
-declaration: REG range? ident_list ";" -> make_reg_decls
+declaration: REG range? IDENT "=" expr ";" -> make_reg_decl_assign
+          | WIRE range? IDENT "=" expr ";" -> make_wire_decl_assign
+          | INTEGER range? IDENT "=" expr ";" -> make_integer_decl_assign
+          | REG range? ident_list ";" -> make_reg_decls
           | WIRE range? ident_list ";" -> make_wire_decls
           | INTEGER range? ident_list ";" -> make_integer_decls
           | genvar_decl
 
 ident_list: IDENT ("," IDENT)*
 
-parameter_decl_stmt: "parameter"i IDENT "=" expr ";"
-                    | "localparam"i IDENT "=" expr ";"
+parameter_decl_stmt: "parameter"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
+                    | "localparam"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
+
+parameter_assign: IDENT "=" expr
 
 genvar_decl: "genvar"i IDENT ";"
 
@@ -110,6 +115,7 @@ initial_block: INITIAL stmt
 
 always_block: ALWAYS sensitivity stmt
              | ALWAYS delay_control -> always_delay
+             | ALWAYS begin_end_block -> always_plain
 
 sensitivity: "@" "(" sensitivity_list ")"
             | "@" "(" "*" ")"
@@ -124,7 +130,8 @@ sensitivity_item: "posedge"i IDENT -> posedge
                   | "negedge"i IDENT -> negedge
                   | IDENT -> level
 
-?stmt: begin_end_block
+?stmt: ";" -> empty_stmt
+     | begin_end_block
      | system_task
      | blocking_assign
      | nonblocking_assign
@@ -150,10 +157,11 @@ system_task: "$display"i "(" display_args? ")" ";" -> display
             | "$dumpfile"i "(" STRING ")" ";" -> dumpfile
             | "$dumpvars"i ["(" display_args? ")"] ";" -> dumpvars
             | "$monitor"i "(" display_args? ")" ";" -> monitor
+            | SYS_IDENT "(" display_args? ")" ";" -> generic_system_task
 
 display_args: display_arg ("," display_arg)*
 
-display_arg: STRING | expr
+display_arg: expr
 
 blocking_assign: lvalue "=" expr ";"
 nonblocking_assign: lvalue "<=" expr ";"
@@ -177,8 +185,11 @@ for_stmt: "for" "(" for_init? ";" expr? ";" for_step? ")" stmt
 if_stmt: "if" "(" expr ")" stmt ["else" stmt]
 
 fork_stmt: "fork" begin_end_block "join" -> fork_join
+          | "fork" stmt_list "join" -> fork_join
           | "fork" begin_end_block "join_any" -> fork_join_any
+          | "fork" stmt_list "join_any" -> fork_join_any
           | "fork" begin_end_block "join_none" -> fork_join_none
+          | "fork" stmt_list "join_none" -> fork_join_none
 
 task_enable: IDENT "(" expr ("," expr)* ")" ";" -> task_call
           | IDENT "(" ")" ";" -> task_call_empty
@@ -255,6 +266,7 @@ rel_expr: rel_expr OP_LT shift_expr
         | signal_ref -> signal_expr
         | hier_ident
         | SYS_IDENT -> sys_ident
+        | STRING -> string_expr
         | concat_expr
         | "(" expr ")"
 

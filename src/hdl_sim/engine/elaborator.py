@@ -109,6 +109,14 @@ def _elaborate_module(
     param_evaluator.resolve_module_params(module.parameters)
     module = expand_module_generates(module, param_evaluator)
 
+    for param_name, param_value in param_evaluator.snapshot().items():
+        local[param_name] = SimNet(
+            name=_scoped_name(prefix, param_name),
+            width=32,
+            kind=DeclKind.INTEGER,
+            value=param_value,
+        )
+
     for port in module.ports:
         if port_bindings and port.name in port_bindings:
             net = port_bindings[port.name]

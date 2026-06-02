@@ -21,7 +21,7 @@ from hdl_sim import __version__
 from hdl_sim.engine.elaborator import elaborate
 from hdl_sim.engine.simulator import Simulator
 from hdl_sim.parser.ast import Design, Module, PortDirection
-from hdl_sim.parser.loader import load_design_with_meta
+from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir
@@ -255,7 +255,7 @@ def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
             path.relative_to(root)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="example not found") from exc
-        files.append({"path": rel, "content": path.read_text(encoding="utf-8")})
+        files.append({"path": rel, "content": read_verilog_text(path)})
     return files
 
 

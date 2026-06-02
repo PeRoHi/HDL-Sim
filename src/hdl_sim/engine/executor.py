@@ -40,6 +40,54 @@ NetUpdateCallback = Callable[[SimNet, SimTime], None]
 FinishCallback = Callable[[], None]
 
 
+def _format_verilog(fmt: str, values: list[int]) -> tuple[str, int]:
+    import re
+
+    used = 0
+
+    def repl(match):
+        nonlocal used
+        spec = match.group(0)
+        if spec == "%%":
+            return "%"
+        if used >= len(values):
+            return spec
+        value = values[used]
+        used += 1
+        code = spec[-1].lower()
+        if code == "b":
+            return format(value, "b")
+        if code == "h":
+            return format(value, "x")
+        if code == "d":
+            return str(value)
+        return str(value)
+
+    rendered = re.sub(r"%%|%0?\d+?[bhdBHD]|%0?[bhdBHD]", repl, fmt)
+    return rendered, used
+
+
+def render_display_args(args: tuple[DisplayArg, ...], evaluator) -> str:
+    parts: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg.text is not None:
+            following: list[int] = []
+            lookahead = index + 1
+            while lookahead < len(args) and args[lookahead].expr is not None:
+                following.append(evaluator.eval(args[lookahead].expr))
+                lookahead += 1
+            rendered, used = _format_verilog(arg.text, following)
+            parts.append(rendered)
+            index += 1 + used
+            continue
+        if arg.expr is not None:
+            parts.append(str(evaluator.eval(arg.expr)))
+        index += 1
+    return "".join(parts)
+
+
 @dataclass(slots=True)
 class ProcessContext:
     queue: EventQueue
@@ -290,8 +338,8 @@ class StatementRunner:
             if self._ctx.on_dumpvars is not None:
                 self._ctx.on_dumpvars(stmt.args)
             return
-        msg = f"unsupported system task: {stmt.name}"
-        raise RuntimeError(msg)
+        # Unknown vendor/PLI system tasks (e.g. $sdf_annotate) are ignored.
+        return
 
     def _execute_statement_list(
         self,
@@ -341,21 +389,7 @@ class StatementRunner:
         nested_runner.execute(stmt, on_complete=after_stmt)
 
     def _execute_display(self, stmt: Display) -> None:
-        parts: list[str] = []
-        format_values: list[int] = []
-        for arg in stmt.args:
-            if arg.text is not None:
-                parts.append(arg.text)
-            elif arg.expr is not None:
-                format_values.append(self._ctx.evaluator.eval(arg.expr))
-        if parts and format_values:
-            message = parts[0] % tuple(format_values)
-        elif parts:
-            message = "".join(parts)
-        elif format_values:
-            message = " ".join(str(value) for value in format_values)
-        else:
-            message = ""
+        message = render_display_args(stmt.args, self._ctx.evaluator)
         print(message, flush=True)
         if self._ctx.on_display is not None:
             self._ctx.on_display(message, self._now())
