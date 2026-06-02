@@ -11,6 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+# Source checkout: allow `python -m hdl_sim.web.launcher` without pip install.
+if not getattr(sys, "frozen", False):
+    try:
+        import hdl_sim  # noqa: F401
+    except ModuleNotFoundError:
+        _src = Path(__file__).resolve().parents[2]
+        if (_src / "hdl_sim").is_dir():
+            sys.path.insert(0, str(_src))
+
 from hdl_sim.web.port_util import (
     DEFAULT_UI_PORT,
     ensure_default_port,
@@ -19,6 +28,7 @@ from hdl_sim.web.port_util import (
     wait_for_server,
 )
 from hdl_sim.web.paths import project_root
+from hdl_sim.web.runtime import ensure_stdio, prepare_runtime
 
 DEFAULT_PORT = DEFAULT_UI_PORT
 REQUIRED_PACKAGES = ("fastapi", "uvicorn", "lark")
@@ -117,6 +127,34 @@ def open_browser_later(url: str, *, delay: float = 0.3) -> None:
     threading.Timer(delay, _open).start()
 
 
+def open_ui_window(
+    url: str,
+    *,
+    server: RunningServer | None = None,
+    native: bool = False,
+    on_log: Callable[[str], None] | None = None,
+) -> None:
+    """Open the UI in a native window or the default browser."""
+
+    if native:
+        from hdl_sim.web.native_window import open_native_window, pywebview_available, pywebview_help
+
+        if not pywebview_available():
+            msg = pywebview_help()
+            if on_log is not None:
+                on_log(msg)
+            else:
+                print(msg, file=sys.stderr)
+            open_browser_later(url)
+            return
+        if on_log is not None:
+            on_log("専用ウィンドウで開きます")
+        open_native_window(url, server=server)
+        return
+
+    open_browser_later(url)
+
+
 @dataclass(slots=True)
 class RunningServer:
     host: str
@@ -137,10 +175,12 @@ def start_server(
     port: int = DEFAULT_PORT,
     *,
     open_browser: bool = True,
+    native_window: bool = False,
     reload: bool = False,
     blocking: bool = True,
     on_log: Callable[[str], None] | None = None,
 ) -> RunningServer | int:
+    prepare_runtime()
     ensure_src_on_path()
     try:
         port = prepare_ui_port(host, port, on_log=on_log)
@@ -157,8 +197,15 @@ def start_server(
 
     import uvicorn
 
+    if is_frozen():
+        from hdl_sim.web.app import create_app
+
+        app_target = create_app
+    else:
+        app_target = "hdl_sim.web.app:create_app"
+
     config = uvicorn.Config(
-        "hdl_sim.web.app:create_app",
+        app_target,
         factory=True,
         host=host,
         port=port,
@@ -179,10 +226,14 @@ def start_server(
         thread.join(timeout=3)
         return 2
 
+    running = RunningServer(host=host, port=port, url=url, thread=thread, server=server)
+
     if open_browser:
+        if native_window:
+            open_ui_window(url, server=running, native=True, on_log=on_log)
+            return 0 if blocking else running
         open_browser_later(url)
 
-    running = RunningServer(host=host, port=port, url=url, thread=thread, server=server)
     if blocking:
         print("=" * 58)
         print("HDL-Sim UI を起動します")
@@ -202,6 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind (default: 8765)")
     parser.add_argument("--no-open", action="store_true", help="Do not open the browser automatically")
+    parser.add_argument(
+        "--window",
+        action="store_true",
+        help="Open in a dedicated desktop window (requires pywebview)",
+    )
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for development")
     parser.add_argument("--gui", action="store_true", help="Open the small GUI launcher (no terminal needed)")
     return parser
@@ -212,18 +268,20 @@ def run(
     port: int = DEFAULT_PORT,
     *,
     open_browser: bool = True,
+    native_window: bool = False,
     reload: bool = False,
     gui: bool = False,
 ) -> int:
     if gui:
         from hdl_sim.web.gui_launcher import run_gui
 
-        run_gui(host=host, port=port)
+        run_gui(host=host, port=port, native_window=native_window)
         return 0
     result = start_server(
         host=host,
         port=port,
         open_browser=open_browser,
+        native_window=native_window,
         reload=reload,
         blocking=True,
     )
@@ -231,11 +289,13 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    prepare_runtime()
     args = build_parser().parse_args(argv)
     return run(
         host=args.host,
         port=args.port,
         open_browser=not args.no_open,
+        native_window=args.window,
         reload=args.reload,
         gui=args.gui,
     )

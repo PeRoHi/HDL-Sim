@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import tempfile
 import traceback
 from pathlib import Path
@@ -25,8 +26,10 @@ from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir
 from hdl_sim.web import projects as project_store
+from hdl_sim.web import spj_store
+from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.4.0"
+UI_BUILD = "0.5.1"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -299,9 +302,27 @@ def create_app() -> FastAPI:
             "version_label": f"Ver {__version__}",
             "build": UI_BUILD,
             "ui_dir": str(UI_DIR.resolve()),
+            "spj_dir": str(spj_store.spj_dir().resolve()),
+            "data_dir": str(spj_store.spj_dir().resolve().parent),
+            "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
             "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
         }
+
+    @app.get("/api/update-check")
+    def api_update_check(refresh: bool = False) -> dict[str, Any]:
+        try:
+            return check_for_updates(__version__, force_refresh=refresh)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "current_version": __version__,
+                "latest_version": __version__,
+                "update_available": False,
+                "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
+                "download_url": None,
+                "error": str(exc),
+            }
 
     @app.get("/api/examples")
     def list_examples() -> list[dict[str, Any]]:
@@ -390,6 +411,38 @@ def create_app() -> FastAPI:
                 top=req.top,
                 label=req.label,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/spj/info")
+    def api_spj_info() -> dict[str, Any]:
+        try:
+            return {
+                "path": str(spj_store.spj_dir().resolve()),
+                "files": spj_store.list_spj_files(),
+            }
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/spj/{filename}")
+    def api_load_spj(filename: str) -> dict[str, Any]:
+        try:
+            loaded = spj_store.load_spj_file(filename)
+            return {"filename": loaded["filename"], **loaded["data"]}
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="spj file not found") from exc
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/spj/{filename}")
+    def api_save_spj(filename: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("format") != "hdl-sim-project":
+            raise HTTPException(status_code=400, detail="invalid spj format")
+        if not payload.get("files"):
+            raise HTTPException(status_code=400, detail="files required")
+        try:
+            saved = spj_store.save_spj_file(filename, payload)
+            return {"ok": True, **saved}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

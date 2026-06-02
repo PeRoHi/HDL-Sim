@@ -4,17 +4,30 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.4.0" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.4.0" />
+  <meta name="hdl-sim-ui-build" content="0.5.1" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.1" />
 </head>
 <body>
-  <!-- Compact toolbar -->
+  <!-- Silos-style menu bar -->
+  <nav id="menubar" class="menubar" aria-label="メインメニュー">
+    <div class="menubar-brand" title="HDL-Sim UI バージョン">
+      <span id="app-version" class="brand-ver">Ver 0.5.1</span>
+      <span class="brand-name">HDL-Sim</span>
+    </div>
+    <button type="button" class="menubar-btn" data-menu="file">File</button>
+    <button type="button" class="menubar-btn" data-menu="edit">Edit</button>
+    <button type="button" class="menubar-btn" data-menu="view">View</button>
+    <button type="button" class="menubar-btn" data-menu="project">Project</button>
+    <button type="button" class="menubar-btn" data-menu="debug">Debug</button>
+    <button type="button" class="menubar-btn" data-menu="window">Window</button>
+    <button type="button" class="menubar-btn" data-menu="help">Help</button>
+  </nav>
+  <div id="menu-dropdown" class="menu-dropdown" role="menu" hidden></div>
+  <div id="update-banner" class="update-banner" hidden role="status"></div>
+
+  <!-- Simulation toolbar -->
   <header class="toolbar" role="banner">
     <div class="toolbar-left">
-      <div class="brand-block">
-        <span id="app-version" class="version-badge" title="HDL-Sim UI バージョン">Ver 0.4.0</span>
-        <span class="brand" title="HDL-Sim">HDL-Sim</span>
-      </div>
       <div class="toolbar-group" role="toolbar" aria-label="実行">
         <button type="button" id="btn-run" class="tb-btn primary" title="実行 (F5)" aria-label="実行">
           <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
@@ -42,8 +55,9 @@
     <div class="toolbar-center">
       <label class="tb-field tb-field-top">
         <span class="tb-field-label">Top</span>
-        <input type="text" id="input-top" list="top-module-list" placeholder="auto" spellcheck="false" autocomplete="off" />
-        <datalist id="top-module-list"></datalist>
+        <select id="select-top" title="開いている .v ファイル内の module 名">
+          <option value="">(auto)</option>
+        </select>
       </label>
       <label class="tb-field">
         <span class="tb-field-label">Until</span>
@@ -78,6 +92,12 @@
             </select>
             <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
             <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
+            <label class="project-label" for="select-spj">SPJ</label>
+            <select id="select-spj" title="HDL-Sim/spj 内のプロジェクト">
+              <option value="">— .spj —</option>
+            </select>
+            <button type="button" id="btn-open-spj" class="mini-btn" title=".spj を開く (./spj/)">Open</button>
+            <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として ./spj/ に保存">Save</button>
           </div>
           <div class="pane-tabs" role="tablist">
             <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
@@ -91,7 +111,7 @@
                 <button type="button" id="btn-delete-file" class="mini-btn danger" title="選択ファイルを削除">− Del</button>
                 <input type="file" id="file-import-input" class="visually-hidden" multiple accept=".v,.sv,.vh,.svh,text/plain" tabindex="-1" aria-hidden="true" />
               </div>
-              <div id="file-tree" class="tree-view" tabindex="0"></div>
+              <div id="file-tree" class="tree-view" tabindex="0" aria-label="ワークスペースファイル"></div>
             </div>
             <div id="view-hierarchy" class="pane-view" role="tabpanel" hidden>
               <div id="hierarchy-tree" class="tree-view" tabindex="0"></div>
@@ -103,28 +123,14 @@
           </div>
         </aside>
 
-        <!-- Center: Editor -->
+        <!-- Center: MDI workspace -->
         <section id="pane-editor" class="pane pane-editor" aria-label="エディタ">
-          <div id="editor-tabs" class="editor-tabs" role="tablist"></div>
-          <div id="editor-host" class="editor-host"></div>
+          <div id="mdi-desktop" class="mdi-desktop" aria-label="ワークスペース">
+            <div id="mdi-canvas" class="mdi-canvas"></div>
+          </div>
+          <div id="editor-tabs" class="editor-tabs visually-hidden" role="tablist"></div>
+          <div id="editor-host" class="editor-host visually-hidden"></div>
         </section>
-
-        <!-- Right: Waveform (collapsible) -->
-        <aside id="pane-waveform" class="pane pane-waveform" aria-label="波形">
-          <div class="pane-header-bar">
-            <span class="pane-title">Waveform</span>
-            <div class="pane-header-actions">
-              <button type="button" id="btn-wave-fit" class="mini-btn" title="先頭へスクロールして再描画">Fit</button>
-              <button type="button" id="btn-wave-close" class="mini-btn icon-only" title="閉じる" aria-label="波形を閉じる">×</button>
-            </div>
-          </div>
-          <div class="wave-toolbar">
-            <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
-          </div>
-          <div id="waveform-wrap" class="waveform-wrap">
-            <canvas id="waveform-canvas"></canvas>
-          </div>
-        </aside>
       </div>
 
       <!-- Bottom: Console -->
@@ -140,7 +146,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.4.0"></script>
-  <script src="/assets/js/app.js?v=0.4.0" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.5.1"></script>
+  <script src="/assets/js/menu-bar.js?v=0.5.1"></script>
+  <script src="/assets/js/app.js?v=0.5.1" type="module"></script>
 </body>
 </html>

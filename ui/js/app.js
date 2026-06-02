@@ -2,6 +2,8 @@
  * HDL-Sim IDE-style web UI
  */
 
+import { createWorkspaceTree, scanModulesInWorkspace } from "./workspace-tree.js";
+
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
 \`timescale 1ns/1ps
 
@@ -44,9 +46,13 @@ const $ = (id) => document.getElementById(id);
 const fileStore = new Map();
 let activeFile = "design.v";
 let editor = null;
+const fileEditors = new Map();
+const mdiWindows = new Map();
+let mdiZ = 10;
 let lastWaveform = null;
 let selectedSignal = null;
 let waveformVisible = false;
+let waveZoom = 1;
 let abortController = null;
 
 /** @type {Split.Instance | null} */
@@ -60,6 +66,24 @@ const SPLIT_SIZES = {
 };
 
 let currentProject = "";
+let spjDirPath = "";
+const RECENT_SPJ_KEY = "hdl-sim-recent-spj";
+const RECENT_SPJ_MAX = 8;
+
+const viewState = {
+  mainToolbar: true,
+  outputPanel: true,
+  projectBar: true,
+};
+
+let simRunning = false;
+let debugSingleStep = false;
+
+/** @type {ReturnType<typeof createWorkspaceTree> | null} */
+let workspaceTree = null;
+
+const UI_VERSION_KEY = "hdl-sim-ui-version";
+const DISMISS_UPDATE_KEY = "hdl-sim-dismiss-update";
 
 function initFiles() {
   fileStore.set("design.v", { content: DEFAULT_SOURCE, model: null });
@@ -72,7 +96,7 @@ function setStatus(text, kind = "") {
 }
 
 function appendConsole(text, kind = "") {
-  const el = $("console-output");
+  const targets = [$("console-output"), $("mdi-console-output")].filter(Boolean);
   if (text == null || text === "") return;
 
   const prefix =
@@ -101,24 +125,30 @@ function appendConsole(text, kind = "") {
     const row = document.createElement("div");
     row.className = "console-line" + (lineKind ? ` line-${lineKind}` : "");
     row.textContent = (index === 0 ? prefix : "") + line;
-    el.appendChild(row);
+    targets.forEach((el) => el.appendChild(row.cloneNode(true)));
   });
-  el.scrollTop = el.scrollHeight;
+  targets.forEach((el) => { el.scrollTop = el.scrollHeight; });
 }
 
 function clearConsole() {
   $("console-output").innerHTML = "";
+  const mdiOut = $("mdi-console-output");
+  if (mdiOut) mdiOut.innerHTML = "";
 }
 
 function saveActiveEditor() {
-  if (!editor || !activeFile) return;
-  const entry = fileStore.get(activeFile);
-  if (entry) entry.content = editor.getValue();
+  for (const [, entry] of fileStore) {
+    if (entry.model) entry.content = entry.model.getValue();
+  }
+}
+
+function getSelectedTop() {
+  return $("select-top")?.value.trim() || "";
 }
 
 function getPayload() {
   saveActiveEditor();
-  const top = $("input-top").value.trim();
+  const top = getSelectedTop();
   const files = [];
   for (const [path, entry] of fileStore) {
     files.push({ path, content: entry.content });
@@ -133,36 +163,174 @@ function getPayload() {
   };
 }
 
-function updateTopModuleList(moduleNames, suggestedTop) {
-  const datalist = $("top-module-list");
-  datalist.innerHTML = "";
-  if (!moduleNames?.length) return;
-
-  const sorted = [...moduleNames].sort((a, b) => {
-    const score = (n) => {
-      let s = n.length * 0.001;
-      if (n === suggestedTop) s -= 10;
-      if (n.endsWith("_tb") || n === "tb") s -= 5;
-      return s;
-    };
-    return score(a) - score(b) || a.localeCompare(b);
-  });
-
-  sorted.forEach((name) => {
+function refreshTopModulePicker(suggestedTop) {
+  const sel = $("select-top");
+  if (!sel) return;
+  const current = sel.value;
+  const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
+  sel.innerHTML = '<option value="">(auto)</option>';
+  modules.forEach(({ name, path }) => {
     const opt = document.createElement("option");
     opt.value = name;
-    datalist.appendChild(opt);
+    opt.textContent = `${name}  —  ${path}`;
+    sel.appendChild(opt);
   });
-
-  const input = $("input-top");
-  if (!input.value.trim() && suggestedTop) {
-    input.value = suggestedTop;
+  const has = (name) => modules.some((m) => m.name === name);
+  if (current && has(current)) sel.value = current;
+  else if (suggestedTop && has(suggestedTop)) sel.value = suggestedTop;
+  else if (has("tb")) sel.value = "tb";
+  else {
+    const tb = modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_"));
+    if (tb) sel.value = tb.name;
   }
+}
+
+function scheduleTopModuleRefresh() {
+  refreshTopModulePicker();
 }
 
 function syncDeleteButton() {
   const btn = $("btn-delete-file");
   if (btn) btn.disabled = fileStore.size <= 1;
+}
+
+function mdiCanvas() {
+  return $("mdi-canvas");
+}
+
+function bringMdiToFront(win) {
+  if (!win) return;
+  mdiZ += 1;
+  win.style.zIndex = String(mdiZ);
+  document.querySelectorAll(".mdi-window").forEach((node) => node.classList.remove("active"));
+  win.classList.add("active");
+}
+
+function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "" } = {}) {
+  const existing = mdiWindows.get(id);
+  if (existing) {
+    existing.hidden = false;
+    bringMdiToFront(existing);
+    return existing;
+  }
+
+  const win = document.createElement("section");
+  win.className = "mdi-window";
+  win.dataset.mdiId = id;
+  win.style.left = `${x}px`;
+  win.style.top = `${y}px`;
+  win.style.width = `${width}px`;
+  win.style.height = `${height}px`;
+
+  const titlebar = document.createElement("div");
+  titlebar.className = "mdi-titlebar";
+  const titleEl = document.createElement("span");
+  titleEl.className = "mdi-title";
+  titleEl.textContent = title;
+  titlebar.appendChild(titleEl);
+
+  const controls = document.createElement("div");
+  controls.className = "mdi-controls";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "mdi-btn close";
+  close.title = "閉じる";
+  close.textContent = "×";
+  close.addEventListener("click", (e) => {
+    e.stopPropagation();
+    win.hidden = true;
+    if (id === "waveform") {
+      waveformVisible = false;
+      $("btn-wave-toggle")?.classList.remove("active");
+    }
+  });
+  controls.appendChild(close);
+  titlebar.appendChild(controls);
+
+  const body = document.createElement("div");
+  body.className = `mdi-body ${bodyClass}`.trim();
+
+  win.appendChild(titlebar);
+  win.appendChild(body);
+  mdiCanvas().appendChild(win);
+  mdiWindows.set(id, win);
+  bringMdiToFront(win);
+
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+  titlebar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    bringMdiToFront(win);
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = win.offsetLeft;
+    startTop = win.offsetTop;
+    titlebar.setPointerCapture(e.pointerId);
+  });
+  titlebar.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
+    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
+  });
+  titlebar.addEventListener("pointerup", (e) => {
+    dragging = false;
+    titlebar.releasePointerCapture(e.pointerId);
+  });
+  win.addEventListener("pointerdown", () => bringMdiToFront(win));
+
+  return win;
+}
+
+function initMdiPan() {
+  const desktop = $("mdi-desktop");
+  if (!desktop) return;
+
+  let panning = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  desktop.addEventListener("pointerdown", (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    panning = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = desktop.scrollLeft;
+    startTop = desktop.scrollTop;
+    desktop.classList.add("panning");
+    desktop.setPointerCapture(e.pointerId);
+  });
+
+  desktop.addEventListener("pointermove", (e) => {
+    if (!panning) return;
+    desktop.scrollLeft = startLeft - (e.clientX - startX);
+    desktop.scrollTop = startTop - (e.clientY - startY);
+  });
+
+  desktop.addEventListener("pointerup", (e) => {
+    if (!panning) return;
+    panning = false;
+    desktop.classList.remove("panning");
+    desktop.releasePointerCapture(e.pointerId);
+  });
+
+  desktop.addEventListener("auxclick", (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
+}
+
+function tileFileWindows() {
+  let index = 0;
+  for (const path of fileStore.keys()) {
+    openFile(path, { focus: index === 0, x: 36 + index * 34, y: 32 + index * 34 });
+    index += 1;
+  }
 }
 
 function loadWorkspaceFiles(fileEntries, top) {
@@ -172,8 +340,15 @@ function loadWorkspaceFiles(fileEntries, top) {
     return;
   }
 
-  for (const [, entry] of fileStore) {
-    entry.model?.dispose();
+  for (const [, view] of fileEditors) view.editor?.dispose();
+  fileEditors.clear();
+  editor = null;
+  for (const [, entry] of fileStore) entry.model?.dispose();
+  for (const [id, win] of mdiWindows) {
+    if (id.startsWith("file:")) {
+      win.remove();
+      mdiWindows.delete(id);
+    }
   }
   fileStore.clear();
 
@@ -182,14 +357,15 @@ function loadWorkspaceFiles(fileEntries, top) {
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
-  if (editor) {
-    const entry = fileStore.get(activeFile);
-    editor.setModel(getOrCreateModel(activeFile, entry.content));
+  if (top != null && top !== "") {
+    const sel = $("select-top");
+    if (sel) sel.value = top;
   }
-  if (top != null) $("input-top").value = top;
   renderEditorTabs();
-  renderFileTree();
+  workspaceTree?.render();
+  refreshTopModulePicker(top || undefined);
   syncDeleteButton();
+  if (window.monaco) tileFileWindows();
 }
 
 async function loadProjects() {
@@ -244,7 +420,7 @@ async function createProject() {
   if (!name?.trim()) return;
   try {
     saveActiveEditor();
-    const top = $("input-top").value.trim() || null;
+    const top = getSelectedTop() || null;
     await api("/api/projects", { name: name.trim(), top });
     currentProject = name.trim();
     await loadProjects();
@@ -264,7 +440,7 @@ async function saveCurrentProject(showPrompt = true) {
     if (!name?.trim()) return;
     name = name.trim();
     try {
-      await api("/api/projects", { name, top: $("input-top").value.trim() || null });
+      await api("/api/projects", { name, top: getSelectedTop() || null });
       currentProject = name;
       await loadProjects();
       $("select-project").value = name;
@@ -294,6 +470,354 @@ async function saveCurrentProject(showPrompt = true) {
   }
 }
 
+function currentProjectFileName() {
+  const base = currentProject || getSelectedTop() || "hdl_sim_project";
+  return `${base.replace(/[^A-Za-z0-9_-]+/g, "_")}.spj`;
+}
+
+function buildSpjPayload() {
+  const payload = getPayload();
+  return {
+    format: "hdl-sim-project",
+    version: 1,
+    name: currentProject || currentProjectFileName().replace(/\.spj$/i, ""),
+    top: payload.top,
+    until: payload.until,
+    max_events: payload.max_events,
+    files: payload.files,
+  };
+}
+
+function applySpjData(data, filename) {
+  if (data.format !== "hdl-sim-project" || !Array.isArray(data.files)) {
+    throw new Error("HDL-Sim project fileではありません");
+  }
+  currentProject = data.name || String(filename || "").replace(/\.spj$/i, "");
+  $("select-project").value = "";
+  $("select-example").value = "";
+  if (data.until != null) $("input-until").value = data.until;
+  if (data.max_events != null) $("input-max-events").value = data.max_events;
+  loadWorkspaceFiles(data.files, data.top || "");
+}
+
+async function loadSpjFileList(selectName) {
+  const sel = $("select-spj");
+  if (!sel) return;
+  try {
+    const info = await api("/api/spj/info");
+    spjDirPath = info.path || spjDirPath;
+    const keep = selectName || sel.value;
+    sel.innerHTML = '<option value="">— .spj —</option>';
+    for (const file of info.files || []) {
+      const opt = document.createElement("option");
+      opt.value = file.name;
+      opt.textContent = file.label || file.name;
+      sel.appendChild(opt);
+    }
+    if (keep && [...sel.options].some((o) => o.value === keep)) {
+      sel.value = keep;
+    }
+  } catch (e) {
+    appendConsole(String(e), "err");
+  }
+}
+
+async function saveProjectFile() {
+  try {
+    const data = buildSpjPayload();
+    const filename = currentProjectFileName();
+    const saved = await api(
+      `/api/spj/${encodeURIComponent(filename)}`,
+      data,
+      undefined,
+      "PUT"
+    );
+    await loadSpjFileList(saved.filename);
+    rememberRecentSpj(saved.filename);
+    appendConsole(`[spj] saved: ${saved.path}`, "ok");
+    setStatus(`Saved: ${saved.filename}`, "ok");
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("SPJ save failed", "err");
+  }
+}
+
+function normalizeSpjFilename(name) {
+  let cleaned = name.trim().replace(/\\/g, "/").split("/").pop() || "project.spj";
+  if (!cleaned.toLowerCase().endsWith(".spj")) cleaned += ".spj";
+  return cleaned.replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+
+async function saveProjectFileAs() {
+  const suggested = currentProjectFileName();
+  const name = prompt("Save As (.spj):", suggested);
+  if (!name?.trim()) return;
+  try {
+    const data = buildSpjPayload();
+    const filename = normalizeSpjFilename(name);
+    data.name = filename.replace(/\.spj$/i, "");
+    const saved = await api(
+      `/api/spj/${encodeURIComponent(filename)}`,
+      data,
+      undefined,
+      "PUT"
+    );
+    await loadSpjFileList(saved.filename);
+    rememberRecentSpj(saved.filename);
+    appendConsole(`[spj] saved as: ${saved.path}`, "ok");
+    setStatus(`Saved: ${saved.filename}`, "ok");
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("SPJ save failed", "err");
+  }
+}
+
+function getRecentSpjFiles() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_SPJ_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecentSpj(filename) {
+  if (!filename) return;
+  const list = getRecentSpjFiles().filter((name) => name !== filename);
+  list.unshift(filename);
+  localStorage.setItem(RECENT_SPJ_KEY, JSON.stringify(list.slice(0, RECENT_SPJ_MAX)));
+  window.HDLSimMenuBar?.refresh();
+}
+
+function menuFileExit() {
+  window.close();
+  appendConsole("ブラウザタブを閉じて終了してください", "info");
+}
+
+function currentSpjFilename() {
+  const selected = $("select-spj")?.value;
+  if (selected) return selected;
+  return currentProjectFileName();
+}
+
+function getActiveMonacoEditor() {
+  if (editor) return editor;
+  return fileEditors.get(activeFile)?.editor || null;
+}
+
+function triggerEditor(action) {
+  const ed = getActiveMonacoEditor();
+  if (!ed) {
+    appendConsole("[edit] エディタにフォーカスがありません", "warn");
+    return false;
+  }
+  ed.focus();
+  ed.trigger("keyboard", action, null);
+  return true;
+}
+
+function getEditMenuContext() {
+  const ed = getActiveMonacoEditor();
+  const noSelection = !ed || ed.getSelection()?.isEmpty();
+  return {
+    "edit.cut": noSelection,
+    "edit.copy": noSelection,
+    "edit.clear": noSelection,
+    "edit.find-next": true,
+  };
+}
+
+function applyViewState() {
+  document.body.classList.toggle("view-hide-main-toolbar", !viewState.mainToolbar);
+  document.body.classList.toggle("view-hide-output-panel", !viewState.outputPanel);
+  document.body.classList.toggle("view-hide-project-bar", !viewState.projectBar);
+  layoutAllEditors();
+  if (lastWaveform && waveformVisible) drawWave(lastWaveform);
+}
+
+function toggleViewMenu(id) {
+  if (id === "view.main-toolbar") viewState.mainToolbar = !viewState.mainToolbar;
+  if (id === "view.output-panel") viewState.outputPanel = !viewState.outputPanel;
+  if (id === "view.project-bar") viewState.projectBar = !viewState.projectBar;
+  applyViewState();
+  window.HDLSimMenuBar?.refresh();
+}
+
+function menuProjectClose() {
+  currentProject = "";
+  $("select-project").value = "";
+  $("select-spj").value = "";
+  appendConsole("[project] closed", "info");
+  setStatus("Project closed", "ok");
+}
+
+async function menuProjectFiles() {
+  const name = currentSpjFilename();
+  try {
+    const info = await api("/api/spj/info");
+    if (info.files?.some((f) => f.name === name)) {
+      await openSelectedSpjFile(name);
+      return;
+    }
+    appendConsole(`[project] ${name} が ${spjDirPath} にありません`, "warn");
+  } catch (e) {
+    appendConsole(String(e), "err");
+  }
+}
+
+function menuProjectSettings() {
+  const top = prompt("Top module:", getSelectedTop());
+  if (top != null && $("select-top")) $("select-top").value = top;
+}
+
+function getWindowFileList() {
+  const list = [];
+  for (const path of fileStore.keys()) {
+    list.push({ path, label: path.includes("/") ? path.split("/").pop() : path });
+  }
+  const out = mdiWindows.get("output");
+  if (out && !out.hidden) list.push({ path: "__output__", label: "Output" });
+  const wave = mdiWindows.get("waveform");
+  if (wave && !wave.hidden) list.push({ path: "__waveform__", label: "Waveform" });
+  return list;
+}
+
+function windowCascade() {
+  let i = 0;
+  for (const [, win] of mdiWindows) {
+    if (win.hidden) continue;
+    win.style.left = `${36 + i * 28}px`;
+    win.style.top = `${32 + i * 28}px`;
+    i += 1;
+  }
+}
+
+function windowTile() {
+  const canvas = mdiCanvas();
+  if (!canvas) return;
+  const visible = [...mdiWindows.entries()].filter(([, w]) => !w.hidden);
+  const n = visible.length;
+  if (!n) return;
+  const cols = Math.ceil(Math.sqrt(n));
+  const pad = 8;
+  const cellW = Math.max(280, Math.floor((canvas.clientWidth - pad * (cols + 1)) / cols));
+  const cellH = Math.max(180, Math.floor((canvas.clientHeight - pad * 2) / Math.ceil(n / cols)));
+  visible.forEach(([, win], index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    win.style.left = `${pad + col * (cellW + pad)}px`;
+    win.style.top = `${pad + row * (cellH + pad)}px`;
+    win.style.width = `${cellW}px`;
+    win.style.height = `${cellH}px`;
+    win.querySelector(".mdi-body")?.firstElementChild?.dispatchEvent(new Event("resize"));
+  });
+  layoutAllEditors();
+}
+
+function windowOpenFile(path) {
+  if (path === "__output__") {
+    createOutputWindow();
+    return;
+  }
+  if (path === "__waveform__") {
+    toggleWaveform(true);
+    return;
+  }
+  openFile(path);
+}
+
+function toggleDebugSingleStep() {
+  debugSingleStep = !debugSingleStep;
+  appendConsole(`[debug] Single step/breakpoints ${debugSingleStep ? "enabled" : "disabled"}`, "info");
+  window.HDLSimMenuBar?.refresh();
+}
+
+async function debugRestart() {
+  await runElaborate();
+  await runSimulate();
+}
+
+function menuHelpGuide() {
+  appendConsole(
+    "[help] Run(F5) でシミュレーション / Save .spj で ./spj/ に保存 / 中クリック長押しでワークスペース移動",
+    "info"
+  );
+}
+
+async function menuHelpAbout() {
+  try {
+    const info = await api("/api/ui-info");
+    alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
+  } catch {
+    alert("HDL-Sim 0.5.1\nVerilog シミュレータ + Web IDE");
+  }
+}
+
+function getMenuContext() {
+  return {
+    checked: {
+      "view.main-toolbar": viewState.mainToolbar,
+      "view.output-panel": viewState.outputPanel,
+      "view.project-bar": viewState.projectBar,
+      "debug.single-step": debugSingleStep,
+    },
+    disabled: {
+      ...getEditMenuContext(),
+      "debug.break": !simRunning,
+      "debug.finish": true,
+      "debug.restart": false,
+      "debug.step": !debugSingleStep,
+    },
+    hints: {
+      currentSpj: currentSpjFilename(),
+    },
+    recent: {
+      fileRecent: getRecentSpjFiles(),
+      projectRecent: getRecentSpjFiles(),
+    },
+    windowFiles: getWindowFileList(),
+    activeWindow: activeFile,
+  };
+}
+
+async function openSelectedSpjFile(name) {
+  const filename = (name || $("select-spj")?.value || "").trim();
+  if (!filename) {
+    appendConsole(`[spj] 開くファイルを一覧から選んでください (${spjDirPath})`, "warn");
+    return;
+  }
+  const data = await api(`/api/spj/${encodeURIComponent(filename)}`);
+  applySpjData(data, filename);
+  $("select-spj").value = filename;
+  rememberRecentSpj(filename);
+  appendConsole(`[spj] opened: ${filename} (${data.files.length} files)`, "ok");
+  setStatus(`Opened: ${filename}`, "ok");
+  runElaborate();
+}
+
+async function openProjectFilePicker() {
+  try {
+    await loadSpjFileList();
+    const sel = $("select-spj");
+    if (sel?.value) {
+      await openSelectedSpjFile(sel.value);
+      return;
+    }
+    const info = await api("/api/spj/info");
+    if (!info.files?.length) {
+      appendConsole(`[spj] ${spjDirPath} に .spj がありません`, "warn");
+      return;
+    }
+    if (info.files.length === 1) {
+      await openSelectedSpjFile(info.files[0].name);
+      return;
+    }
+    appendConsole(`[spj] 一覧から .spj を選んで Open .spj を押してください`, "info");
+  } catch (e) {
+    appendConsole(String(e), "err");
+    setStatus("SPJ open failed", "err");
+  }
+}
+
 /* ── Split.js layout ── */
 
 function initSplits() {
@@ -306,22 +830,21 @@ function initSplits() {
     onDragEnd: (sizes) => {
       SPLIT_SIZES.v.main = sizes[0];
       SPLIT_SIZES.v.console = sizes[1];
-      editor?.layout();
+      layoutAllEditors();
       if (lastWaveform) drawWave(lastWaveform);
     },
   });
 
-  splitH = Split(["#pane-explorer", "#pane-editor", "#pane-waveform"], {
+  splitH = Split(["#pane-explorer", "#pane-editor"], {
     direction: "horizontal",
-    sizes: [SPLIT_SIZES.h.explorer, SPLIT_SIZES.h.editor, 0],
-    minSize: [140, 280, 0],
+    sizes: [SPLIT_SIZES.h.explorer, SPLIT_SIZES.h.editor],
+    minSize: [140, 360],
     gutterSize: 4,
     snapOffset: 0,
     onDragEnd: (sizes) => {
       SPLIT_SIZES.h.explorer = sizes[0];
       SPLIT_SIZES.h.editor = sizes[1];
-      SPLIT_SIZES.h.wave = sizes[2];
-      editor?.layout();
+      layoutAllEditors();
       if (lastWaveform) drawWave(lastWaveform);
     },
   });
@@ -332,22 +855,15 @@ function toggleWaveform(show) {
   const btn = $("btn-wave-toggle");
 
   if (waveformVisible) {
-    const wave = Math.max(SPLIT_SIZES.h.wave || 28, 22);
-    const explorer = SPLIT_SIZES.h.explorer;
-    const editor = 100 - explorer - wave;
-    splitH.setSizes([explorer, editor, wave]);
-    SPLIT_SIZES.h.wave = wave;
+    createWaveformWindow();
     btn.classList.add("active");
     if (lastWaveform) drawWave(lastWaveform);
   } else {
-    const sizes = splitH.getSizes();
-    SPLIT_SIZES.h.explorer = sizes[0];
-    SPLIT_SIZES.h.editor = sizes[1] + sizes[2];
-    SPLIT_SIZES.h.wave = 0;
-    splitH.setSizes([SPLIT_SIZES.h.explorer, SPLIT_SIZES.h.editor, 0]);
+    const win = mdiWindows.get("waveform");
+    if (win) win.hidden = true;
     btn.classList.remove("active");
   }
-  editor?.layout();
+  layoutAllEditors();
 }
 
 /* ── Explorer tabs ── */
@@ -389,71 +905,128 @@ function renderEditorTabs() {
 }
 
 function renderFileTree() {
-  const root = $("file-tree");
-  root.innerHTML = "";
-
-  const header = document.createElement("div");
-  header.className = "tree-node";
-  header.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">WORKSPACE</span>`;
-  root.appendChild(header);
-
-  const body = document.createElement("div");
-  body.className = "tree-children";
-  renderFileTreeNode(body, buildFileTree(), 0);
-  root.appendChild(body);
-  syncDeleteButton();
+  workspaceTree?.render();
 }
 
-function buildFileTree() {
-  /** @type {Map<string, { dirs: Map<string, any>, files: string[] }>} */
-  const root = { dirs: new Map(), files: [] };
+function initWorkspaceTreeView() {
+  workspaceTree = createWorkspaceTree({
+    fileStore,
+    getRootElement: () => $("file-tree"),
+    getActiveFile: () => activeFile,
+    onOpenFile: (path) => openFile(path),
+    onDeleteFile: (path) => deleteFile(path),
+    onNewFile: (folder) => addFileInFolder(folder),
+    onNewFolder: (parent) => createFolder(parent),
+    onRenameFile: (path) => renameFilePrompt(path),
+    onRenameFolder: (path) => renameFolderPrompt(path),
+    onDeleteFolder: (path) => deleteFolder(path),
+    onMovePath: (from, to) => moveFilePath(from, to),
+    onAfterRender: () => syncDeleteButton(),
+  });
+  workspaceTree.render();
+}
 
-  for (const path of fileStore.keys()) {
-    const parts = path.split("/");
-    let node = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const dir = parts[i];
-      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
-      node = node.dirs.get(dir);
-    }
-    node.files.push(path);
+function renameFilePath(oldPath, newPath) {
+  oldPath = oldPath.replace(/\\/g, "/");
+  newPath = newPath.replace(/\\/g, "/");
+  if (oldPath === newPath || !fileStore.has(oldPath) || fileStore.has(newPath)) return false;
+
+  const entry = fileStore.get(oldPath);
+  const view = fileEditors.get(oldPath);
+  const oldWinId = fileWindowId(oldPath);
+  const win = mdiWindows.get(oldWinId);
+
+  fileStore.delete(oldPath);
+  fileStore.set(newPath, entry);
+
+  if (view) {
+    fileEditors.delete(oldPath);
+    fileEditors.set(newPath, view);
   }
-  return root;
+  if (win) {
+    mdiWindows.delete(oldWinId);
+    win.dataset.mdiId = fileWindowId(newPath);
+    const title = win.querySelector(".mdi-title");
+    if (title) title.textContent = newPath;
+    mdiWindows.set(fileWindowId(newPath), win);
+  }
+  if (entry?.model) {
+    const uri = monaco.Uri.parse(`file:///${newPath}`);
+    monaco.editor.setModelLanguage(entry.model, "verilog");
+    // keep same model, update uri by recreating if needed
+  }
+  if (activeFile === oldPath) activeFile = newPath;
+  renderEditorTabs();
+  workspaceTree?.render();
+  refreshTopModulePicker();
+  return true;
 }
 
-function renderFileTreeNode(parentEl, node, depth) {
-  const sortedDirs = [...node.dirs.keys()].sort();
-  sortedDirs.forEach((dirName) => {
-    const dirNode = node.dirs.get(dirName);
-    const row = document.createElement("div");
-    row.className = "tree-node";
-    row.style.paddingLeft = `${depth * 12 + 4}px`;
-    row.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">${dirName}</span>`;
-    parentEl.appendChild(row);
+function moveFilePath(from, to) {
+  if (renameFilePath(from, to)) {
+    appendConsole(`[files] moved: ${from} → ${to}`, "info");
+    return true;
+  }
+  appendConsole(`[files] move failed: ${from} → ${to}`, "warn");
+  return false;
+}
 
-    const childWrap = document.createElement("div");
-    childWrap.className = "tree-children";
-    renderFileTreeNode(childWrap, dirNode, depth + 1);
-    parentEl.appendChild(childWrap);
+function renameFilePrompt(path) {
+  const base = path.includes("/") ? path.split("/").pop() : path;
+  const next = prompt("新しいファイル名:", base);
+  if (!next?.trim()) return;
+  let fileName = next.trim().replace(/\\/g, "/");
+  if (!fileName.endsWith(".v") && !fileName.endsWith(".sv")) fileName += ".v";
+  fileName = fileName.split("/").pop();
+  const folder = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+  const dest = folder ? `${folder}/${fileName}` : fileName;
+  if (moveFilePath(path, dest)) runElaborate();
+}
 
-    const twist = row.querySelector(".twist");
-    twist.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const collapsed = childWrap.classList.toggle("collapsed");
-      twist.textContent = collapsed ? "▶" : "▼";
-    });
-  });
+function renameFolderPrompt(folderPath) {
+  const name = folderPath.includes("/") ? folderPath.split("/").pop() : folderPath;
+  const next = prompt("新しいフォルダ名:", name);
+  if (!next?.trim()) return;
+  const parent = folderPath.includes("/") ? folderPath.split("/").slice(0, -1).join("/") : "";
+  const newName = next.trim().replace(/\\/g, "/").split("/").pop();
+  const newFolder = parent ? `${parent}/${newName}` : newName;
+  if (newFolder === folderPath) return;
 
-  node.files.sort().forEach((path) => {
-    const row = document.createElement("div");
-    row.className = "tree-node" + (path === activeFile ? " selected" : "");
-    row.style.paddingLeft = `${depth * 12 + 4}px`;
-    const name = path.includes("/") ? path.split("/").pop() : path;
-    row.innerHTML = `<span class="twist empty"></span><span class="icon">📄</span><span class="label">${name}</span>`;
-    row.title = path;
-    row.addEventListener("click", () => openFile(path));
-    parentEl.appendChild(row);
-  });
+  const paths = [...fileStore.keys()].filter((p) => p.startsWith(`${folderPath}/`));
+  for (const p of paths) {
+    const dest = newFolder + p.slice(folderPath.length);
+    renameFilePath(p, dest);
+  }
+  workspaceTree?.removeVirtualFolderPrefix(folderPath);
+  workspaceTree?.addVirtualFolder(newFolder);
+  workspaceTree?.setContextFolder(newFolder);
+  workspaceTree?.render();
+}
+
+function deleteFolder(folderPath) {
+  const paths = [...fileStore.keys()].filter((p) => p.startsWith(`${folderPath}/`));
+  if (paths.length && !window.confirm(`「${folderPath}」内の ${paths.length} ファイルを削除しますか？`)) {
+    return;
+  }
+  paths.forEach((p) => deleteFile(p, { confirmDelete: false }));
+  workspaceTree?.removeVirtualFolderPrefix(folderPath);
+  workspaceTree?.render();
+}
+
+function createFolder(parent) {
+  const name = prompt("フォルダ名:", "src");
+  if (!name?.trim()) return;
+  const cleaned = name.trim().replace(/\\/g, "/").split("/").pop();
+  const folder = parent ? `${parent}/${cleaned}` : cleaned;
+  workspaceTree?.addVirtualFolder(folder);
+  workspaceTree?.setContextFolder(folder);
+  workspaceTree?.render();
+  appendConsole(`[files] folder: ${folder}`, "info");
+}
+
+function addFileInFolder(folder) {
+  const defaultName = folder ? `${folder}/design.v` : "design.v";
+  addFile(defaultName, { skipPrompt: false, defaultName });
 }
 
 function getOrCreateModel(path, content) {
@@ -465,24 +1038,84 @@ function getOrCreateModel(path, content) {
   return model;
 }
 
-function openFile(path) {
+function layoutAllEditors() {
+  for (const [, view] of fileEditors) view.editor?.layout();
+}
+
+function fileWindowId(path) {
+  return `file:${path}`;
+}
+
+function openFile(path, options = {}) {
   if (!fileStore.has(path)) return;
   saveActiveEditor();
   activeFile = path;
   const entry = fileStore.get(path);
-  editor.setModel(getOrCreateModel(path, entry.content));
+  const id = fileWindowId(path);
+  const index = [...fileStore.keys()].indexOf(path);
+  const win = createMdiWindow(id, path, {
+    x: options.x ?? 40 + Math.max(index, 0) * 28,
+    y: options.y ?? 38 + Math.max(index, 0) * 28,
+    width: 560,
+    height: 390,
+    bodyClass: "mdi-editor",
+  });
+  win.hidden = false;
+
+  let view = fileEditors.get(path);
+  if (!view) {
+    const body = win.querySelector(".mdi-body");
+    const model = getOrCreateModel(path, entry.content);
+    const ed = monaco.editor.create(body, {
+      model,
+      theme: "hdl-dark",
+      automaticLayout: true,
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Consolas', 'Source Code Pro', monospace",
+      lineNumbers: "on",
+      minimap: { enabled: true, scale: 1, maxColumn: 80 },
+      scrollBeyondLastLine: false,
+      wordWrap: "off",
+      renderWhitespace: "selection",
+      tabSize: 4,
+      insertSpaces: true,
+      folding: true,
+      glyphMargin: true,
+    });
+    ed.onDidFocusEditorText(() => {
+      activeFile = path;
+      editor = ed;
+      renderEditorTabs();
+      workspaceTree?.render();
+      bringMdiToFront(win);
+    });
+    ed.onDidChangeModelContent(() => {
+      scheduleTopModuleRefresh();
+    });
+    view = { editor: ed, window: win };
+    fileEditors.set(path, view);
+  }
+  editor = view.editor;
+  bringMdiToFront(win);
+  view.editor.layout();
   renderEditorTabs();
   renderFileTree();
 }
 
-function addFile(name) {
-  let path = name || prompt("ファイル名 (例: dut.v または lib/and2.v):", "dut.v");
+function addFile(name, options = {}) {
+  const folder = workspaceTree?.getContextFolder() || "";
+  const defaultName = options.defaultName || (folder ? `${folder}/design.v` : "design.v");
+  let path = name;
+  if (!options.skipPrompt) {
+    path = prompt("ファイル名 (フォルダ/ファイル.v):", defaultName);
+  }
   if (!path) return;
   path = path.trim().replace(/\\/g, "/");
   if (!path.endsWith(".v") && !path.endsWith(".sv")) path += ".v";
-  putFileContent(path, `// ${path}\n`);
+  putFileContent(path, `// ${path}\nmodule ${path.split("/").pop().replace(/\.(v|sv)$/i, "")};\nendmodule\n`);
   openFile(path);
   switchExplorerTab("files");
+  refreshTopModulePicker();
 }
 
 function putFileContent(path, content) {
@@ -521,10 +1154,11 @@ async function importLocalFiles(fileList) {
 
   if (!loaded.length) return;
 
-  openFile(loaded[loaded.length - 1]);
+  loaded.forEach((path, index) => openFile(path, { focus: index === loaded.length - 1 }));
   switchExplorerTab("files");
   renderEditorTabs();
-  renderFileTree();
+  workspaceTree?.render();
+  refreshTopModulePicker();
   appendConsole(`[open] ${loaded.join(", ")}`, "info");
   setStatus(`${loaded.length} file(s) opened`, "ok");
 }
@@ -540,6 +1174,15 @@ function deleteFile(path, { confirmDelete = true } = {}) {
   if (confirmDelete && !window.confirm(`「${target}」を削除しますか？`)) return;
 
   const entry = fileStore.get(target);
+  const view = fileEditors.get(target);
+  if (editor === view?.editor) editor = null;
+  if (view?.editor) view.editor.dispose();
+  fileEditors.delete(target);
+  const win = mdiWindows.get(fileWindowId(target));
+  if (win) {
+    win.remove();
+    mdiWindows.delete(fileWindowId(target));
+  }
   if (entry?.model) {
     entry.content = entry.model.getValue();
     entry.model.dispose();
@@ -667,18 +1310,86 @@ function highlightSignal(name) {
   drawWave(filtered);
 }
 
+function createOutputWindow() {
+  const win = createMdiWindow("output", "Output", {
+    x: 70,
+    y: 330,
+    width: 640,
+    height: 250,
+    bodyClass: "mdi-output",
+  });
+  const body = win.querySelector(".mdi-body");
+  if (!body.id) {
+    body.id = "mdi-console-output";
+    body.classList.add("console-output");
+  }
+  win.hidden = false;
+  bringMdiToFront(win);
+  return win;
+}
+
+function createWaveformWindow() {
+  const win = createMdiWindow("waveform", "Waveform", {
+    x: 760,
+    y: 80,
+    width: 720,
+    height: 360,
+    bodyClass: "mdi-waveform",
+  });
+  const body = win.querySelector(".mdi-body");
+  if (!body.querySelector("#waveform-canvas")) {
+    body.innerHTML = `
+      <div class="wave-toolbar">
+        <button type="button" id="btn-wave-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
+        <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
+        <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
+        <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
+      </div>
+      <div id="waveform-wrap" class="waveform-wrap">
+        <canvas id="waveform-canvas"></canvas>
+      </div>
+    `;
+    body.querySelector("#btn-wave-fit")?.addEventListener("click", fitWaveform);
+    body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
+    body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
+    body.querySelector("#chk-auto-scroll")?.addEventListener("change", () => {
+      if (lastWaveform) drawWave(lastWaveform);
+    });
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(() => {
+        if (!win.hidden && lastWaveform) drawWave(lastWaveform);
+      });
+      observer.observe(body);
+    }
+  }
+  win.hidden = false;
+  waveformVisible = true;
+  bringMdiToFront(win);
+  return win;
+}
+
 function drawWave(waveform) {
   if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
+  createWaveformWindow();
   const canvas = $("waveform-canvas");
   window.HDLSimWaveform.drawWaveform(canvas, waveform, {
     wrap: $("waveform-wrap"),
     autoScroll: $("chk-auto-scroll")?.checked,
+    zoom: waveZoom,
   });
 }
 
 function fitWaveform() {
+  waveZoom = 1;
   const wrap = $("waveform-wrap");
   if (wrap) wrap.scrollLeft = 0;
+  drawWave(lastWaveform);
+}
+
+function setWaveZoom(nextZoom) {
+  waveZoom = Math.min(32, Math.max(1, nextZoom));
+  const auto = $("chk-auto-scroll");
+  if (auto) auto.checked = false;
   drawWave(lastWaveform);
 }
 
@@ -712,10 +1423,12 @@ async function api(path, body, signal, method) {
 }
 
 function setRunning(running) {
+  simRunning = running;
   $("btn-run").disabled = running;
   $("btn-stop").disabled = !running;
   $("btn-elab").disabled = running;
   $("btn-step").disabled = running;
+  window.HDLSimMenuBar?.refresh();
 }
 
 async function loadExamples() {
@@ -782,6 +1495,7 @@ async function openExample(id) {
 
 async function runElaborate() {
   setStatus("Elaborating…", "busy");
+  createOutputWindow();
   try {
     const payload = getPayload();
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
@@ -796,8 +1510,7 @@ async function runElaborate() {
       return;
     }
     renderHierarchy(data.hierarchy);
-    updateTopModuleList(data.module_names || data.overview?.module_names, data.top);
-    if (data.top) $("input-top").placeholder = data.top;
+    refreshTopModulePicker(data.top);
     setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
   } catch (e) {
@@ -811,6 +1524,7 @@ async function runElaborate() {
 async function runSimulate() {
   setStatus("Running…", "busy");
   setRunning(true);
+  createOutputWindow();
   clearConsole();
   abortController = new AbortController();
 
@@ -832,7 +1546,7 @@ async function runSimulate() {
     }
     if (data.console) appendConsole(data.console);
     appendConsole(`time=${data.stop_time} events=${data.events_processed} top=${data.top_module}`, "ok");
-    updateTopModuleList(data.module_names || data.overview?.module_names, data.top_module);
+    refreshTopModulePicker(data.top_module);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
     lastWaveform = data.waveform;
@@ -891,30 +1605,10 @@ function initMonaco() {
       },
     });
 
-    editor = monaco.editor.create($("editor-host"), {
-      model: getOrCreateModel(activeFile, fileStore.get(activeFile).content),
-      theme: "hdl-dark",
-      automaticLayout: true,
-      fontSize: 13,
-      fontFamily: "'Cascadia Code', 'Consolas', 'Source Code Pro', monospace",
-      lineNumbers: "on",
-      minimap: { enabled: true, scale: 1, maxColumn: 80 },
-      scrollBeyondLastLine: false,
-      wordWrap: "off",
-      renderWhitespace: "selection",
-      tabSize: 4,
-      insertSpaces: true,
-      folding: true,
-      glyphMargin: true,
-    });
-
-    editor.onDidChangeModelContent(() => {
-      const entry = fileStore.get(activeFile);
-      if (entry) entry.content = editor.getValue();
-    });
-
+    initWorkspaceTreeView();
+    tileFileWindows();
     renderEditorTabs();
-    renderFileTree();
+    refreshTopModulePicker();
     renderHierarchy(null);
     loadExamples();
     loadProjects();
@@ -929,10 +1623,10 @@ function bindUi() {
   $("btn-elab").addEventListener("click", runElaborate);
   $("btn-clear-console").addEventListener("click", clearConsole);
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
-  $("btn-wave-close").addEventListener("click", () => toggleWaveform(false));
-  $("btn-wave-fit").addEventListener("click", fitWaveform);
+  $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
+  $("btn-wave-fit")?.addEventListener("click", fitWaveform);
   $("btn-open-files").addEventListener("click", () => openFilePicker());
-  $("btn-new-file").addEventListener("click", () => addFile());
+  $("btn-new-file").addEventListener("click", () => addFileInFolder(workspaceTree?.getContextFolder() || ""));
   $("btn-delete-file").addEventListener("click", () => deleteFile());
   $("file-import-input")?.addEventListener("change", (e) => {
     importLocalFiles(e.target.files);
@@ -942,27 +1636,235 @@ function bindUi() {
   $("select-project")?.addEventListener("change", (e) => openProject(e.target.value));
   $("btn-new-project")?.addEventListener("click", () => createProject());
   $("btn-save-project")?.addEventListener("click", () => saveCurrentProject());
+  $("btn-open-spj")?.addEventListener("click", openProjectFilePicker);
+  $("btn-save-spj")?.addEventListener("click", saveProjectFile);
+  $("select-spj")?.addEventListener("change", (e) => {
+    if (e.target.value) openSelectedSpjFile(e.target.value);
+  });
 
   document.querySelectorAll(".pane-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchExplorerTab(tab.dataset.pane));
   });
 
   window.addEventListener("resize", () => {
-    editor?.layout();
-    if (lastWaveform) drawWave(lastWaveform);
+    layoutAllEditors();
+    if (lastWaveform && waveformVisible) drawWave(lastWaveform);
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "F5") return;
-    const tag = e.target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    e.preventDefault();
-    runSimulate();
+    if (handleMenuShortcut(e)) return;
   });
 
   $("chk-auto-scroll")?.addEventListener("change", () => {
     if (lastWaveform) drawWave(lastWaveform);
   });
+
+  initMenuBar();
+}
+
+function initMenuBar() {
+  window.HDLSimMenuBar?.init({
+    getMenuContext,
+    actions: {
+      "file.new": () => addFileInFolder(workspaceTree?.getContextFolder() || ""),
+      "file.open": () => openProjectFilePicker(),
+      "file.save": () => saveProjectFile(),
+      "file.save-as": () => saveProjectFileAs(),
+      "file.recent": (filename) => openSelectedSpjFile(filename),
+      "file.exit": () => menuFileExit(),
+      "edit.undo": () => triggerEditor("undo"),
+      "edit.cut": () => triggerEditor("editor.action.clipboardCutAction"),
+      "edit.copy": () => triggerEditor("editor.action.clipboardCopyAction"),
+      "edit.paste": () => triggerEditor("editor.action.clipboardPasteAction"),
+      "edit.clear": () => {
+        const ed = getActiveMonacoEditor();
+        if (!ed || ed.getSelection()?.isEmpty()) return;
+        ed.executeEdits("clear", [{ range: ed.getSelection(), text: "", forceMoveMarkers: true }]);
+      },
+      "edit.select-all": () => triggerEditor("editor.action.selectAll"),
+      "edit.find": () => triggerEditor("actions.find"),
+      "edit.find-next": () => triggerEditor("editor.action.nextMatchFindAction"),
+      "edit.replace": () => triggerEditor("editor.action.startFindReplaceAction"),
+      "edit.goto-line": () => triggerEditor("editor.action.gotoLine"),
+      "view.main-toolbar": () => toggleViewMenu("view.main-toolbar"),
+      "view.output-panel": () => toggleViewMenu("view.output-panel"),
+      "view.project-bar": () => toggleViewMenu("view.project-bar"),
+      "project.new": () => createProject(),
+      "project.open": () => openProjectFilePicker(),
+      "project.files": () => menuProjectFiles(),
+      "project.save-as": () => saveProjectFileAs(),
+      "project.close": () => menuProjectClose(),
+      "project.reload-files": () => runElaborate(),
+      "project.settings": () => menuProjectSettings(),
+      "project.recent": (filename) => openSelectedSpjFile(filename),
+      "debug.single-step": () => toggleDebugSingleStep(),
+      "debug.go": () => runSimulate(),
+      "debug.break": () => stopSimulation(),
+      "debug.restart": () => debugRestart(),
+      "debug.step": () => runStep(),
+      "window.cascade": () => windowCascade(),
+      "window.tile": () => windowTile(),
+      "window.waveform": () => toggleWaveform(true),
+      "window.open-file": (path) => windowOpenFile(path),
+      "help.guide": () => menuHelpGuide(),
+      "help.about": () => menuHelpAbout(),
+    },
+  });
+  applyViewState();
+}
+
+function handleMenuShortcut(e) {
+  const tag = e.target?.tagName;
+  const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+  if (e.key === "F5" && !e.shiftKey && !e.altKey) {
+    if (inField) return false;
+    e.preventDefault();
+    runSimulate();
+    return true;
+  }
+  if (e.key === "F5" && e.shiftKey) {
+    if (inField) return false;
+    e.preventDefault();
+    debugRestart();
+    return true;
+  }
+  if (e.key === "F6") {
+    if (inField) return false;
+    e.preventDefault();
+    toggleWaveform(true);
+    return true;
+  }
+  if (e.key === "F10") {
+    if (inField) return false;
+    e.preventDefault();
+    runStep();
+    return true;
+  }
+  if (e.key === "Escape") {
+    if (inField) return false;
+    stopSimulation();
+    window.HDLSimMenuBar?.close();
+    return true;
+  }
+  if (e.altKey && e.key === "F5") {
+    e.preventDefault();
+    runElaborate().then(() => runSimulate());
+    return true;
+  }
+  if (!(e.ctrlKey || e.metaKey)) return false;
+  if (inField) return false;
+
+  const key = e.key.toLowerCase();
+  const map = {
+    n: () => createProject(),
+    o: () => openProjectFilePicker(),
+    s: () => saveProjectFile(),
+    z: () => triggerEditor("undo"),
+    x: () => triggerEditor("editor.action.clipboardCutAction"),
+    c: () => triggerEditor("editor.action.clipboardCopyAction"),
+    v: () => triggerEditor("editor.action.clipboardPasteAction"),
+    a: () => triggerEditor("editor.action.selectAll"),
+    f: () => triggerEditor("actions.find"),
+    h: () => triggerEditor("editor.action.startFindReplaceAction"),
+    g: () => triggerEditor("editor.action.gotoLine"),
+    l: () => runElaborate(),
+  };
+  if (map[key]) {
+    e.preventDefault();
+    map[key]();
+    return true;
+  }
+  return false;
+}
+
+function compareSemver(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i += 1) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
+
+function showUpdateBanner(options) {
+  const banner = $("update-banner");
+  if (!banner) return;
+
+  const {
+    latestVersion,
+    currentVersion,
+    releaseUrl,
+    downloadUrl,
+    mode = "remote",
+  } = options;
+
+  const url = downloadUrl || releaseUrl || "https://github.com/PeRoHi/HDL-Sim/releases/latest";
+  const linkLabel = downloadUrl ? "インストーラーをダウンロード" : "リリースを見る";
+
+  let message;
+  if (mode === "local") {
+    message =
+      `<strong>更新あり:</strong> HDL-Sim ${latestVersion} ` +
+      `(前回 ${currentVersion})。ページを再読み込みしてください。`;
+  } else {
+    message =
+      `<strong>新しいバージョンがあります:</strong> ${latestVersion} ` +
+      `(現在 ${currentVersion})。` +
+      ` インストール済みの exe も、新しい Setup を取得して更新できます。`;
+  }
+
+  banner.innerHTML =
+    `<span>${message}</span>` +
+    `<a href="${url}" target="_blank" rel="noopener">${linkLabel}</a>` +
+    `<button type="button" id="btn-dismiss-update">後で</button>`;
+  banner.hidden = false;
+
+  $("btn-dismiss-update")?.addEventListener("click", () => {
+    banner.hidden = true;
+    localStorage.setItem(DISMISS_UPDATE_KEY, latestVersion);
+    if (mode === "local") {
+      localStorage.setItem(UI_VERSION_KEY, latestVersion);
+    }
+  });
+}
+
+function checkForLocalUpdates(info) {
+  if (!info?.version) return;
+  const previous = localStorage.getItem(UI_VERSION_KEY);
+  localStorage.setItem(UI_VERSION_KEY, info.version);
+  if (!previous || compareSemver(info.version, previous) <= 0) return;
+  if (localStorage.getItem(DISMISS_UPDATE_KEY) === info.version) return;
+  showUpdateBanner({
+    latestVersion: info.version,
+    currentVersion: previous,
+    releaseUrl: info.release_url,
+    mode: "local",
+  });
+  appendConsole(`[update] ${previous} → ${info.version}`, "info");
+}
+
+async function checkForRemoteUpdates(currentVersion) {
+  try {
+    const data = await api("/api/update-check");
+    if (!data.ok || !data.update_available) return;
+    if (localStorage.getItem(DISMISS_UPDATE_KEY) === data.latest_version) return;
+    showUpdateBanner({
+      latestVersion: data.latest_version,
+      currentVersion: data.current_version || currentVersion,
+      releaseUrl: data.release_url,
+      downloadUrl: data.download_url,
+      mode: "remote",
+    });
+    appendConsole(
+      `[update] 新しいリリース ${data.latest_version} があります (現在 ${data.current_version})`,
+      "info"
+    );
+  } catch {
+    /* offline or GitHub unreachable */
+  }
 }
 
 async function verifyUiBuild() {
@@ -981,6 +1883,13 @@ async function verifyUiBuild() {
       );
       return;
     }
+    if (info.spj_dir) {
+      spjDirPath = info.spj_dir;
+      appendConsole(`[spj] folder: ${spjDirPath}`, "info");
+    }
+    checkForLocalUpdates(info);
+    await checkForRemoteUpdates(info.version);
+    await loadSpjFileList();
     setStatus("Ready", "ok");
   } catch {
     /* keep static badge */
@@ -990,4 +1899,5 @@ async function verifyUiBuild() {
 initFiles();
 initSplits();
 bindUi();
+initMdiPan();
 initMonaco();

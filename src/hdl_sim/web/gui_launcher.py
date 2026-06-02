@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import sys
-import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
 
 from hdl_sim import __version__
 from hdl_sim.web.launcher import (
@@ -15,15 +13,34 @@ from hdl_sim.web.launcher import (
     is_frozen,
     missing_dependencies,
     open_browser_later,
+    open_ui_window,
     start_server,
 )
+from hdl_sim.web.native_window import pywebview_available, pywebview_help
 from hdl_sim.web.paths import ui_dir
+from hdl_sim.web.runtime import ensure_stdio, prepare_runtime
+
+tk = messagebox = scrolledtext = ttk = None  # lazy-loaded for dev GUI only
+
+
+def _load_tk():
+    global tk, messagebox, scrolledtext, ttk
+    if tk is None:
+        import tkinter as _tk
+        from tkinter import messagebox as _messagebox
+        from tkinter import scrolledtext as _scrolledtext
+        from tkinter import ttk as _ttk
+
+        tk, messagebox, scrolledtext, ttk = _tk, _messagebox, _scrolledtext, _ttk
+    return tk, messagebox, scrolledtext, ttk
 
 
 class HDLSimGuiLauncher:
-    def __init__(self, *, host: str = "127.0.0.1", port: int = 8765) -> None:
+    def __init__(self, *, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+        _load_tk()
         self.host = host
         self.port = port
+        self.native_window = native_window
         self.server: RunningServer | None = None
 
         self.root = tk.Tk()
@@ -56,8 +73,20 @@ class HDLSimGuiLauncher:
         buttons = ttk.Frame(frame)
         buttons.pack(fill=tk.X, pady=(0, 8))
 
-        self.btn_open = ttk.Button(buttons, text="ブラウザを開く", command=self.open_browser, state=tk.DISABLED)
+        self.btn_open = ttk.Button(buttons, text="UI を開く", command=self.open_ui, state=tk.DISABLED)
         self.btn_open.pack(side=tk.LEFT)
+
+        if pywebview_available():
+            self.btn_window = ttk.Button(buttons, text="専用ウィンドウ", command=self.open_native, state=tk.DISABLED)
+            self.btn_window.pack(side=tk.LEFT, padx=(8, 0))
+        else:
+            self.btn_window = None
+            ttk.Label(
+                frame,
+                text="専用ウィンドウ: pip install pywebview",
+                foreground="#666",
+                font=("Segoe UI", 9),
+            ).pack(anchor=tk.W, pady=(0, 4))
 
         self.btn_install = ttk.Button(buttons, text="依存関係をインストール", command=self.install_deps)
         if not is_frozen():
@@ -128,7 +157,8 @@ class HDLSimGuiLauncher:
         result = start_server(
             self.host,
             self.port,
-            open_browser=True,
+            open_browser=not self.native_window,
+            native_window=False,
             blocking=False,
             on_log=self.append_log,
         )
@@ -145,13 +175,29 @@ class HDLSimGuiLauncher:
         self.status.set("起動しました")
         self.url.set(self.server.url)
         self.btn_open.configure(state=tk.NORMAL)
+        if self.btn_window is not None:
+            self.btn_window.configure(state=tk.NORMAL)
         self.append_log(f"URL: {self.server.url}")
         if self.server.port != DEFAULT_PORT:
             self.append_log(f"注意: 既定ポート {DEFAULT_PORT} 以外で起動しています")
+        if self.native_window:
+            self.root.after(100, self.open_native)
 
-    def open_browser(self) -> None:
+    def open_ui(self) -> None:
         if self.server is not None:
             open_browser_later(self.server.url)
+
+    def open_native(self) -> None:
+        if self.server is None:
+            return
+        if not pywebview_available():
+            messagebox.showinfo("HDL-Sim", pywebview_help())
+            return
+        self.root.withdraw()
+        try:
+            open_ui_window(self.server.url, server=self.server, native=True, on_log=self.append_log)
+        finally:
+            self.on_close()
 
     def on_close(self) -> None:
         if self.server is not None:
@@ -162,13 +208,60 @@ class HDLSimGuiLauncher:
         self.root.mainloop()
 
 
-def run_gui(*, host: str = "127.0.0.1", port: int = 8765) -> None:
-    HDLSimGuiLauncher(host=host, port=port).run()
+def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+    _load_tk()
+    HDLSimGuiLauncher(host=host, port=port, native_window=native_window).run()
 
 
 def main() -> int:
+    prepare_runtime()
+    if is_frozen():
+        return run_frozen_desktop()
     run_gui()
     return 0
+
+
+def run_frozen_desktop(*, host: str = "127.0.0.1", port: int = 8765) -> int:
+    """PyInstaller .exe: start server and open the native IDE window directly."""
+
+    ensure_stdio()
+    result = start_server(
+        host,
+        port,
+        open_browser=False,
+        native_window=False,
+        blocking=False,
+    )
+    if isinstance(result, int):
+        _frozen_error("HDL-Sim の起動に失敗しました。")
+        return result
+
+    if pywebview_available():
+        try:
+            open_ui_window(result.url, server=result, native=True)
+            return 0
+        except Exception as exc:
+            _frozen_error(f"専用ウィンドウを開けませんでした。\n{exc}\n\nブラウザで開きます。")
+
+    open_browser_later(result.url)
+    try:
+        result.thread.join()
+    except KeyboardInterrupt:
+        result.stop()
+    return 0
+
+
+def _frozen_error(message: str) -> None:
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("HDL-Sim", message)
+        root.destroy()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

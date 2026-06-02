@@ -63,5 +63,38 @@ def test_install_dependencies_skipped_when_frozen(monkeypatch) -> None:
     assert "同梱" in msg or "bundled" in msg.lower() or "PyInstaller" in msg
 
 
+def test_launcher_parser_window_flag() -> None:
+    args = build_parser().parse_args(["--window"])
+    assert args.window is True
+
+
+def test_frozen_desktop_skips_tk_when_native_available(monkeypatch) -> None:
+    import hdl_sim.web.gui_launcher as gui_launcher
+
+    calls: list[str] = []
+
+    class FakeServer:
+        url = "http://127.0.0.1:8765"
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(gui_launcher, "is_frozen", lambda: True)
+    monkeypatch.setattr(gui_launcher, "pywebview_available", lambda: True)
+    monkeypatch.setattr(
+        gui_launcher,
+        "start_server",
+        lambda *a, **k: calls.append("start") or FakeServer(),
+    )
+    monkeypatch.setattr(
+        gui_launcher,
+        "open_ui_window",
+        lambda *a, **k: calls.append("native"),
+    )
+
+    assert gui_launcher.run_frozen_desktop() == 0
+    assert calls == ["start", "native"]
+
+
 def test_is_frozen_false_in_dev() -> None:
     assert is_frozen() is False
