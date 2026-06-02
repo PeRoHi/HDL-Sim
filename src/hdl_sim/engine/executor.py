@@ -124,7 +124,8 @@ class StatementRunner:
             return
 
         if isinstance(stmt, DelayControl):
-            target_time = self._now() + stmt.delay
+            delay_val = int(self._ctx.evaluator.eval(stmt.delay))
+            target_time = self._now() + delay_val
 
             def resume() -> None:
                 self.execute(stmt.body, on_complete=on_complete)
@@ -307,7 +308,8 @@ class StatementRunner:
         stmt = statements[index]
 
         if isinstance(stmt, DelayControl):
-            target_time = self._now() + stmt.delay
+            delay_val = int(self._ctx.evaluator.eval(stmt.delay))
+            target_time = self._now() + delay_val
 
             def resume_after_delay() -> None:
                 runner = StatementRunner(self._state)

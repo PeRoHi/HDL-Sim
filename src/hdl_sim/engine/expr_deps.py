@@ -72,7 +72,7 @@ def identifiers_in_stmt(stmt: Stmt) -> set[str]:
     if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
         return identifiers_in_lvalue(stmt.target) | identifiers_in_expr(stmt.expr)
     if isinstance(stmt, DelayControl):
-        return identifiers_in_stmt(stmt.body)
+        return identifiers_in_expr(stmt.delay) | identifiers_in_stmt(stmt.body)
     if isinstance(stmt, Forever):
         return identifiers_in_stmt(stmt.body)
     if isinstance(stmt, Repeat):

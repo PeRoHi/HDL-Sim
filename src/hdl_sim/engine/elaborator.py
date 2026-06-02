@@ -142,7 +142,7 @@ def _elaborate_module(
     for instance in module.instances:
         child = modules[instance.module_type]
         child_prefix = _scoped_name(prefix, instance.instance_name)
-        bindings = _resolve_instance_ports(instance, local, prefix, global_nets)
+        bindings = _resolve_instance_ports(instance, child, local, prefix, global_nets)
         child_params = ParameterEvaluator(param_evaluator.snapshot()).resolve_module_params(
             child.parameters,
             instance.parameter_overrides,
@@ -164,13 +164,21 @@ def _elaborate_module(
 
 def _resolve_instance_ports(
     instance: ModuleInstance,
+    child: Module,
     parent_local: dict[str, SimNet],
     parent_prefix: str,
     global_nets: dict[str, SimNet],
 ) -> dict[str, SimNet]:
     bindings: dict[str, SimNet] = {}
-    for connection in instance.connections:
-        bindings[connection.port] = _resolve_connection_expr(
+    port_names = [p.name for p in child.ports]
+    for index, connection in enumerate(instance.connections):
+        port_name = connection.port or (
+            port_names[index] if index < len(port_names) else ""
+        )
+        if not port_name:
+            msg = f"positional port connection out of range for {instance.module_type}"
+            raise ValueError(msg)
+        bindings[port_name] = _resolve_connection_expr(
             connection,
             parent_local,
             parent_prefix,

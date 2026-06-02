@@ -10,6 +10,7 @@ INITIAL.2: "initial"i
 ALWAYS.2: "always"i
 ASSIGN.2: "assign"i
 BEGIN.2: "begin"i
+SYS_IDENT.2: /\$[A-Za-z_]\w+/
 IDENT: /[A-Za-z_]\w*/
 
 design: module+
@@ -93,6 +94,7 @@ function_item: "input" range? IDENT ";" -> func_input
                | declaration
                | blocking_assign
                | if_stmt
+               | case_stmt
                | begin_end_block
 
 continuous_assign: ASSIGN lvalue "=" expr ";"
@@ -101,16 +103,22 @@ module_instance.1: IDENT param_instance? IDENT "(" port_connections? ")" ";"
 
 port_connections: port_connection ("," port_connection)*
 
-port_connection: "." IDENT "(" expr ")"
+port_connection: "." IDENT "(" expr ")" -> named_port_connection
+                 | expr -> positional_port_connection
 
 initial_block: INITIAL stmt
 
 always_block: ALWAYS sensitivity stmt
+             | ALWAYS delay_control -> always_delay
 
-sensitivity: "@" "(" sensitivity_item ("," sensitivity_item)* ")"
+sensitivity: "@" "(" sensitivity_list ")"
             | "@" "(" "*" ")"
             | "@" sensitivity_item
             | "@" "*"
+
+sensitivity_list: sensitivity_item (sensitivity_sep sensitivity_item)*
+
+sensitivity_sep: "," | "or"i
 
 sensitivity_item: "posedge"i IDENT -> posedge
                   | "negedge"i IDENT -> negedge
@@ -153,7 +161,7 @@ nonblocking_assign: lvalue "<=" expr ";"
 select: "[" expr ":" expr "]" -> part_sel
        | "[" expr "]" -> bit_sel
 
-delay_control: "#" NUMBER stmt
+delay_control: "#" expr stmt
 
 forever_stmt: "forever" stmt
 
@@ -245,6 +253,8 @@ rel_expr: rel_expr OP_LT shift_expr
         | sized_number
         | func_call
         | signal_ref -> signal_expr
+        | hier_ident
+        | SYS_IDENT -> sys_ident
         | concat_expr
         | "(" expr ")"
 
@@ -253,6 +263,8 @@ func_call: IDENT "(" expr ("," expr)* ")"
 concat_expr: "{" expr ("," expr)* "}"
 
 signal_ref: IDENT select?
+
+hier_ident: IDENT ("." IDENT)+
 
 lvalue: signal_ref -> to_lvalue
 

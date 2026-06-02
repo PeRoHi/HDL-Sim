@@ -204,7 +204,7 @@ class NonBlockingAssign(Stmt):
 
 @dataclass(frozen=True, slots=True)
 class DelayControl(Stmt):
-    delay: int
+    delay: Expr
     body: Stmt
 
 

@@ -8,6 +8,7 @@ from hdl_sim.parser.ast import (
     Forever,
     IdentRef,
     InitialBlock,
+    IntLiteral,
 )
 
 
@@ -70,7 +71,8 @@ def test_parse_delay_control() -> None:
     )
     initial = module.initial_blocks[0]
     assert isinstance(initial.body, DelayControl)
-    assert initial.body.delay == 3
+    assert isinstance(initial.body.delay, IntLiteral)
+    assert initial.body.delay.value == 3
 
 
 def test_parse_comma_separated_reg_declarations() -> None:

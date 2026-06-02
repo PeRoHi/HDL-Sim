@@ -412,8 +412,13 @@ class VerilogTransformer(Transformer):
         return connections
 
     @v_args(inline=True)
-    def port_connection(self, port: Token, expr: Expr) -> PortConnection:
+    @v_args(inline=True)
+    def named_port_connection(self, port: Token, expr: Expr) -> PortConnection:
         return PortConnection(port=str(port), expr=expr)
+
+    @v_args(inline=True)
+    def positional_port_connection(self, expr: Expr) -> PortConnection:
+        return PortConnection(port="", expr=expr)
 
     def _append_declaration(self, bucket: list[Declaration], item: Any) -> None:
         if isinstance(item, Declaration):
@@ -502,6 +507,9 @@ class VerilogTransformer(Transformer):
     def always_block(self, items: list[Any]) -> AlwaysBlock:
         return AlwaysBlock(sensitivity=items[-2], body=items[-1])
 
+    def always_delay(self, items: list[Any]) -> AlwaysBlock:
+        return AlwaysBlock(sensitivity=None, body=items[-1])
+
     @v_args(inline=True)
     def posedge(self, name: Token) -> tuple[EdgeKind, str]:
         return (EdgeKind.POSEDGE, str(name))
@@ -514,12 +522,31 @@ class VerilogTransformer(Transformer):
     def level(self, name: Token) -> tuple[None, str]:
         return (None, str(name))
 
-    def sensitivity(self, *items: Any) -> tuple[tuple[EdgeKind | None, str], ...] | None:
-        if len(items) == 1 and str(items[0]) == "*":
+    def _collect_sensitivity_edges(self, items: list[Any]) -> tuple[tuple[EdgeKind | None, str], ...]:
+        edges: list[tuple[EdgeKind | None, str]] = []
+
+        def walk(value: Any) -> None:
+            if isinstance(value, tuple):
+                if len(value) == 2 and isinstance(value[0], EdgeKind):
+                    edges.append(value)
+                    return
+                for part in value:
+                    walk(part)
+            elif isinstance(value, list):
+                for part in value:
+                    walk(part)
+
+        walk(items)
+        return tuple(edges)
+
+    def sensitivity_list(self, items: list[Any]) -> tuple[tuple[EdgeKind | None, str], ...]:
+        return self._collect_sensitivity_edges(items)
+
+    def sensitivity(self, items: list[Any]) -> tuple[tuple[EdgeKind | None, str], ...] | None:
+        flat = _flatten(items if isinstance(items, list) else [items])
+        if len(flat) == 1 and str(flat[0]) == "*":
             return None
-        if len(items) == 1 and isinstance(items[0], list):
-            return tuple(items[0])
-        return tuple(items)
+        return self._collect_sensitivity_edges(flat)
 
     def begin_labeled(self, items: list[Any]) -> Block:
         label = str(items[2])
@@ -585,6 +612,15 @@ class VerilogTransformer(Transformer):
         return _expr_from_signal(ref[0], ref[1])
 
     @v_args(inline=True)
+    def hier_ident(self, first: Token, *rest: Token) -> IdentRef:
+        parts = [str(first)] + [str(r) for r in rest]
+        return IdentRef(name=".".join(parts))
+
+    @v_args(inline=True)
+    def sys_ident(self, token: Token) -> IdentRef:
+        return IdentRef(name=str(token))
+
+    @v_args(inline=True)
     def bit_sel(self, index: Expr) -> SelectInfo:
         return ("bit", index, None)
 
@@ -601,9 +637,8 @@ class VerilogTransformer(Transformer):
         return NonBlockingAssign(target=target, expr=expr)
 
     @v_args(inline=True)
-    def delay_control(self, delay: Token | IntLiteral, body: Stmt) -> DelayControl:
-        value = delay.value if isinstance(delay, IntLiteral) else _int(delay)
-        return DelayControl(delay=value, body=body)
+    def delay_control(self, delay: Expr, body: Stmt) -> DelayControl:
+        return DelayControl(delay=delay, body=body)
 
     @v_args(inline=True)
     def forever_stmt(self, body: Stmt) -> Forever:
@@ -914,13 +949,20 @@ class VerilogTransformer(Transformer):
 
     def eq_expr(self, *children: Any) -> Expr:
         children = self._child_args(children)
-        if len(children) == 1:
-            return self._resolve_expr(children[0])
-        result = children[0]
+        resolved = [self._resolve_expr(child) for child in children]
+        if len(resolved) == 1:
+            return resolved[0]
+        if len(resolved) == 2:
+            return BinaryExpr("==", resolved[0], resolved[1])
+        result = resolved[0]
         index = 1
-        while index < len(children):
-            op = str(children[index])
-            right = children[index + 1]
+        while index < len(resolved):
+            op = str(resolved[index])
+            if op in {"!=", "=="}:
+                result = BinaryExpr(op, result, resolved[index + 1])
+                index += 2
+                continue
+            right = resolved[index + 1]
             result = BinaryExpr(op, result, right)
             index += 2
         return result

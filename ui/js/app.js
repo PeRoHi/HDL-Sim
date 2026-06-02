@@ -808,7 +808,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.6\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.7\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -920,8 +920,11 @@ function toggleWaveform(show) {
     if (lastWaveform) drawWave(lastWaveform);
   } else {
     const win = mdiWindows.get("waveform");
-    if (win) win.hidden = true;
-    btn.classList.remove("active");
+    if (win) {
+      win.hidden = true;
+      win.style.display = "none";
+    }
+    btn?.classList.remove("active");
   }
   layoutAllEditors();
 }
@@ -1427,6 +1430,7 @@ function createWaveformWindow() {
   }
   if (waveformVisible) {
     win.hidden = false;
+    win.style.display = "";
     bringMdiToFront(win);
   }
   return win;
@@ -1842,7 +1846,13 @@ function handleMenuShortcut(e) {
     s: () => saveProjectFile(),
     z: () => triggerEditor("undo"),
     x: () => triggerEditor("editor.action.clipboardCutAction"),
-    c: () => triggerEditor("editor.action.clipboardCopyAction"),
+    c: () => {
+      if (e.target?.closest?.("#pane-console, .mdi-output")) {
+        copyConsoleText({ errorsOnly: e.shiftKey });
+      } else {
+        triggerEditor("editor.action.clipboardCopyAction");
+      }
+    },
     v: () => triggerEditor("editor.action.clipboardPasteAction"),
     a: () => triggerEditor("editor.action.selectAll"),
     f: () => triggerEditor("actions.find"),
