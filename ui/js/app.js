@@ -220,7 +220,9 @@ function getPayload() {
   const top = getSelectedTop();
   const files = [];
   for (const [path, entry] of fileStore) {
-    files.push({ path, content: entry.content });
+    const item = { path, content: entry.content };
+    if (entry.includeOnly) item.include_only = true;
+    files.push(item);
   }
   files.sort((a, b) => a.path.localeCompare(b.path));
   return {
@@ -424,8 +426,8 @@ function loadWorkspaceFiles(fileEntries, top) {
   }
   fileStore.clear();
 
-  fileEntries.forEach(({ path, content }) => {
-    fileStore.set(path, { content, model: null });
+  fileEntries.forEach(({ path, content, include_only }) => {
+    fileStore.set(path, { content, model: null, includeOnly: Boolean(include_only) });
   });
 
   activeFile = fileEntries[0]?.path || "design.v";

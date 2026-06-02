@@ -14,6 +14,7 @@ LEGACY = EXAMPLES / "新しいフォルダー"
 SPJ_OUT = ROOT / "spj"
 
 MODULE_RE = re.compile(r"^\s*module\s+(\w+)", re.MULTILINE | re.IGNORECASE)
+INCLUDE_RE = re.compile(r'`include\s+"([^"]+\.v)"', re.IGNORECASE)
 
 
 def resolve_v_file(base: Path, name: str) -> Path:
@@ -44,26 +45,28 @@ def module_name(path: Path) -> str:
     return path.stem
 
 
-def parse_silos_files(text: str) -> list[str]:
-    names: list[str] = []
-    in_files = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped == "[Files]":
-            in_files = True
-            continue
-        if stripped.startswith("[") and in_files:
-            break
-        if not in_files:
-            continue
-        quoted = re.search(r'"([^"]+\.v)"', line, re.IGNORECASE)
-        if quoted:
-            names.append(quoted.group(1))
-            continue
-        bare = re.search(r"=\s*([A-Za-z0-9_./-]+\.v)\s*$", line, re.IGNORECASE)
-        if bare:
-            names.append(bare.group(1))
-    return names
+def patch_vend_for_hdl_sim(source: str) -> str:
+    """Replace unsupported concat-lvalue assign with split assigns."""
+
+    old = "assign {newspaper, NEXT_STATE} = fsm(coin, PRES_STATE);"
+    new = """wire [2:0] __fsm_out;
+assign __fsm_out = fsm(coin, PRES_STATE);
+assign newspaper = __fsm_out[2];
+assign PRES_STATE = __fsm_out[1:0];"""
+    if old in source:
+        return source.replace(old, new)
+    return source
+
+
+def discover_includes(base_dir: Path, rel_names: list[str]) -> list[str]:
+    found: list[str] = []
+    for rel in rel_names:
+        text = read_verilog(resolve_v_file(base_dir, rel))
+        for match in INCLUDE_RE.finditer(text):
+            inc = match.group(1)
+            if inc not in rel_names and inc not in found:
+                found.append(inc)
+    return found
 
 
 def build_project(
@@ -73,11 +76,33 @@ def build_project(
     rel_names: list[str],
     top: str | None = None,
     label: str | None = None,
+    include_only: set[str] | None = None,
+    patchers: dict[str, str] | None = None,
 ) -> dict:
-    files: list[dict[str, str]] = []
-    for rel in rel_names:
+    include_only = include_only or set()
+    patchers = patchers or {}
+    auto_includes = discover_includes(base_dir, rel_names)
+    ordered = list(rel_names)
+    for inc in auto_includes:
+        if inc not in ordered:
+            ordered.append(inc)
+            include_only.add(inc)
+
+    files: list[dict[str, str | bool]] = []
+    for rel in ordered:
         path = resolve_v_file(base_dir, rel)
-        files.append({"path": path.name, "content": read_verilog(path)})
+        content = read_verilog(path)
+        if rel in patchers:
+            content = patchers[rel](content)
+        entry: dict[str, str | bool] = {"path": path.name, "content": content}
+        if (
+            rel in include_only
+            or path.name in include_only
+            or MODULE_RE.search(content) is None
+        ):
+            entry["include_only"] = True
+        files.append(entry)
+
     if top is None:
         top = module_name(resolve_v_file(base_dir, rel_names[0]))
     payload: dict = {
@@ -92,7 +117,7 @@ def build_project(
     return payload
 
 
-# Explicit tops from docs/tests; Silos [Files] order preserved.
+# HDL-Sim で Elab/Run できる例のみ（Silos 専用 PLI/混合信号は除外）
 PROJECTS: list[dict] = [
     {
         "name": "saikoro",
@@ -155,28 +180,15 @@ PROJECTS: list[dict] = [
         "base": LEGACY,
         "files": ["vending_testbench.v"],
         "top": "stimulus",
-        "label": "Vending machine TB (include)",
+        "label": "Vending machine FSM (include)",
     },
     {
         "name": "silos_gate",
         "base": LEGACY,
-        "files": ["vendtest.v"],
+        "files": ["vendtest.v", "vend.v"],
         "top": "stimulus",
-        "label": "Gate / vendtest stimulus",
-    },
-    {
-        "name": "silos_fltsim",
-        "base": LEGACY,
-        "files": ["faulttst.v"],
-        "top": "fault_strobe",
-        "label": "Fault sim fragment (PLI)",
-    },
-    {
-        "name": "silos_analog",
-        "base": LEGACY,
-        "files": ["analog.v"],
-        "top": None,
-        "label": "Analog/mixed (Silos; limited sim support)",
+        "label": "Vending RTL (vend + TB)",
+        "patchers": {"vend.v": patch_vend_for_hdl_sim},
     },
 ]
 
@@ -200,11 +212,18 @@ def main() -> int:
             rel_names=spec["files"],
             top=spec.get("top"),
             label=spec.get("label"),
+            include_only=set(spec.get("include_only") or []),
+            patchers=spec.get("patchers"),
         )
         write_spj(payload)
         written.append(payload["name"])
 
-    # Remove Silos .spj left under examples (HDL-Sim uses ./spj/ only).
+    for stale in ("silos_fltsim", "silos_analog"):
+        stale_path = SPJ_OUT / f"{stale}.spj"
+        if stale_path.is_file():
+            stale_path.unlink()
+            print(f"Removed unsupported {stale}.spj")
+
     removed = 0
     for old in EXAMPLES.rglob("*.spj"):
         old.unlink()

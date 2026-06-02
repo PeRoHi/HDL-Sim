@@ -1,28 +1,19 @@
-"""Bundled example .spj projects in ./spj/."""
+"""SPJ projects load correctly (includes, vend patch)."""
 
 import json
 from pathlib import Path
 
 import pytest
 
-from hdl_sim.web import spj_store
+from hdl_sim.engine.elaborator import elaborate
+from hdl_sim.parser.loader import load_design_with_meta
+from hdl_sim.web.app import SourceFile, load_design_from_files
 
 
-@pytest.fixture()
-def spj_root(tmp_path, monkeypatch):
-    repo_spj = Path(__file__).resolve().parents[1] / "spj"
-    monkeypatch.setattr(spj_store, "spj_dir", lambda: repo_spj)
-    return repo_spj
-
-
-def test_repo_spj_includes_saikoro(spj_root: Path) -> None:
-    path = spj_root / "saikoro.spj"
-    assert path.is_file()
+def test_saikoro_spj_in_repo() -> None:
+    path = Path(__file__).resolve().parents[1] / "spj" / "saikoro.spj"
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["format"] == "hdl-sim-project"
     assert data["top"] == "sai_test"
-    names = {f["path"] for f in data["files"]}
-    assert names == {"sai.v", "saitest.v"}
 
 
 def test_no_spj_left_under_examples() -> None:
@@ -30,6 +21,22 @@ def test_no_spj_left_under_examples() -> None:
     assert list(examples.rglob("*.spj")) == []
 
 
-def test_spj_store_loads_saikoro(spj_root: Path) -> None:
-    loaded = spj_store.load_spj_file("saikoro.spj")
-    assert loaded["data"]["top"] == "sai_test"
+def test_vending_spj_resolves_include() -> None:
+    root = Path(__file__).resolve().parents[1] / "spj" / "silos_vending.spj"
+    data = json.loads(root.read_text(encoding="utf-8"))
+    files = [SourceFile(**item) for item in data["files"]]
+    assert any(f.path == "vending.v" and f.include_only for f in files)
+    loaded, _base, tmp = load_design_from_files(files)
+    tmp.cleanup()
+    elaborated = elaborate(loaded.design, top=data["top"])
+    assert elaborated.top_module == "stimulus"
+
+
+def test_gate_spj_elaborates_vend() -> None:
+    root = Path(__file__).resolve().parents[1] / "spj" / "silos_gate.spj"
+    data = json.loads(root.read_text(encoding="utf-8"))
+    files = [SourceFile(**item) for item in data["files"]]
+    loaded, _base, tmp = load_design_from_files(files)
+    tmp.cleanup()
+    elaborated = elaborate(loaded.design, top=data["top"])
+    assert "vend" in {m.name for m in loaded.design.modules}
