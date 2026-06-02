@@ -10,6 +10,8 @@ _COMMENT_LINE = re.compile(r"//.*?$", re.MULTILINE)
 _DEFINE = re.compile(r"`define\s+(\w+)\s+([^\n]+)")
 _UNDEF = re.compile(r"`undef\s+(\w+)\s*")
 _TIMESCALE = re.compile(r"`timescale\s+(\S+)\s*/\s*(\S+)\s*")
+_DIRECTIVE_LINE = re.compile(r"^\s*`(disable_codecoverage|enable_codecoverage|celldefine|endcelldefine)\b.*$", re.MULTILINE)
+_IFDEF_BLOCK = re.compile(r"^\s*`ifn?def\b.*?^\s*`endif\b", re.MULTILINE | re.DOTALL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +50,8 @@ def preprocess(source: str, *, extra_defines: dict[str, str] | None = None) -> P
     cleaned = _TIMESCALE.sub("", cleaned)
     cleaned = _DEFINE.sub("", cleaned)
     cleaned = _UNDEF.sub("", cleaned)
+    cleaned = _IFDEF_BLOCK.sub("", cleaned)
+    cleaned = _DIRECTIVE_LINE.sub("", cleaned)
     cleaned = apply_defines(cleaned, defines)
 
     return PreprocessResult(source=cleaned.strip(), timescale=timescale, defines=defines)
@@ -77,7 +81,8 @@ def expand_includes(
             if candidate in seen:
                 return ""
             seen.add(candidate)
-            nested = candidate.read_text(encoding="utf-8")
+            from hdl_sim.parser.loader import read_verilog_text
+            nested = read_verilog_text(candidate)
             nested = preprocess(nested, extra_defines=extra_defines).source
             nested = expand_includes(
                 nested,

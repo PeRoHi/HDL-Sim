@@ -18,6 +18,7 @@ from hdl_sim.parser.ast import (
     IntLiteral,
     Lvalue,
     PartSelect,
+    StringLiteral,
     UnaryExpr,
 )
 
@@ -109,7 +110,14 @@ class ExpressionEvaluator:
             )
         if isinstance(expr, IntLiteral):
             return expr.value
+        if isinstance(expr, StringLiteral):
+            value = 0
+            for ch in expr.value.encode("utf-8"):
+                value = (value << 8) | ch
+            return value
         if isinstance(expr, IdentRef):
+            if expr.name in {"$time", "$stime"}:
+                return self._queue.now if self._queue is not None else 0
             try:
                 return self._nets[expr.name].value
             except KeyError as exc:

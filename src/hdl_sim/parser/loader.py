@@ -12,6 +12,16 @@ from hdl_sim.parser.parser import parse_design
 from hdl_sim.parser.preprocess import expand_includes, preprocess
 
 
+def read_verilog_text(path: Path) -> str:
+    data = path.read_bytes()
+    for encoding in ("utf-8", "utf-8-sig", "cp932", "shift_jis"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 @dataclass(frozen=True, slots=True)
 class LoadResult:
     design: Design
@@ -49,11 +59,11 @@ def load_design_with_meta(
             unique_paths.append(resolved)
 
     for source_path in path_list:
-        raw = source_path.read_text(encoding="utf-8")
+        raw = read_verilog_text(source_path)
         pre = preprocess(raw, extra_defines=defines)
         if pre.timescale:
             timescale = pre.timescale
-        cleaned = expand_includes(pre.source, unique_paths, extra_defines=defines)
+        cleaned = expand_includes(pre.source, unique_paths, extra_defines=pre.defines or defines)
         design = parse_design(cleaned)
         for module in design.modules:
             if module.name in seen:

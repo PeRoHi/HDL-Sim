@@ -293,6 +293,9 @@ class VerilogTransformer(Transformer):
     def port_list(self, ports: list[Port]) -> list[Port]:
         return ports
 
+    def port(self, items: list[Any]) -> Port:
+        return items[0]
+
     def _merge_ports(self, ports: list[Port]) -> tuple[Port, ...]:
         """Merge ANSI header ports with implicit names and body input/output decls."""
         order: list[str] = []
@@ -394,8 +397,15 @@ class VerilogTransformer(Transformer):
         return params
 
     @v_args(inline=True)
+    def parameter_assign(self, name: Token, expr: Expr) -> ParameterDecl:
+        return ParameterDecl(name=str(name), expr=expr)
+
+    @v_args(inline=True)
     def parameter_decl(self, name: Token, expr: Expr) -> ParameterDecl:
         return ParameterDecl(name=str(name), expr=expr)
+
+    def parameter_decl_stmt_multi(self, items: list[Any]) -> list[ParameterDecl]:
+        return [item for item in items if isinstance(item, ParameterDecl)]
 
     @v_args(inline=True)
     def parameter_decl_stmt(self, name: Token, expr: Expr) -> ParameterDecl:
@@ -468,6 +478,25 @@ class VerilogTransformer(Transformer):
     def make_integer_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
         return self._multi_decl(DeclKind.INTEGER, children)
 
+    def _decl_assign(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
+        filtered = [c for c in children if not isinstance(c, Token) or str(c) not in {"reg", "wire", "integer"}]
+        range_node = None
+        if len(filtered) == 3:
+            range_node, name, expr = filtered
+        else:
+            name, expr = filtered[-2], filtered[-1]
+        decl = Declaration(kind=kind, name=str(name), range=range_node if isinstance(range_node, ValueRange) else None)
+        return (decl, ContinuousAssign(target=str(name), expr=expr))
+
+    def make_reg_decl_assign(self, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
+        return self._decl_assign(DeclKind.REG, children)
+
+    def make_wire_decl_assign(self, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
+        return self._decl_assign(DeclKind.WIRE, children)
+
+    def make_integer_decl_assign(self, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
+        return self._decl_assign(DeclKind.INTEGER, children)
+
     @v_args(inline=True)
     def declaration(self, *rest: Any) -> Declaration | tuple[Declaration, ...]:
         """Legacy fallback if a single declaration slips through."""
@@ -508,7 +537,10 @@ class VerilogTransformer(Transformer):
         return AlwaysBlock(sensitivity=items[-2], body=items[-1])
 
     def always_delay(self, items: list[Any]) -> AlwaysBlock:
-        return AlwaysBlock(sensitivity=None, body=items[-1])
+        return AlwaysBlock(sensitivity=(), body=Forever(items[-1]))
+
+    def always_plain(self, items: list[Any]) -> AlwaysBlock:
+        return AlwaysBlock(sensitivity=(), body=Forever(items[-1]))
 
     @v_args(inline=True)
     def posedge(self, name: Token) -> tuple[EdgeKind, str]:
@@ -568,8 +600,10 @@ class VerilogTransformer(Transformer):
     def display_args(self, args: list[DisplayArg]) -> list[DisplayArg]:
         return args
 
-    @v_args(inline=True)
-    def display_arg(self, value: Any) -> DisplayArg:
+    def display_arg(self, items: list[Any]) -> DisplayArg:
+        value = items[0] if isinstance(items, list) else items
+        if isinstance(value, Tree) and str(value.data) == "string_expr" and value.children:
+            value = value.children[0]
         if isinstance(value, StringLiteral):
             return DisplayArg(text=value.value)
         return DisplayArg(expr=value)
@@ -670,13 +704,24 @@ class VerilogTransformer(Transformer):
                 flat.append(resolved)
         return tuple(flat)
 
+    def _strip_begin_tokens(self, items: list[Any]) -> list[Any]:
+        return [
+            item
+            for item in items
+            if not (isinstance(item, Token) and str(item).lower() == "begin")
+        ]
+
     @v_args(inline=True)
-    def gen_begin_labeled(self, label: Token, *items: Any) -> tuple[str, Any]:
-        body = self._flatten_body_items(list(items))
+    def gen_begin_labeled(self, *items: Any) -> tuple[str, Any]:
+        cleaned = self._strip_begin_tokens(list(items))
+        if not cleaned:
+            return ("labeled", "gen", ())
+        label = cleaned[0]
+        body = self._flatten_body_items(cleaned[1:])
         return ("labeled", str(label), body)
 
     def gen_begin(self, items: list[Any]) -> tuple[Any, ...]:
-        return self._flatten_body_items(items)
+        return self._flatten_body_items(self._strip_begin_tokens(items))
 
     def gen_single(self, item: Any) -> tuple[Any, ...]:
         return self._flatten_body_items([item])
@@ -717,17 +762,24 @@ class VerilogTransformer(Transformer):
             else_items = self._resolve_generate_items(flat[2])
         return self._normalize_generate_if(GenerateIf(condition=condition, then_items=then_items, else_items=else_items))
 
-    @v_args(inline=True)
-    def fork_join(self, body: Stmt) -> ForkJoin:
-        return ForkJoin(body=body, join_mode="join")
+    def _fork_body(self, items: list[Any]) -> Stmt:
+        candidate = items[0] if len(items) == 1 else items
+        if isinstance(candidate, Block):
+            return candidate
+        if isinstance(candidate, list):
+            return Block(statements=tuple(s for s in _flatten(candidate) if isinstance(s, Stmt)))
+        if isinstance(candidate, tuple):
+            return Block(statements=tuple(s for s in _flatten(list(candidate)) if isinstance(s, Stmt)))
+        return candidate if isinstance(candidate, Stmt) else Block(statements=())
 
-    @v_args(inline=True)
-    def fork_join_any(self, body: Stmt) -> ForkJoin:
-        return ForkJoin(body=body, join_mode="join_any")
+    def fork_join(self, items: list[Any]) -> ForkJoin:
+        return ForkJoin(body=self._fork_body(items), join_mode="join")
 
-    @v_args(inline=True)
-    def fork_join_none(self, body: Stmt) -> ForkJoin:
-        return ForkJoin(body=body, join_mode="join_none")
+    def fork_join_any(self, items: list[Any]) -> ForkJoin:
+        return ForkJoin(body=self._fork_body(items), join_mode="join_any")
+
+    def fork_join_none(self, items: list[Any]) -> ForkJoin:
+        return ForkJoin(body=self._fork_body(items), join_mode="join_none")
 
 
     def task_decl(self, children: list[Any]) -> TaskDef:
@@ -867,6 +919,10 @@ class VerilogTransformer(Transformer):
     @v_args(inline=True)
     def monitor(self, args: list[DisplayArg] | None = None) -> SystemTask:
         return SystemTask(name="monitor", args=tuple(args or []))
+
+    @v_args(inline=True)
+    def generic_system_task(self, name: Token, args: list[DisplayArg] | None = None) -> SystemTask:
+        return SystemTask(name=str(name).lstrip("$"), args=tuple(args or []))
     @v_args(inline=True)
     def while_stmt(self, condition: Expr, body: Stmt) -> WhileStmt:
         return WhileStmt(condition=condition, body=body)
@@ -1078,7 +1134,8 @@ def _grammar_text() -> str:
 
     for path in candidates:
         if path.is_file():
-            return path.read_text(encoding="utf-8")
+            from hdl_sim.parser.loader import read_verilog_text
+            return read_verilog_text(path)
 
     msg = "verilog.lark grammar file not found (dev tree or PyInstaller bundle)"
     raise FileNotFoundError(msg)

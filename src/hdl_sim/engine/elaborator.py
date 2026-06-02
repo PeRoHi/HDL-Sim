@@ -59,8 +59,8 @@ def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
     initials: list[ScopedProcess] = []
     always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]] = []
 
-    functions = tuple(top.functions)
-    tasks = tuple(top.tasks)
+    functions = tuple(fn for module in design.modules for fn in module.functions)
+    tasks = tuple(task for module in design.modules for task in module.tasks)
 
     _elaborate_module(
         top,
@@ -100,6 +100,14 @@ def _elaborate_module(
     param_evaluator = ParameterEvaluator(param_env)
     param_evaluator.resolve_module_params(module.parameters)
     module = expand_module_generates(module, param_evaluator)
+
+    for param_name, param_value in param_evaluator.snapshot().items():
+        local[param_name] = SimNet(
+            name=_scoped_name(prefix, param_name),
+            width=32,
+            kind=DeclKind.INTEGER,
+            value=param_value,
+        )
 
     for port in module.ports:
         if port_bindings and port.name in port_bindings:
