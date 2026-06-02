@@ -105,6 +105,22 @@ function getConsolePlainText() {
     .join("\n");
 }
 
+function initConsoleKeyboard() {
+  const bind = (el) => {
+    if (!el) return;
+    el.tabIndex = 0;
+    el.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "c") return;
+      const selected = window.getSelection()?.toString();
+      if (selected) return;
+      e.preventDefault();
+      copyConsoleText({ errorsOnly: e.shiftKey });
+    });
+  };
+  bind($("console-output"));
+  bind($("mdi-console-output"));
+}
+
 async function copyConsoleText({ errorsOnly = false } = {}) {
   const text = errorsOnly
     ? lastConsoleErrorText || getConsolePlainText()
@@ -281,11 +297,12 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
   close.textContent = "×";
   close.addEventListener("click", (e) => {
     e.stopPropagation();
-    win.hidden = true;
+    e.preventDefault();
     if (id === "waveform") {
-      waveformVisible = false;
-      $("btn-wave-toggle")?.classList.remove("active");
+      toggleWaveform(false);
+      return;
     }
+    win.hidden = true;
   });
   controls.appendChild(close);
   titlebar.appendChild(controls);
@@ -791,7 +808,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.5\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.6\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1397,7 +1414,7 @@ function createWaveformWindow() {
     body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
     body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
     body.querySelector("#chk-auto-scroll")?.addEventListener("change", () => {
-      if (lastWaveform) drawWave(lastWaveform);
+      if (waveformVisible && lastWaveform) redrawWaveformCanvas(lastWaveform);
     });
     if (window.ResizeObserver) {
       const observer = new ResizeObserver(() => {
@@ -1707,11 +1724,20 @@ function bindUi() {
 
   document.addEventListener("keydown", (e) => {
     if (handleMenuShortcut(e)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+      const inConsole = e.target?.closest?.("#pane-console, .mdi-output");
+      if (inConsole && !window.getSelection()?.toString()) {
+        e.preventDefault();
+        copyConsoleText({ errorsOnly: e.shiftKey });
+      }
+    }
   });
 
   $("chk-auto-scroll")?.addEventListener("change", () => {
-    if (lastWaveform) drawWave(lastWaveform);
+    if (waveformVisible && lastWaveform) redrawWaveformCanvas(lastWaveform);
   });
+
+  initConsoleKeyboard();
 
   initMenuBar();
 }

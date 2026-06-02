@@ -254,8 +254,7 @@ class VerilogTransformer(Transformer):
                 ports.extend(items[index])
                 index += 1
         for item in items[index:]:
-            candidates = item if isinstance(item, list) else [item]
-            for candidate in candidates:
+            for candidate in _flatten(item if isinstance(item, list) else [item]):
                 if isinstance(candidate, Port):
                     ports.append(candidate)
                 elif isinstance(candidate, ParameterDecl):
@@ -329,6 +328,25 @@ class VerilogTransformer(Transformer):
             return Port(direction=port_dir, name=str(name), range=value_range)
         (name,) = rest
         return Port(direction=port_dir, name=str(name))
+
+    def port_decls_body(self, items: list[Any]) -> list[Port]:
+        dir_text = str(items[0]).lower()
+        if dir_text == "input":
+            port_dir = PortDirection.INPUT
+        elif dir_text == "inout":
+            port_dir = PortDirection.INOUT
+        else:
+            port_dir = PortDirection.OUTPUT
+        if len(items) == 2:
+            names = items[1]
+            value_range = None
+        else:
+            value_range = items[1]
+            names = items[2]
+        return [
+            self._port_decl_with_dir(port_dir, value_range, name)
+            for name in names
+        ]
 
     @v_args(inline=True)
     def port_decl(self, direction: Token, *rest: Any) -> Port:

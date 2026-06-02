@@ -4,6 +4,18 @@ from hdl_sim.parser import parse_module
 from hdl_sim.parser.ast import PortDirection
 
 
+def test_comma_separated_port_body_declarations() -> None:
+    module = parse_module(
+        """
+        module sai (ck, reset, enable, lamp);
+          input ck, reset, enable;
+          output lamp;
+        endmodule
+        """
+    )
+    assert len(module.ports) == 4
+
+
 def test_implicit_port_list_with_body_directions() -> None:
     module = parse_module(
         """

@@ -31,7 +31,7 @@ port: port_decl | IDENT -> port_name
 
 port_decl: PORT_DIR range? IDENT
 
-port_body_decl.10: PORT_DIR range? IDENT ";" -> port_decl
+port_body_decl.10: PORT_DIR range? ident_list ";" -> port_decls_body
 
 decl_or_stmt: port_body_decl
              | declaration
