@@ -30,6 +30,7 @@ class ScopedContinuousAssign:
     target: str
     expr: Expr
     locals: dict[str, SimNet]
+    params: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +139,8 @@ def _elaborate_module(
         local[decl.name] = net
         global_nets[full_name] = net
 
+    module_params = param_evaluator.snapshot()
+
     for assign in module.continuous_assigns:
         target = _scoped_name(prefix, assign.target)
         if assign.target in local:
@@ -146,10 +149,14 @@ def _elaborate_module(
             global_nets[target] = SimNet(name=target, width=1, kind=DeclKind.WIRE)
             local[assign.target] = global_nets[target]
         continuous.append(
-            ScopedContinuousAssign(target=target, expr=assign.expr, locals=dict(local))
+            ScopedContinuousAssign(
+                target=target,
+                expr=assign.expr,
+                locals=dict(local),
+                params=dict(module_params),
+            )
         )
 
-    module_params = param_evaluator.snapshot()
     for block in module.initial_blocks:
         initials.append(ScopedProcess(body=block.body, locals=dict(local), params=dict(module_params)))
 

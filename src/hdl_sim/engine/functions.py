@@ -20,6 +20,7 @@ def call_function(
     queue: EventQueue,
     nba: NBARegion,
     on_net_update: Callable[[SimNet, SimTime], None],
+    params: dict[str, int] | None = None,
 ) -> int:
     """Execute a function and return its integer result."""
 
@@ -42,7 +43,7 @@ def call_function(
         if decl.name not in locals:
             locals[decl.name] = SimNet.from_declaration(decl.name, decl.kind, None)
 
-    evaluator = ExpressionEvaluator(locals, functions=functions)
+    evaluator = ExpressionEvaluator(locals, functions=functions, params=params or {})
 
     def run_stmt(stmt: Stmt) -> None:
         context = ProcessContext(

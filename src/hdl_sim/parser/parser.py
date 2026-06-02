@@ -634,6 +634,10 @@ class VerilogTransformer(Transformer):
         return StringLiteral(value=raw[1:-1])
 
     @v_args(inline=True)
+    def string_expr(self, lit: StringLiteral) -> StringLiteral:
+        return lit
+
+    @v_args(inline=True)
     def signal_ref(self, name: Token, select: SelectInfo = None) -> tuple[str, SelectInfo]:
         return (str(name), _select_info(select))
 
@@ -669,6 +673,10 @@ class VerilogTransformer(Transformer):
     @v_args(inline=True)
     def nonblocking_assign(self, target: Lvalue, expr: Expr) -> NonBlockingAssign:
         return NonBlockingAssign(target=target, expr=expr)
+
+    @v_args(inline=True)
+    def empty_stmt(self) -> Block:
+        return Block(statements=())
 
     @v_args(inline=True)
     def delay_control(self, delay: Expr, body: Stmt) -> DelayControl:
@@ -970,11 +978,13 @@ class VerilogTransformer(Transformer):
     def ev_expr(self, expr: Expr) -> Expr:
         return expr
 
-    def event_control(self, *events: Expr, body: Stmt | None = None) -> EventControl:
-        if body is None:
-            *event_nodes, body = events
-            return EventControl(events=tuple(event_nodes), body=body)
-        return EventControl(events=tuple(events), body=body)
+    @v_args(inline=True)
+    def event_control(self, *children: Any) -> EventControl:
+        body = children[-1]
+        if isinstance(body, Tree):
+            body = self.transform(body)
+        events = tuple(children[:-1])
+        return EventControl(events=events, body=body)
 
     def ternary_expr(self, *children: Any) -> Expr:
         children = self._child_args(children)

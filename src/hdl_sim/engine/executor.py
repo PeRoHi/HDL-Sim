@@ -271,7 +271,7 @@ class StatementRunner:
 
 
         if isinstance(stmt, EventControl):
-            self._execute_event_control(stmt)
+            self._execute_event_control(stmt, on_complete=on_complete)
             return
 
         msg = f"unsupported statement: {type(stmt).__name__}"
@@ -453,18 +453,26 @@ class StatementRunner:
 
         step(count)
 
-    def _execute_event_control(self, stmt: EventControl) -> None:
+    def _execute_event_control(
+        self,
+        stmt: EventControl,
+        *,
+        on_complete: ContinueCallback | None = None,
+    ) -> None:
         trigger = self._await_events(stmt.events)
+        fired = False
 
-        def arm() -> None:
-            if trigger():
-                StatementRunner(self._state).execute(stmt.body)
-            arm()
+        def try_fire() -> None:
+            nonlocal fired
+            if fired or not trigger():
+                return
+            fired = True
+            StatementRunner(self._state).execute(stmt.body, on_complete=on_complete)
 
         for net in self._nets_in_events(stmt.events):
-            net.subscribe(lambda *_args, arm_cb=arm: arm_cb())
+            net.subscribe(lambda *_args, cb=try_fire: cb())
 
-        arm()
+        try_fire()
 
     def _await_events(self, events: tuple[Expr, ...]) -> Callable[[], bool]:
         if not events:

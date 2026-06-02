@@ -113,6 +113,7 @@ class ExpressionEvaluator:
                 queue=self._queue or EventQueue(),
                 nba=self._nba or NBARegion(self._nets, on_update=lambda *_: None),
                 on_net_update=self._on_net_update or (lambda *_: None),
+                params=self._params,
             )
         if isinstance(expr, IntLiteral):
             return expr.value

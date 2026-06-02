@@ -118,7 +118,14 @@ class Simulator:
 
     def _register_continuous_updates(self) -> None:
         for assign in self._elaborated.continuous_assigns:
-            evaluator = ExpressionEvaluator(assign.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
+            evaluator = ExpressionEvaluator(
+                assign.locals,
+                functions=self._functions,
+                queue=self._queue,
+                nba=self._nba,
+                on_net_update=self._record_net,
+                params=assign.params,
+            )
 
             def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> bool:
                 from hdl_sim.engine.net_state import apply_four_state

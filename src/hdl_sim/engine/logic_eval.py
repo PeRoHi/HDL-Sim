@@ -17,6 +17,7 @@ from hdl_sim.parser.ast import (
     IdentRef,
     IntLiteral,
     PartSelect,
+    StringLiteral,
     UnaryExpr,
 )
 
@@ -35,14 +36,24 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
 
     if isinstance(expr, IntLiteral):
         return FourStateValue.from_literal(expr)
+    if isinstance(expr, StringLiteral):
+        value = 0
+        for ch in expr.value.encode("utf-8"):
+            value = (value << 8) | ch
+        width = max(32, value.bit_length())
+        return FourStateValue(value=value, width=width)
     if isinstance(expr, IdentRef):
-        net = nets[expr.name]
-        return FourStateValue(
-            value=net.value,
-            width=net.width,
-            x_mask=getattr(net, "x_mask", 0),
-            z_mask=getattr(net, "z_mask", 0),
-        )
+        net = nets.get(expr.name)
+        if net is not None:
+            return FourStateValue(
+                value=net.value,
+                width=net.width,
+                x_mask=getattr(net, "x_mask", 0),
+                z_mask=getattr(net, "z_mask", 0),
+            )
+        value = eval_int(expr)
+        width = max(1, value.bit_length())
+        return FourStateValue(value=value, width=width)
     if isinstance(expr, BitSelect):
         base = eval_logic(IdentRef(expr.signal), eval_int, nets)
         index = eval_int(expr.index)

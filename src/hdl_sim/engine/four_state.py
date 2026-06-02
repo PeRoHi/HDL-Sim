@@ -70,8 +70,12 @@ def case_match(selector: FourStateValue, pattern: FourStateValue, style: str) ->
 def eval_four_state(expr: Expr, eval_int: callable[[Expr], int]) -> FourStateValue:
     """Evaluate ``expr`` for use in case statements."""
 
+    from hdl_sim.parser.ast import StringLiteral
+
     if isinstance(expr, IntLiteral):
         return FourStateValue.from_literal(expr)
+    if isinstance(expr, StringLiteral):
+        return FourStateValue.from_int(eval_int(expr))
     return FourStateValue.from_int(eval_int(expr))
 
 
