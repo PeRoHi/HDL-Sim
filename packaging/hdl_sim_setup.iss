@@ -30,6 +30,11 @@ CreateUninstallRegKey=yes
 UpdateUninstallLogAppName=yes
 CloseApplications=force
 RestartApplications=no
+#ifdef SignedRelease
+; Requires HDL_SIM_SIGN_PFX or HDL_SIM_SIGN_THUMBPRINT — see packaging/SIGNING.md
+SignTool=powershell -NoProfile -ExecutionPolicy Bypass -File "{src}inno_sign.ps1" $f
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"

@@ -32,7 +32,17 @@ if not defined ISCC (
   exit /b 1
 )
 
-"%ISCC%" packaging\hdl_sim_setup.iss
+set "ISCC_ARGS="
+if defined HDL_SIM_SIGN_PFX set "ISCC_ARGS=/DSignedRelease=1"
+if defined HDL_SIM_SIGN_THUMBPRINT set "ISCC_ARGS=/DSignedRelease=1"
+
+if defined ISCC_ARGS (
+  echo [HDL-Sim] 署名付きインストーラーをビルドします（SIGNING.md 参照）
+) else (
+  echo [HDL-Sim] 未署名ビルド（SAC で unins000.exe がブロックされる場合あり）
+)
+
+"%ISCC%" %ISCC_ARGS% packaging\hdl_sim_setup.iss
 if errorlevel 1 (
   echo インストーラーのビルドに失敗しました.
   pause
