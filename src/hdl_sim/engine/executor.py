@@ -32,6 +32,7 @@ from hdl_sim.parser.ast import (
     ForStmt,
     ForkJoin,
     TaskEnable,
+    WaitStmt,
 )
 
 
@@ -265,6 +266,10 @@ class StatementRunner:
                 on_complete()
             return
 
+        if isinstance(stmt, WaitStmt):
+            self._execute_wait(stmt, on_complete=on_complete)
+            return
+
         if isinstance(stmt, ForkJoin):
             self._execute_fork_join(stmt, on_complete=on_complete)
             return
@@ -452,6 +457,32 @@ class StatementRunner:
             self.execute(body, on_complete=lambda: step(remaining - 1))
 
         step(count)
+
+    def _execute_wait(
+        self,
+        stmt: WaitStmt,
+        *,
+        on_complete: ContinueCallback | None = None,
+    ) -> None:
+        from hdl_sim.engine.expr_deps import identifiers_in_expr
+
+        fired = False
+
+        def try_continue() -> None:
+            nonlocal fired
+            if fired:
+                return
+            if self._ctx.evaluator.eval(stmt.condition):
+                fired = True
+                if on_complete is not None:
+                    on_complete()
+
+        for name in identifiers_in_expr(stmt.condition):
+            net = self._state.context.nets.get(name)
+            if net is not None:
+                net.subscribe(lambda *_args, cb=try_continue: cb())
+
+        try_continue()
 
     def _execute_event_control(
         self,

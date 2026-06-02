@@ -32,6 +32,7 @@ from hdl_sim.parser.ast import (
     FunctionDef,
     FunctionInput,
     TaskEnable,
+    WaitStmt,
     TaskPortKind,
     TaskPort,
     TaskDef,
@@ -864,6 +865,10 @@ class VerilogTransformer(Transformer):
             return TaskPort(kind=TaskPortKind.OUTPUT, name=str(name), range=value_range)
         (name,) = rest
         return TaskPort(kind=TaskPortKind.OUTPUT, name=str(name))
+
+    @v_args(inline=True)
+    def wait_stmt(self, condition: Expr) -> WaitStmt:
+        return WaitStmt(condition=condition)
 
     @v_args(inline=True)
     def task_call(self, name: Token, *args: Expr) -> TaskEnable:

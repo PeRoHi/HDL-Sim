@@ -24,6 +24,7 @@ from hdl_sim.parser.ast import (
     WhileStmt,
     ForStmt,
     ConcatExpr,
+    WaitStmt,
 )
 
 
@@ -105,4 +106,6 @@ def identifiers_in_stmt(stmt: Stmt) -> set[str]:
         for event in stmt.events:
             result |= identifiers_in_expr(event)
         return result | identifiers_in_stmt(stmt.body)
+    if isinstance(stmt, WaitStmt):
+        return identifiers_in_expr(stmt.condition)
     return set()

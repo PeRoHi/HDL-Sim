@@ -144,9 +144,12 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | for_stmt
      | if_stmt
      | case_stmt
+     | wait_stmt
      | task_enable
      | fork_stmt
      | event_control
+
+wait_stmt: "wait"i "(" expr ")" ";" -> wait_stmt
 
 begin_end_block: BEGIN ":" IDENT stmt_list "end" -> begin_labeled
                  | BEGIN stmt_list "end" -> begin_plain
