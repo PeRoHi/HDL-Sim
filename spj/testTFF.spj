@@ -1,0 +1,17 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "testTFF",
+  "top": "TFF_tp",
+  "files": [
+    {
+      "path": "tff_TST.v",
+      "content": "`timescale 1ns/1ns       \nmodule TFF_tp;\nreg   R, T;  \nwire  Q, QB;       \n\nparameter STEP = 50;   \nTFF  TFF(R, T, Q, QB);  \n\ninitial begin\n\t              R = 0;  T= 0;\n\t#(STEP/4)     R = 1;\n\t#(STEP/6)     R = 0;\n     #(STEP/2)       T=1 ;\n\t#(STEP/4)     T = 0;\n     #(STEP/2)     T=1 ;\n\t#(STEP/2)      T = 0;\n\t#(STEP/4)    $finish;\n\t\nend\nendmodule"
+    },
+    {
+      "path": "tff.v",
+      "content": "module TFF (R, T, Q, QB);\ninput R, T;\noutput Q, QB; \nreg Q;\n\nassign QB= ~Q;\nalways @(   posedge R or posedge T)\n      Q <= ( R )?    0 :   ~Q  ;  \nendmodule\n"
+    }
+  ],
+  "label": "TFF testbench"
+}

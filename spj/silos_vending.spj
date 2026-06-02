@@ -1,0 +1,13 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "silos_vending",
+  "top": "stimulus",
+  "files": [
+    {
+      "path": "vending_testbench.v",
+      "content": "/**************************************************************************\nAdapted from Example 14-8 Stimulus for Newspaper Vending Machine FSM\n\"Verilog HDL  A Guide to Digital Design and Synthesis\"\nBy Samir Palnitkar, Prentice Hall, ISBN 0-13-451675-3 \n**************************************************************************/\n\n`define nickel 2'b01\n`define dime 2'b10\n\n`timescale 1ns / 1ns\n\nmodule stimulus;\nreg clock;\nreg [1:0] coin;\nreg reset;\nreg newspaper;\n\n`include \"vending.v\"\n\n//Apply stimulus to the vending machine\ninitial\nbegin\n\tclock = 0;\n\tcoin = 0;\n\treset = 1;\n\t#50 reset = 0;\n\t#1400 $finish;\nend\n\ninitial\n\tfork \n\t\t//Put 3 nickels to get newspaper\n\t\t#100 coin = `nickel;\n\t\t#200 coin = `nickel;\n\t\t#300 coin = `nickel; \n\n\t\t//Put one nickel and then one dime to get newspaper\n\t\t#500 coin = `nickel; \n\t\t#600 coin = `dime; \n\n\t\t//Put two dimes; machine does not return a nickel to get newspaper\n\t\t#800 coin = `dime; \n\t\t#900 coin = `dime; \n\n\t\t//Put one dime and then one nickel to get newspaper\n\t\t#1100 coin = `dime; \n\t\t#1200 coin = `nickel;\n\t\tjoin\n\n\n//setup clock; cycle time = 40 units\nalways\nbegin\n\t#30 clock = ~clock;\nend\n\n//reset coin to zero\nalways @(posedge clock) \n\tif (coin !=0) #35 coin =0; \n\n//test for newspaper\nalways @(posedge S15)\nbegin\n\tnewspaper = 1;\t\n\trepeat (2) @(posedge clock) \n\tnewspaper = 0;\n\t@(negedge clock);\nend\n\nendmodule\n"
+    }
+  ],
+  "label": "Vending machine TB (include)"
+}

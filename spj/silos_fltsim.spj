@@ -1,0 +1,13 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "silos_fltsim",
+  "top": "fault_strobe",
+  "files": [
+    {
+      "path": "faulttst.v",
+      "content": "`timescale 1ns / 100 ps\nmodule fault_strobe;\n\n// declare delays as parameters for ease of modification.\nparameter offset=50, wait_strobe=2;\n\n// setup the stobe for the test nodes.\ninitial \n\t// Specify a startup time of \"offset\" before strobing test nodes.  \n\t#offset \n\n\t// After a negative clock edge occurs, \n\t// strobe the test nodes after a wait time of \"wait_strobe\".\n\tforever @(negedge stimulate.clock) \n\t\t#wait_strobe   $fs_strobe( stimulate.vendcoke,\n\t\t\t\tstimulate.vendpepsi, stimulate.vendsoft_drink );\n\n\nendmodule\n"
+    }
+  ],
+  "label": "Fault sim fragment (PLI)"
+}

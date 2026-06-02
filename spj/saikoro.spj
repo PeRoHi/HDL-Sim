@@ -1,0 +1,17 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "saikoro",
+  "top": "sai_test",
+  "files": [
+    {
+      "path": "saitest.v",
+      "content": "module sai_test; \n  reg ck, reset, enable; \n  wire [6:0] lamp; \n  parameter STEP = 1000; \n  sai sai( ck, reset, enable, lamp ); \ninitial ck=0;\nalways#(STEP/2)\n   ck = ~ck;\ninitial begin\n\t\treset = 0; enable = 0;\n   #STEP \treset = 1; \n   #STEP \treset = 0; \n   #STEP\tenable = 1;\n   #(STEP*5) \tenable = 0;\n   #STEP \tenable = 1;  \n   #(STEP*5) $finish;\nend \ninitial $monitor( $stime, \" reset= %b enable= %b saikoro= %h lamp=%b\", reset, enable, sai.cnt, lamp); \nendmodule "
+    },
+    {
+      "path": "sai.v",
+      "content": "module sai (ck, reset, enable,lamp);\ninput ck,reset,enable;\noutput [6:0] lamp;\nreg [2:0] cnt;\nalways @(posedge ck or posedge reset) begin\n if (reset == 1)\n   cnt <= 1;\n   else if (enable == 1)\n      if (cnt == 6)\n          cnt <= 1;\n     else\n          cnt <= cnt+1;\nend\nfunction [6:0] dec;\ninput [2:0] in;\n  case (in)\n    1 : dec = 7'b0001000;\n    2 : dec = 7'b1000001;\n    3 : dec = 7'b0011100;\n    4 : dec = 7'b1010101;\n    5 : dec = 7'b1011101;\n    6 : dec = 7'b1110111;\n    default : dec = 7'b0000000;\n  endcase\nendfunction\nassign lamp = dec(cnt);\nendmodule"
+    }
+  ],
+  "label": "サイコロ (sai + saitest)"
+}

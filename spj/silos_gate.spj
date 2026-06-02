@@ -1,0 +1,13 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "silos_gate",
+  "top": "stimulus",
+  "files": [
+    {
+      "path": "vendtest.v",
+      "content": "/**************************************************************************\nAdapted from Example 14-8 Stimulus for Newspaper Vending Machine FSM\n\"Verilog HDL  A Guide to Digital Design and Synthesis\"\nBy Samir Palnitkar, Prentice Hall, ISBN 0-13-451675-3 \n**************************************************************************/\n`timescale 1ns / 1ns\nmodule stimulus;\nreg clock;\nreg [1:0] coin;\nreg [1:0] coin1;\nreg reset;\nwire newspaper;\nreg [96:1] info;\n\n//instantiate the vending state machine\nvend vendY (coin, clock, reset, newspaper);\n\n//Display the output\ninitial\nbegin\n\t$display(\"\\t\\t\\t\\tTime\tReset   Newspaper\\n\");\n\t$monitor(\"%d\t%d\t\t%d\", $time, reset, newspaper);\nend\n\n//Apply stimulus to the vending machine\ninitial\nbegin\n\tclock = 0;\n\tcoin = 0;\n\tcoin1 = 0;\n\treset = 1;\n\t#50 reset = 0;\n\n\t@(negedge clock);\n\n\t//Put 3 nickels to get newspaper\n\t#80 coin = 1; #40 coin = 0;\n\t#80 coin = 1; #40 coin = 0;\n\t#80 coin = 1; #40 coin = 0;\n\n\t//Put one nickel and then one dime to get newspaper\n\t#180 coin = 1; #40 coin = 0;\n\t#80 coin = 2; #40 coin = 0;\n\n\t//Put two dimes; machine does not return a nickel to get newspaper\n\t#180 coin = 2; #40 coin = 0;\n\t#80 coin = 2; #40 coin = 0;\n\n\t//Put one dime and then one nickel to get newspaper\n\t#180 coin = 2; #40 coin = 0;\n\t#80 coin = 1; #40 coin = 0;\n\n\t#80 $finish;\nend\n\n//setup clock; cycle time = 40 units\nalways\nbegin\n\t#20 clock = ~clock;\nend\n\n//ascii vector to explain stimulus\nalways @coin\nbegin\n\tcoin1 = coin1 +1;\n\tcase (coin1)\n\t0: info = \"off\";\n\t1: info = \"adding coins\";\n\t2: info = \"adding coins\";\n\t3: begin info = \"newspaper\"; coin1 = 0; end\n\tendcase\nend\n\nendmodule\n"
+    }
+  ],
+  "label": "Gate / vendtest stimulus"
+}

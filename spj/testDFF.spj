@@ -1,0 +1,17 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "testDFF",
+  "top": "DFF_tp",
+  "files": [
+    {
+      "path": "DFF_TST.v",
+      "content": "`timescale 1ns/1ns       \nmodule DFF_tp;\nreg   CLK, D, RST;  //　テスト入力をreg宣言   \nwire  Q, QB;       //　出力をwire宣言\n\nparameter STEP = 50;   \nDFF  DFF(Q, QB, D, CLK, RST);  //　テスト対象呼び出し\n\nalways #(STEP/2)\tCLK = ~CLK;    //　クロック作成\ninitial begin\n\t              RST = 1;  D = 0; CLK = 0;\n\t#(STEP/4)     RST = 0;\n\t#(STEP*3/4)             D = 1;\n\t#(STEP/4)     RST = 1;\n        #(2*STEP)               D = 0;\n\t#STEP                   D = 1;\n\t#(STEP/2)     RST = 0;\n\t#(STEP/2)     RST = 1;\n\t#(STEP/4)    $finish;\n\t\nend\nendmodule"
+    },
+    {
+      "path": "DFF.v",
+      "content": "module DFF(Q, QB, D, CLK, RST);\ninput D, CLK, RST;\noutput Q, QB;\nreg Q;\n\nalways @(posedge CLK or negedge RST)\n\nif(RST == 1)\n\t Q <=D ;\n\telse\n\t Q <= 0;\nassign QB = ~Q;\nendmodule\n"
+    }
+  ],
+  "label": "DFF testbench"
+}
