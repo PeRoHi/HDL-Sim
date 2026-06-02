@@ -30,9 +30,11 @@ port_list: "(" port ("," port)* ")"
 
 port: port_decl | IDENT -> port_name
 
-port_decl: PORT_DIR range? IDENT
+port_decl: PORT_DIR port_type? range? IDENT
 
-port_body_decl.10: PORT_DIR range? ident_list ";" -> port_decls_body
+port_type: WIRE | REG
+
+port_body_decl.10: PORT_DIR port_type? range? ident_list ";" -> port_decls_body
 
 decl_or_stmt: port_body_decl
              | declaration
