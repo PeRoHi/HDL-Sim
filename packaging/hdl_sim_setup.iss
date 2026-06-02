@@ -2,7 +2,7 @@
 ; Build: packaging\build_installer.bat
 
 #define AppName "HDL-Sim"
-#define AppVersion "0.5.2"
+#define AppVersion "0.5.3"
 #define AppPublisher "HDL-Sim"
 #define AppExeName "HDL-Sim.exe"
 
@@ -42,6 +42,7 @@ Name: "launchapp"; Description: "インストール完了後に {#AppName} を�
 [Files]
 Source: "..\dist\HDL-Sim\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "INSTALL_README.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Comment: "Verilog HDL シミュレータ IDE"

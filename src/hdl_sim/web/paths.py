@@ -19,6 +19,21 @@ def project_root() -> Path:
     return install_dir()
 
 
+def resource_root() -> Path:
+    """Bundled assets root (PyInstaller _MEIPASS / _internal)."""
+
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            path = Path(meipass)
+            if path.is_dir():
+                return path
+        internal = install_dir() / "_internal"
+        if internal.is_dir():
+            return internal
+    return project_root()
+
+
 def _read_data_dir_override() -> Path | None:
     cfg = install_dir() / "data_dir.txt"
     if not cfg.is_file():
@@ -56,9 +71,10 @@ def user_data_dir() -> Path:
 
 def ui_dir() -> Path:
     if getattr(sys, "frozen", False):
-        bundled = Path(getattr(sys, "_MEIPASS", project_root())) / "ui"
-        if bundled.is_dir():
-            return bundled
+        for base in (resource_root(), install_dir()):
+            bundled = base / "ui"
+            if bundled.is_dir():
+                return bundled
     return project_root() / "ui"
 
 
@@ -67,7 +83,7 @@ def examples_dir() -> Path:
         beside_exe = install_dir() / "examples"
         if beside_exe.is_dir():
             return beside_exe
-        bundled = Path(getattr(sys, "_MEIPASS", project_root())) / "examples"
+        bundled = resource_root() / "examples"
         if bundled.is_dir():
             return bundled
     return project_root() / "examples"

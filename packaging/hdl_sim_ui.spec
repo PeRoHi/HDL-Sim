@@ -13,6 +13,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 root = Path(SPECPATH).resolve().parent
 
 webview_hidden = collect_submodules("webview")
+hdl_sim_hidden = collect_submodules("hdl_sim")
+uvicorn_hidden = collect_submodules("uvicorn")
+fastapi_hidden = collect_submodules("fastapi")
 parser_data = [
     (str(root / "src" / "hdl_sim" / "parser" / "verilog.lark"), "hdl_sim/parser"),
 ]
@@ -49,11 +52,19 @@ a = Analysis(
         'hdl_sim.web.runtime',
         'hdl_sim.web.paths',
         'hdl_sim.web.vcd_json',
+        'hdl_sim.web.update_checker',
+        'hdl_sim.web.crash_log',
         *webview_hidden,
+        *hdl_sim_hidden,
+        *uvicorn_hidden,
+        *fastapi_hidden,
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[str(root / 'packaging' / 'pyi_rth_stdio.py')],
+    runtime_hooks=[
+        str(root / 'packaging' / 'pyi_rth_cwd.py'),
+        str(root / 'packaging' / 'pyi_rth_stdio.py'),
+    ],
     excludes=[],
     noarchive=False,
     optimize=0,
@@ -69,7 +80,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -84,7 +95,6 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
-    upx_exclude=[],
+    upx=False,
     name='HDL-Sim',
 )
