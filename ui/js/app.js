@@ -95,9 +95,50 @@ function setStatus(text, kind = "") {
   bar.className = "status-pill" + (kind ? ` ${kind}` : "");
 }
 
+let lastConsoleErrorText = "";
+
+function getConsolePlainText() {
+  const el = $("console-output");
+  if (!el) return "";
+  return Array.from(el.querySelectorAll(".console-line"))
+    .map((row) => row.textContent || "")
+    .join("\n");
+}
+
+async function copyConsoleText({ errorsOnly = false } = {}) {
+  const text = errorsOnly
+    ? lastConsoleErrorText || getConsolePlainText()
+    : getConsolePlainText();
+  if (!text) {
+    appendConsole("[console] コピーする内容がありません", "warn");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    appendConsole(errorsOnly ? "[console] エラー内容をクリップボードにコピーしました" : "[console] 出力をコピーしました", "info");
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+      appendConsole(errorsOnly ? "[console] エラー内容をコピーしました" : "[console] 出力をコピーしました", "info");
+    } catch (err) {
+      appendConsole(`[console] コピーに失敗: ${err}`, "err");
+    }
+    area.remove();
+  }
+}
+
 function appendConsole(text, kind = "") {
   const targets = [$("console-output"), $("mdi-console-output")].filter(Boolean);
   if (text == null || text === "") return;
+  if (kind === "err") {
+    lastConsoleErrorText = String(text);
+  }
 
   const prefix =
     kind === "err" ? "[ERROR] " :
@@ -206,11 +247,13 @@ function bringMdiToFront(win) {
   win.classList.add("active");
 }
 
-function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "" } = {}) {
+function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "", show = true } = {}) {
   const existing = mdiWindows.get(id);
   if (existing) {
-    existing.hidden = false;
-    bringMdiToFront(existing);
+    if (show) {
+      existing.hidden = false;
+      bringMdiToFront(existing);
+    }
     return existing;
   }
 
@@ -1335,6 +1378,7 @@ function createWaveformWindow() {
     width: 720,
     height: 360,
     bodyClass: "mdi-waveform",
+    show: waveformVisible,
   });
   const body = win.querySelector(".mdi-body");
   if (!body.querySelector("#waveform-canvas")) {
@@ -1357,26 +1401,36 @@ function createWaveformWindow() {
     });
     if (window.ResizeObserver) {
       const observer = new ResizeObserver(() => {
-        if (!win.hidden && lastWaveform) drawWave(lastWaveform);
+        if (waveformVisible && !win.hidden && lastWaveform) {
+          redrawWaveformCanvas(lastWaveform);
+        }
       });
       observer.observe(body);
     }
   }
-  win.hidden = false;
-  waveformVisible = true;
-  bringMdiToFront(win);
+  if (waveformVisible) {
+    win.hidden = false;
+    bringMdiToFront(win);
+  }
   return win;
+}
+
+function redrawWaveformCanvas(waveform) {
+  if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
+  const canvas = $("waveform-canvas");
+  if (!canvas) return;
+  window.HDLSimWaveform.drawWaveform(canvas, waveform, {
+    wrap: $("waveform-wrap"),
+    zoom: waveZoom,
+    autoScroll: $("chk-auto-scroll")?.checked !== false,
+  });
 }
 
 function drawWave(waveform) {
   if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
+  if (!waveformVisible) return;
   createWaveformWindow();
-  const canvas = $("waveform-canvas");
-  window.HDLSimWaveform.drawWaveform(canvas, waveform, {
-    wrap: $("waveform-wrap"),
-    autoScroll: $("chk-auto-scroll")?.checked,
-    zoom: waveZoom,
-  });
+  redrawWaveformCanvas(waveform);
 }
 
 function fitWaveform() {
@@ -1501,8 +1555,7 @@ async function runElaborate() {
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
     const data = await api("/api/elaborate", payload);
     if (!data.ok) {
-      appendConsole(data.error, "err");
-      if (data.trace) appendConsole(data.trace, "err");
+      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
       renderHierarchy(null);
       renderSignalList([]);
       setStatus("Elab error", "err");
@@ -1536,8 +1589,7 @@ async function runSimulate() {
 
     const data = await api("/api/simulate", payload, abortController.signal);
     if (!data.ok) {
-      appendConsole(data.error, "err");
-      if (data.trace) appendConsole(data.trace, "err");
+      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
       if (data.console) appendConsole(data.console);
       renderHierarchy(null);
       renderSignalList([]);
@@ -1622,6 +1674,8 @@ function bindUi() {
   $("btn-step").addEventListener("click", runStep);
   $("btn-elab").addEventListener("click", runElaborate);
   $("btn-clear-console").addEventListener("click", clearConsole);
+  $("btn-copy-console")?.addEventListener("click", () => copyConsoleText());
+  $("btn-copy-console-err")?.addEventListener("click", () => copyConsoleText({ errorsOnly: true }));
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
   $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit")?.addEventListener("click", fitWaveform);

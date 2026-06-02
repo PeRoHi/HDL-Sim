@@ -2,6 +2,16 @@
 
 ?start: design
 
+REG.2: "reg"i
+WIRE.2: "wire"i
+INTEGER.2: "integer"i
+PORT_DIR.2: "input"i | "output"i | "inout"i
+INITIAL.2: "initial"i
+ALWAYS.2: "always"i
+ASSIGN.2: "assign"i
+BEGIN.2: "begin"i
+IDENT: /[A-Za-z_]\w*/
+
 design: module+
 
 module: "module" IDENT parameter_list? port_list? ";" decl_or_stmt* "endmodule" [";"]
@@ -15,13 +25,16 @@ param_instance: "#" "(" param_override ("," param_override)* ")"
 
 param_override: "." IDENT "(" expr ")"
 
-port_list: "(" port_decl ("," port_decl)* ")"
+port_list: "(" port ("," port)* ")"
+
+port: port_decl | IDENT -> port_name
 
 port_decl: PORT_DIR range? IDENT
 
-PORT_DIR: "input"i | "output"i | "inout"i
+port_body_decl.10: PORT_DIR range? IDENT ";" -> port_decl
 
-decl_or_stmt: declaration
+decl_or_stmt: port_body_decl
+             | declaration
              | parameter_decl_stmt
              | continuous_assign
              | initial_block
@@ -40,10 +53,6 @@ ident_list: IDENT ("," IDENT)*
 
 parameter_decl_stmt: "parameter"i IDENT "=" expr ";"
                     | "localparam"i IDENT "=" expr ";"
-
-REG: "reg"i
-WIRE: "wire"i
-INTEGER: "integer"i
 
 genvar_decl: "genvar"i IDENT ";"
 
@@ -67,8 +76,8 @@ generate_for: "for" "(" genvar_init ";" expr ";" for_step ")" generate_body -> g
 
 genvar_init: "genvar"i? IDENT "=" expr
 
-generate_body: "begin" ":" IDENT generate_item+ "end" -> gen_begin_labeled
-              | "begin" generate_item+ "end" -> gen_begin
+generate_body: BEGIN ":" IDENT generate_item+ "end" -> gen_begin_labeled
+              | BEGIN generate_item+ "end" -> gen_begin
               | generate_item -> gen_single
 
 generate_if: "if" "(" expr ")" generate_body ["else" generate_body] -> gen_if
@@ -86,17 +95,17 @@ function_item: "input" range? IDENT ";" -> func_input
                | if_stmt
                | begin_end_block
 
-continuous_assign: "assign" lvalue "=" expr ";"
+continuous_assign: ASSIGN lvalue "=" expr ";"
 
-module_instance: IDENT param_instance? IDENT "(" port_connections? ")" ";"
+module_instance.1: IDENT param_instance? IDENT "(" port_connections? ")" ";"
 
 port_connections: port_connection ("," port_connection)*
 
 port_connection: "." IDENT "(" expr ")"
 
-initial_block: "initial" stmt
+initial_block: INITIAL stmt
 
-always_block: "always" sensitivity stmt
+always_block: ALWAYS sensitivity stmt
 
 sensitivity: "@" "(" sensitivity_item ("," sensitivity_item)* ")"
             | "@" "(" "*" ")"
@@ -122,8 +131,8 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | fork_stmt
      | event_control
 
-begin_end_block: "begin" ":" IDENT stmt_list "end" -> begin_labeled
-                 | "begin" stmt_list "end" -> begin_plain
+begin_end_block: BEGIN ":" IDENT stmt_list "end" -> begin_labeled
+                 | BEGIN stmt_list "end" -> begin_plain
 
 stmt_list: stmt+
 
@@ -251,9 +260,6 @@ sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 
 NUMBER: /\d+/
 STRING: /"[^"\n]*"/
-IDENT: /[A-Za-z_]\w*/
-
-
 OP_SHL: "<<"
 OP_SHR: ">>"
 OP_LE: "<="

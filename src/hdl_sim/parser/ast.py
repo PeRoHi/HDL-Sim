@@ -17,6 +17,7 @@ class PortDirection(Enum):
     INPUT = auto()
     OUTPUT = auto()
     INOUT = auto()
+    IMPLICIT = auto()  # name-only in module header; direction from body decl
 
 
 class EdgeKind(Enum):

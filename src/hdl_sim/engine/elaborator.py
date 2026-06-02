@@ -106,9 +106,7 @@ def _elaborate_module(
             net = port_bindings[port.name]
         else:
             full_name = _scoped_name(prefix, port.name)
-            if port.direction is PortDirection.INPUT:
-                kind = DeclKind.WIRE
-            elif port.direction is PortDirection.INOUT:
+            if port.direction in (PortDirection.INPUT, PortDirection.INOUT):
                 kind = DeclKind.WIRE
             else:
                 kind = DeclKind.REG

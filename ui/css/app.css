@@ -943,11 +943,16 @@ body.view-hide-project-bar .project-bar { display: none; }
   line-height: 1.45;
   color: var(--text);
   min-height: 0;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .console-line {
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .console-line.line-err { color: var(--error); }

@@ -235,6 +235,7 @@ class VerilogTransformer(Transformer):
 
     def module(self, items: list[Any]) -> Module:
         name = str(items[0])
+        index = 1
         parameters: list[ParameterDecl] = []
         ports: list[Port] = []
         declarations: list[Declaration] = []
@@ -245,8 +246,6 @@ class VerilogTransformer(Transformer):
         functions: list[FunctionDef] = []
         tasks: list[TaskDef] = []
         generate_blocks: list[GenerateBlock] = []
-
-        index = 1
         if index < len(items) and isinstance(items[index], list) and items[index]:
             if isinstance(items[index][0], ParameterDecl):
                 parameters.extend(items[index])
@@ -281,7 +280,7 @@ class VerilogTransformer(Transformer):
         return Module(
             name=name,
             parameters=tuple(parameters),
-            ports=tuple(ports),
+            ports=self._merge_ports(ports),
             declarations=tuple(declarations),
             continuous_assigns=tuple(continuous_assigns),
             initial_blocks=tuple(initial_blocks),
@@ -295,6 +294,42 @@ class VerilogTransformer(Transformer):
     def port_list(self, ports: list[Port]) -> list[Port]:
         return ports
 
+    def _merge_ports(self, ports: list[Port]) -> tuple[Port, ...]:
+        """Merge ANSI header ports with implicit names and body input/output decls."""
+        order: list[str] = []
+        by_name: dict[str, Port] = {}
+        for port in ports:
+            if port.name not in by_name:
+                order.append(port.name)
+                by_name[port.name] = port
+                continue
+            prev = by_name[port.name]
+            if prev.direction is PortDirection.IMPLICIT and port.direction is not PortDirection.IMPLICIT:
+                by_name[port.name] = port
+            elif port.direction is not PortDirection.IMPLICIT and prev.direction is PortDirection.IMPLICIT:
+                by_name[port.name] = port
+            elif port.direction is not PortDirection.IMPLICIT and prev.direction is not PortDirection.IMPLICIT:
+                if prev.direction != port.direction or prev.range != port.range:
+                    msg = f"conflicting port declaration for {port.name}"
+                    raise ValueError(msg)
+        merged = [by_name[n] for n in order]
+        unresolved = [p.name for p in merged if p.direction is PortDirection.IMPLICIT]
+        if unresolved:
+            msg = f"port direction missing for: {', '.join(unresolved)}"
+            raise ValueError(msg)
+        return tuple(merged)
+
+    @v_args(inline=True)
+    def port_name(self, name: Token) -> Port:
+        return Port(direction=PortDirection.IMPLICIT, name=str(name))
+
+    def _port_decl_with_dir(self, port_dir: PortDirection, *rest: Any) -> Port:
+        if len(rest) == 2:
+            value_range, name = rest
+            return Port(direction=port_dir, name=str(name), range=value_range)
+        (name,) = rest
+        return Port(direction=port_dir, name=str(name))
+
     @v_args(inline=True)
     def port_decl(self, direction: Token, *rest: Any) -> Port:
         dir_text = str(direction).lower()
@@ -304,11 +339,7 @@ class VerilogTransformer(Transformer):
             port_dir = PortDirection.INOUT
         else:
             port_dir = PortDirection.OUTPUT
-        if len(rest) == 2:
-            value_range, name = rest
-            return Port(direction=port_dir, name=str(name), range=value_range)
-        (name,) = rest
-        return Port(direction=port_dir, name=str(name))
+        return self._port_decl_with_dir(port_dir, *rest)
 
     @v_args(inline=True)
     def module_instance(
@@ -441,17 +472,17 @@ class VerilogTransformer(Transformer):
     def range(self, msb: Expr, lsb: Expr) -> ValueRange:
         return ValueRange(msb=msb, lsb=lsb)
 
-    @v_args(inline=True)
-    def continuous_assign(self, target: Lvalue, expr: Expr) -> ContinuousAssign:
+    def continuous_assign(self, items: list[Any]) -> ContinuousAssign:
+        filtered = [item for item in items if not isinstance(item, Token)]
+        target, expr = filtered[0], filtered[1]
         return ContinuousAssign(target=target.base, expr=expr)
 
-    @v_args(inline=True)
-    def initial_block(self, body: Stmt) -> InitialBlock:
+    def initial_block(self, items: list[Any]) -> InitialBlock:
+        body = items[-1]
         return InitialBlock(body=body)
 
-    @v_args(inline=True)
-    def always_block(self, sensitivity: Any, body: Stmt) -> AlwaysBlock:
-        return AlwaysBlock(sensitivity=sensitivity, body=body)
+    def always_block(self, items: list[Any]) -> AlwaysBlock:
+        return AlwaysBlock(sensitivity=items[-2], body=items[-1])
 
     @v_args(inline=True)
     def posedge(self, name: Token) -> tuple[EdgeKind, str]:
@@ -472,12 +503,16 @@ class VerilogTransformer(Transformer):
             return tuple(items[0])
         return tuple(items)
 
-    @v_args(inline=True)
-    def begin_labeled(self, label: Token, stmt_list: list[Stmt]) -> Block:
-        return Block(statements=tuple(_flatten(stmt_list)), label=str(label))
+    def begin_labeled(self, items: list[Any]) -> Block:
+        label = str(items[2])
+        stmt_list = items[3]
+        return Block(statements=tuple(_flatten(stmt_list)), label=label)
 
-    def begin_plain(self, stmt_list: list[Stmt]) -> Block:
-        return Block(statements=tuple(_flatten(stmt_list)))
+    def begin_plain(self, items: list[Any]) -> Block:
+        for item in items:
+            if isinstance(item, list):
+                return Block(statements=tuple(_flatten(item)))
+        return Block(statements=tuple(_flatten(items[-1])))
 
     def begin_end_block(self, stmt_list: list[Stmt]) -> Block:
         return Block(statements=tuple(_flatten(stmt_list)))
