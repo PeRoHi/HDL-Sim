@@ -25,11 +25,22 @@ packaging\build_zip.bat
 - 配布物: `dist\HDL-Sim-x.x.x-windows-x64.zip`（解凍して `HDL-Sim.exe` を起動）
 - **exe は Chrome ではなく専用ウィンドウで IDE が開きます**（WebView2 未導入時は [ランタイム](https://go.microsoft.com/fwlink/p/?LinkId=2124703)）
 
+### バージョン更新の通知（利用者）
+
+起動して IDE を開くと、GitHub の **最新 Release**（`PeRoHi/HDL-Sim`）と同梱 exe のバージョンを比較します。新しい版があれば画面上部にバナーが出ます（**自動ダウンロード・自動更新はしません**）。ZIP を取得してフォルダごと入れ替えてください。
+
 ### バージョンの確認（`HDL-Sim.exe`）
 
 1. **起動ウィンドウ** … 起動直後の小さな GUI に `Ver x.x.x` と表示
 2. **IDE** … 左上メニューバーの `Ver x.x.x` バッジ（サーバー `/api/version` と同期）
 3. **Help → About** … ダイアログでバージョン表示
+
+### リリース時のバージョン上げ（開発者）
+
+1. `src/hdl_sim/__init__.py` の `__version__` を更新（ここが exe の正）
+2. 同じ番号を `pyproject.toml`・`src/hdl_sim/web/app.py` の `UI_BUILD`・`ui/index.html` の `?v=` とバッジに反映
+3. `packaging\build_windows.bat` → `packaging\build_zip.bat`
+4. GitHub Release に `HDL-Sim-x.x.x-windows-x64.zip` を添付し、タグ `vx.x.x` を付ける
 
 ### インストーラー版（当面は使用停止）
 

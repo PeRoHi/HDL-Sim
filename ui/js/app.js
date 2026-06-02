@@ -1802,7 +1802,9 @@ function showUpdateBanner(options) {
   } = options;
 
   const url = downloadUrl || releaseUrl || "https://github.com/PeRoHi/HDL-Sim/releases/latest";
-  const linkLabel = downloadUrl ? "インストーラーをダウンロード" : "リリースを見る";
+  const linkLabel = downloadUrl
+    ? (downloadUrl.toLowerCase().endsWith(".zip") ? "ZIP をダウンロード" : "ダウンロード")
+    : "リリースを見る";
 
   let message;
   if (mode === "local") {
@@ -1813,7 +1815,7 @@ function showUpdateBanner(options) {
     message =
       `<strong>新しいバージョンがあります:</strong> ${latestVersion} ` +
       `(現在 ${currentVersion})。` +
-      ` インストール済みの exe も、新しい Setup を取得して更新できます。`;
+      ` 新しい ZIP を取得し、フォルダごと入れ替えて更新してください。`;
   }
 
   banner.innerHTML =

@@ -56,12 +56,20 @@ def _fetch_latest_release(url: str = DEFAULT_RELEASES_URL, *, timeout: float = 8
 
 
 def _pick_windows_asset(release: dict[str, Any]) -> str | None:
+    """Prefer ZIP (primary distribution), then signed/unsigned Setup exe."""
+    zip_url: str | None = None
+    exe_url: str | None = None
     for asset in release.get("assets") or []:
         name = str(asset.get("name") or "")
         lower = name.lower()
-        if lower.endswith(".exe") and ("setup" in lower or "hdl-sim" in lower):
-            return str(asset.get("browser_download_url") or "") or None
-    return None
+        url = str(asset.get("browser_download_url") or "") or None
+        if not url or "hdl-sim" not in lower:
+            continue
+        if lower.endswith(".zip"):
+            zip_url = url
+        elif lower.endswith(".exe") and ("setup" in lower or lower.startswith("hdl-sim")):
+            exe_url = url
+    return zip_url or exe_url
 
 
 def check_for_updates(
