@@ -866,8 +866,8 @@ class VerilogTransformer(Transformer):
         (name,) = rest
         return TaskPort(kind=TaskPortKind.OUTPUT, name=str(name))
 
-    @v_args(inline=True)
-    def wait_stmt(self, condition: Expr) -> WaitStmt:
+    def wait_stmt(self, items: list[Any]) -> WaitStmt:
+        condition = items[-1]
         return WaitStmt(condition=condition)
 
     @v_args(inline=True)
@@ -995,6 +995,10 @@ class VerilogTransformer(Transformer):
     @v_args(inline=True)
     def default_pat(self) -> str:
         return "default"
+
+    @v_args(inline=True)
+    def case_pat_wait(self, token: Token) -> IdentRef:
+        return IdentRef(name=str(token))
 
     def expr_pat(self, children: list[Any]) -> tuple[Expr, ...]:
         return tuple(self._child_args(tuple(children)))

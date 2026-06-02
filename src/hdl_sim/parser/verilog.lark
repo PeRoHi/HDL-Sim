@@ -9,6 +9,7 @@ PORT_DIR.2: "input"i | "output"i | "inout"i
 INITIAL.2: "initial"i
 ALWAYS.2: "always"i
 ASSIGN.2: "assign"i
+WAIT.2: "wait"i
 BEGIN.2: "begin"i
 SYS_IDENT.0: /\$[A-Za-z_]\w+/
 IDENT: /[A-Za-z_]\w*/
@@ -149,7 +150,7 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | fork_stmt
      | event_control
 
-wait_stmt: "wait"i "(" expr ")" ";" -> wait_stmt
+wait_stmt: WAIT "(" expr ")" ";" -> wait_stmt
 
 begin_end_block: BEGIN ":" IDENT stmt_list "end" -> begin_labeled
                  | BEGIN stmt_list "end" -> begin_plain
@@ -206,7 +207,10 @@ case_stmt: "case"i "(" expr ")" case_item+ "endcase" [";"] -> case
 case_item: case_pattern ":" stmt
 
 case_pattern: "default"i -> default_pat
-             | expr ("," expr)* -> expr_pat
+             | case_pat_expr ("," case_pat_expr)* -> expr_pat
+
+case_pat_expr: WAIT -> case_pat_wait
+              | expr
 
 event_control: "@" "(" event_expr ("," event_expr)* ")" stmt
               | "@" event_expr stmt
