@@ -5,6 +5,12 @@ cd /d "%~dp0\.."
 echo [HDL-Sim] Windows インストーラーをビルドします...
 echo.
 
+call packaging\download_webview2.bat
+if errorlevel 1 (
+  pause
+  exit /b 1
+)
+
 if not exist "dist\HDL-Sim\HDL-Sim.exe" (
   echo dist\HDL-Sim\HDL-Sim.exe がありません。先に packaging\build_windows.bat を実行してください.
   pause
@@ -34,7 +40,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo 完成: dist\HDL-Sim-Setup-0.5.3.exe
+echo 完成: dist\HDL-Sim-Setup-0.5.4.exe
+echo WebView2 未導入 PC では Setup 中にランタイムもインストールします.
 echo インストール時にショートカット作成や保存フォルダを選択できます.
 echo アンインストールは Windows の「アプリと機能」から実行できます.
 pause

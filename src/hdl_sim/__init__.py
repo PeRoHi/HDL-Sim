@@ -3,7 +3,7 @@
 from hdl_sim.engine import SimulationResult, Simulator
 from hdl_sim.parser import parse_design, parse_module
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 
 __all__ = [
     "SimulationResult",
