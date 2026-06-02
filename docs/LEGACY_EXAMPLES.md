@@ -2,6 +2,12 @@
 
 `cursor/dev-ui-9db8` から取り込まれた古い Silos 系 `.v` サンプルの動作状況です。
 
+## プロジェクトファイル (`.spj`)
+
+- **Verilog 本体**: `examples/examples/`（および `examples/examples/新しいフォルダー/`）
+- **HDL-Sim 用 `.spj`**: リポジトリ直下の **`spj/`**（Silos INI 形式は移行済み・削除）
+- IDE で **Open .spj** → `spj/saikoro.spj` などを選択すると、同梱ソースがエディタに展開されます
+
 ## 動作確認済み
 
 以下は `load_design_with_meta` で読み込み、`simulate_files` で実行できることを回帰テストしています。

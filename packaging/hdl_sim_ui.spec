@@ -27,6 +27,7 @@ a = Analysis(
     datas=[
         (str(root / 'ui'), 'ui'),
         (str(root / 'examples'), 'examples'),
+        (str(root / 'spj'), 'spj'),
         *parser_data,
         *collect_data_files('lark'),
     ],
