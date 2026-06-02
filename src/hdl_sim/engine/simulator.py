@@ -131,7 +131,12 @@ class Simulator:
 
     def _check_monitors(self) -> None:
         for args, locals in self._monitors:
-            evaluator = ExpressionEvaluator(locals, queue=self._queue)
+            evaluator = ExpressionEvaluator(
+                locals,
+                queue=self._queue,
+                global_nets=self._nets,
+                sim_time=self._queue.now,
+            )
             message = render_display_args(args, evaluator)
             print(message, flush=True)
             if self._tracer is not None:

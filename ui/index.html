@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.5.8" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.8" />
+  <meta name="hdl-sim-ui-build" content="0.5.9" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.9" />
 </head>
 <body>
   <!-- Silos-style menu bar -->
   <nav id="menubar" class="menubar" aria-label="メインメニュー">
     <div class="menubar-brand" title="HDL-Sim UI バージョン">
-      <span id="app-version" class="brand-ver">Ver 0.5.8</span>
+      <span id="app-version" class="brand-ver">Ver 0.5.9</span>
       <span class="brand-name">HDL-Sim</span>
     </div>
     <button type="button" class="menubar-btn" data-menu="file">File</button>
@@ -59,13 +59,13 @@
           <option value="">(auto)</option>
         </select>
       </label>
-      <label class="tb-field">
+      <label class="tb-field" title="シミュレーション時間の上限（時間単位）。この時刻に達するか、イベントがなくなると停止します。">
         <span class="tb-field-label">Until</span>
-        <input type="number" id="input-until" value="50" min="0" />
+        <input type="number" id="input-until" value="15000" min="0" title="停止するシミュレーション時刻（例: STEP=1000 なら 15000 以上推奨）" />
       </label>
-      <label class="tb-field">
+      <label class="tb-field" title="処理するイベント数の上限。無限ループ防止用。通常は 500〜5000 で十分です。">
         <span class="tb-field-label">MaxEv</span>
-        <input type="number" id="input-max-events" value="500" min="1" />
+        <input type="number" id="input-max-events" value="2000" min="1" title="最大イベント数（遅延・posedge などの処理回数上限）" />
       </label>
       <label class="tb-field">
         <span class="tb-field-label">例</span>
@@ -149,8 +149,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.5.8"></script>
-  <script src="/assets/js/menu-bar.js?v=0.5.8"></script>
-  <script src="/assets/js/app.js?v=0.5.8" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.5.9"></script>
+  <script src="/assets/js/menu-bar.js?v=0.5.9"></script>
+  <script src="/assets/js/app.js?v=0.5.9" type="module"></script>
 </body>
 </html>

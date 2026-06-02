@@ -574,6 +574,30 @@ body.view-hide-project-bar .project-bar { display: none; }
   text-overflow: ellipsis;
 }
 
+.tree-node .wave-mark {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.35;
+  padding: 0 4px;
+}
+
+.tree-node.on-wave .wave-mark,
+.tree-node.on-wave .label {
+  color: var(--accent);
+}
+
+.tree-node.on-wave .wave-mark {
+  opacity: 1;
+}
+
+.hierarchy-hint {
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
 .tree-node .badge {
   margin-left: auto;
   padding: 0 4px;

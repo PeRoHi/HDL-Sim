@@ -50,6 +50,9 @@ const fileEditors = new Map();
 const mdiWindows = new Map();
 let mdiZ = 10;
 let lastWaveform = null;
+let lastWaveformFull = null;
+/** @type {string[]} */
+let waveformSelection = [];
 let selectedSignal = null;
 let waveformVisible = false;
 let waveZoom = 1;
@@ -816,7 +819,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.8\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.9\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1276,11 +1279,68 @@ function closeFile(path) {
 
 /* ── Hierarchy tree ── */
 
+function resolveWaveformSignalNames(path) {
+  if (!path || !lastWaveformFull?.signals) return [];
+  const names = lastWaveformFull.signals.map((s) => s.name);
+  if (names.includes(path)) return [path];
+  const suffix = "." + path;
+  const matches = names.filter((n) => n === path || n.endsWith(suffix));
+  return matches.length ? matches : [];
+}
+
+function buildDisplayWaveform() {
+  if (!lastWaveformFull) return null;
+  const pick = waveformSelection.length
+    ? new Set(waveformSelection)
+    : null;
+  const signals = pick
+    ? lastWaveformFull.signals.filter((s) => pick.has(s.name))
+    : lastWaveformFull.signals.slice();
+  return {
+    timescale: lastWaveformFull.timescale,
+    signals: signals.length ? signals : lastWaveformFull.signals.slice(0, 12),
+  };
+}
+
+function refreshWaveformView() {
+  lastWaveform = buildDisplayWaveform();
+  if (lastWaveform) drawWave(lastWaveform);
+  syncHierarchyWaveMarks();
+}
+
+function toggleWaveformSignal(path) {
+  const resolved = resolveWaveformSignalNames(path);
+  if (!resolved.length) {
+    appendConsole(`[wave] 波形データに "${path}" がありません。先に Run してください。`, "warn");
+    return;
+  }
+  const set = new Set(waveformSelection);
+  const removing = resolved.every((n) => set.has(n));
+  for (const name of resolved) {
+    if (removing) set.delete(name);
+    else set.add(name);
+  }
+  waveformSelection = [...set];
+  if (!waveformVisible) toggleWaveform(true);
+  refreshWaveformView();
+}
+
+function syncHierarchyWaveMarks() {
+  const active = new Set(waveformSelection);
+  document.querySelectorAll("#hierarchy-tree .tree-node[data-signal-path]").forEach((row) => {
+    const path = row.dataset.signalPath;
+    const onWave = resolveWaveformSignalNames(path).some((n) => active.has(n));
+    row.classList.toggle("on-wave", onWave);
+  });
+}
+
 function renderTreeNode(node, parentEl, depth = 0) {
   const hasChildren = node.children && node.children.length > 0;
+  const signalPath = node.signalPath || null;
   const row = document.createElement("div");
-  row.className = "tree-node" + (node.name === selectedSignal ? " selected" : "");
+  row.className = "tree-node" + (signalPath && signalPath === selectedSignal ? " selected" : "");
   row.style.paddingLeft = `${depth * 4 + 4}px`;
+  if (signalPath) row.dataset.signalPath = signalPath;
 
   const twist = document.createElement("span");
   twist.className = "twist" + (hasChildren ? "" : " empty");
@@ -1304,12 +1364,26 @@ function renderTreeNode(node, parentEl, depth = 0) {
     row.appendChild(badge);
   }
 
+  if (signalPath) {
+    const waveMark = document.createElement("span");
+    waveMark.className = "wave-mark";
+    waveMark.title = "クリックで波形に追加/削除";
+    waveMark.textContent = "〜";
+    row.appendChild(waveMark);
+  }
+
   row.addEventListener("click", (e) => {
     e.stopPropagation();
+    if (signalPath) {
+      selectedSignal = signalPath;
+      document.querySelectorAll("#hierarchy-tree .tree-node").forEach((n) => n.classList.remove("selected"));
+      row.classList.add("selected");
+      toggleWaveformSignal(signalPath);
+      return;
+    }
     selectedSignal = node.name;
     document.querySelectorAll("#hierarchy-tree .tree-node").forEach((n) => n.classList.remove("selected"));
     row.classList.add("selected");
-    highlightSignal(node.name);
   });
 
   parentEl.appendChild(row);
@@ -1335,7 +1409,19 @@ function renderHierarchy(tree) {
     root.innerHTML = '<div class="empty-hint">Run または Elab で階層を表示</div>';
     return;
   }
+  const hint = document.createElement("div");
+  hint.className = "empty-hint hierarchy-hint";
+  hint.textContent = "信号をクリックで波形に追加/削除（複数選択可）";
+  root.appendChild(hint);
   renderTreeNode(tree, root);
+  syncHierarchyWaveMarks();
+}
+
+function applySuggestedUntil(value) {
+  const input = $("input-until");
+  if (!input || value == null) return;
+  const current = Number(input.value);
+  if (!current || current <= 50) input.value = String(value);
 }
 
 function renderSignalList(signals) {
@@ -1370,15 +1456,8 @@ function renderSignalList(signals) {
 }
 
 function highlightSignal(name) {
-  if (!lastWaveform) return;
-  const filtered = {
-    timescale: lastWaveform.timescale,
-    signals: lastWaveform.signals.filter(
-      (s) => s.name === name || s.name.endsWith("." + name) || name.endsWith(s.name)
-    ),
-  };
-  if (!filtered.signals.length) filtered.signals = lastWaveform.signals.slice(0, 12);
-  drawWave(filtered);
+  if (!name) return;
+  toggleWaveformSignal(name);
 }
 
 function createOutputWindow() {
@@ -1419,6 +1498,7 @@ function createWaveformWindow() {
         <button type="button" id="btn-wave-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
         <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
         <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
+        <button type="button" id="btn-wave-all" class="mini-btn" title="全信号を波形に表示">All</button>
         <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
       </div>
       <div id="waveform-wrap" class="waveform-wrap">
@@ -1426,6 +1506,11 @@ function createWaveformWindow() {
       </div>
     `;
     body.querySelector("#btn-wave-fit")?.addEventListener("click", fitWaveform);
+    body.querySelector("#btn-wave-all")?.addEventListener("click", () => {
+      if (!lastWaveformFull) return;
+      waveformSelection = lastWaveformFull.signals.map((s) => s.name);
+      refreshWaveformView();
+    });
     body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
     body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
     body.querySelector("#chk-auto-scroll")?.addEventListener("change", () => {
@@ -1596,9 +1681,13 @@ async function runElaborate() {
       return;
     }
     renderHierarchy(data.hierarchy);
+    applySuggestedUntil(data.suggested_until);
     refreshTopModulePicker(data.top);
     setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
+    if (data.suggested_until != null) {
+      appendConsole(`[hint] Until の推奨値: ${data.suggested_until}（parameter STEP ベンチ向け）`, "info");
+    }
   } catch (e) {
     if (e.name !== "AbortError") {
       setStatus("Network error", "err");
@@ -1634,9 +1723,13 @@ async function runSimulate() {
     refreshTopModulePicker(data.top_module);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
-    lastWaveform = data.waveform;
-    if (!waveformVisible) toggleWaveform(true);
-    drawWave(data.waveform);
+    lastWaveformFull = data.waveform;
+    waveformSelection = data.waveform?.signals?.map((s) => s.name) || [];
+    applySuggestedUntil(data.suggested_until);
+    refreshWaveformView();
+    if (data.hints?.length) {
+      data.hints.forEach((h) => appendConsole(`[hint] ${h}`, "warn"));
+    }
     switchExplorerTab("hierarchy");
     setStatus(`Done t=${data.stop_time} ev=${data.events_processed}`, "ok");
   } catch (e) {

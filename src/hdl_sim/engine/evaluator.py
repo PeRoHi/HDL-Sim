@@ -41,9 +41,13 @@ class ExpressionEvaluator:
         on_net_update=None,
         caller_nets: dict[str, SimNet] | None = None,
         params: dict[str, int] | None = None,
+        global_nets: dict[str, SimNet] | None = None,
+        sim_time: int | None = None,
     ) -> None:
         self._nets = nets
         self._params = params or {}
+        self._global_nets = global_nets or {}
+        self._sim_time = sim_time
         self._functions = functions or {}
         self._tasks = tasks or {}
         self._queue = queue
@@ -118,15 +122,16 @@ class ExpressionEvaluator:
                 value = (value << 8) | ch
             return value
         if isinstance(expr, IdentRef):
+            if expr.name in ("$stime", "$time") and self._sim_time is not None:
+                return self._sim_time
             if expr.name in self._params:
                 return self._params[expr.name]
-            if expr.name in {"$time", "$stime"}:
-                return self._queue.now if self._queue is not None else 0
-            try:
+            if expr.name in self._nets:
                 return self._nets[expr.name].value
-            except KeyError as exc:
-                msg = f"unknown identifier: {expr.name}"
-                raise EvaluationError(msg) from exc
+            if expr.name in self._global_nets:
+                return self._global_nets[expr.name].value
+            msg = f"unknown identifier: {expr.name}"
+            raise EvaluationError(msg)
         if isinstance(expr, BitSelect):
             return read_lvalue(Lvalue(base=expr.signal, bit=expr.index), self._nets, self.eval)
         if isinstance(expr, PartSelect):

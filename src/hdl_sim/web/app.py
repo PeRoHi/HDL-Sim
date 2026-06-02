@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.8"
+UI_BUILD = "0.5.9"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -99,8 +99,8 @@ class ElaborateRequest(BaseModel):
 class SimulateRequest(BaseModel):
     files: list[SourceFile]
     top: str | None = None
-    until: int | None = 50
-    max_events: int | None = 500
+    until: int | None = 15000
+    max_events: int | None = 2000
     generate_vcd: bool = True
 
 
@@ -183,6 +183,53 @@ def nets_overview(sim: Simulator) -> list[dict[str, Any]]:
     return rows
 
 
+def _signal_path(path_prefix: str, name: str) -> str:
+    return f"{path_prefix}{name}" if path_prefix else name
+
+
+def suggested_sim_until(design: Design, *, top: str | None) -> int | None:
+    """Heuristic default simulation stop time from top-level parameters."""
+
+    from hdl_sim.engine.params import ParameterEvaluator
+
+    modules = {m.name: m for m in design.modules}
+    top_name = top or design.modules[0].name
+    module = modules.get(top_name)
+    if module is None:
+        return None
+    evaluator = ParameterEvaluator()
+    try:
+        evaluator.resolve_module_params(module.parameters)
+    except Exception:
+        return None
+    step = evaluator.snapshot().get("STEP")
+    if step is not None and step > 0:
+        return step * 15
+    return None
+
+
+def simulation_time_hints(
+    design: Design,
+    *,
+    top: str | None,
+    stop_time: int,
+    until: int | None,
+) -> list[str]:
+    """User-facing hints when until is shorter than bench timing."""
+
+    suggested = suggested_sim_until(design, top=top)
+    if suggested is None or until is None:
+        return []
+    if until >= suggested:
+        return []
+    if stop_time < until:
+        return []
+    return [
+        f"Until={until} は短すぎる可能性があります（STEP ベンチなら Until≈{suggested} 以上を推奨）。"
+        " クロック・リセットが動く前に停止していると波形がフラットに見えます。",
+    ]
+
+
 def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     """Build a simple module/instance tree for the sidebar."""
 
@@ -191,7 +238,12 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     if top_name not in modules:
         return {"name": top_name, "kind": "module", "children": []}
 
-    def build(module_name: str, instance_label: str | None) -> dict[str, Any]:
+    def build(
+        module_name: str,
+        instance_label: str | None,
+        *,
+        path_prefix: str = "",
+    ) -> dict[str, Any]:
         module = modules[module_name]
         label = instance_label or module_name
         children: list[dict[str, Any]] = []
@@ -201,6 +253,7 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
                     "name": port.name,
                     "kind": "port",
                     "direction": _port_dir_name(port.direction),
+                    "signalPath": _signal_path(path_prefix, port.name),
                     "children": [],
                 }
             )
@@ -209,12 +262,18 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
                 {
                     "name": decl.name,
                     "kind": decl.kind.name.lower(),
+                    "signalPath": _signal_path(path_prefix, decl.name),
                     "children": [],
                 }
             )
         for inst in module.instances:
+            child_prefix = (
+                f"{path_prefix}{inst.instance_name}."
+                if path_prefix
+                else f"{inst.instance_name}."
+            )
             if inst.module_type in modules:
-                children.append(build(inst.module_type, inst.instance_name))
+                children.append(build(inst.module_type, inst.instance_name, path_prefix=child_prefix))
             else:
                 children.append(
                     {
@@ -465,6 +524,7 @@ def create_app() -> FastAPI:
                 "continuous_assigns": len(elaborated.continuous_assigns),
                 "initial_blocks": len(elaborated.initial_blocks),
                 "always_blocks": len(elaborated.always_blocks),
+                "suggested_until": suggested_sim_until(design, top=top),
             }
         except Exception as exc:
             return {
@@ -514,6 +574,13 @@ def create_app() -> FastAPI:
                 "overview": design_overview(design),
                 "module_names": design_overview(design)["module_names"],
                 "files_loaded": [f.path for f in req.files],
+                "suggested_until": suggested_sim_until(design, top=top),
+                "hints": simulation_time_hints(
+                    design,
+                    top=top,
+                    stop_time=result.stop_time,
+                    until=req.until,
+                ),
             }
         except Exception as exc:
             return {
