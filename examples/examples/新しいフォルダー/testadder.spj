@@ -1,0 +1,9 @@
+[Settings]
+Version=2001.1
+Mode=Debug
+[WindowPos]
+OpenWindows=
+[Options]
+DebugEnable=No
+CCEnable=No
+CcOpEnable=No

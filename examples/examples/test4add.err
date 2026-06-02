@@ -1,0 +1,63 @@
+warning# 1.229
+ print %h ( endmodule ); quit
+                    ^ expecting expression or "(", not keyword "endmodule"
+warning# 1.229
+ print %h ( endmodule ); quit
+      expecting ")" ^
+warning# 1.229
+ print %h ( endmodule ); quit
+                    ^ expecting expression or "(", not keyword "endmodule"
+warning# 1.229
+ print %h ( endmodule ); quit
+      expecting ")" ^
+warning# 1.229
+ print %h ( endmodule ); quit
+                    ^ expecting expression or "(", not keyword "endmodule"
+warning# 1.229
+ print %h ( endmodule ); quit
+      expecting ")" ^
+warning# 1.229
+ print %h ( endmodule ); quit
+                    ^ expecting expression or "(", not keyword "endmodule"
+warning# 1.229
+ print %h ( endmodule ); quit
+      expecting ")" ^
+warning# 1.229
+ print %h ( end ); quit
+              ^ expecting expression or "(", not keyword "end"
+warning# 1.229
+ print %h ( end ); quit
+expecting ")" ^
+warning# 1.229
+ print %h ( end ); quit
+              ^ expecting expression or "(", not keyword "end"
+warning# 1.229
+ print %h ( end ); quit
+expecting ")" ^
+warning# 1.229
+ print %h ( end ); quit
+              ^ expecting expression or "(", not keyword "end"
+warning# 1.229
+ print %h ( end ); quit
+expecting ")" ^
+warning# 1.229
+ print %h ( end ); quit
+              ^ expecting expression or "(", not keyword "end"
+warning# 1.229
+ print %h ( end ); quit
+expecting ")" ^
+warning# 1.229
+ print %h ( end ); quit
+              ^ expecting expression or "(", not keyword "end"
+warning# 1.229
+ print %h ( end ); quit
+expecting ")" ^
+warning# 1.248
+ print %h ( nsec ); quit
+                 ^ variable 'nsec' was not declared
+warning# 1.248
+ print %h ( nsec ); quit
+                 ^ variable 'nsec' was not declared
+warning# 1.248
+ print %h ( nsec ); quit
+                 ^ variable 'nsec' was not declared

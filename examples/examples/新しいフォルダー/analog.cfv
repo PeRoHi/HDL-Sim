@@ -1,0 +1,16 @@
+// Simucad Generated Commands Start Here
+
+// Simucad define
++define+sse
+
+// Project Settings
++typdelays
+-"!file .sav=\"analog\""
+-"!control .sav=3"
+-"!control .enablecache"
+-"!control .savcell=0"
+-"!control .disk=1000M"
+
+// Input Files
+"analog.v"
+

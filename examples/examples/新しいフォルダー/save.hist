@@ -1,0 +1,14 @@
+sim to 0
+sim 
+scope "top "
+vprobe clock
+scope "top "
+vprobe down_up
+scope "top "
+vprobe analog_in
+scope "top "
+vprobe feedback
+scope "top "
+vprobe counter_value
+scope "top "
+vprobe count[7:0]

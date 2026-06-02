@@ -1,0 +1,42 @@
+[Settings]
+Version=2001.1
+Mode=Debug
+[Files]
+0="couter_reset.v"
+1="counter_reset_tp.v"
+[WindowPos]
+Output=0,1,0,-1,0,-1,196,234,1826,817
+Explorer=0,1,0,-1,0,-1,322,282,1952,877
+OpenWindows=
+counter_reset_tp.v=0,1,0,-1,0,-1,597,67,2227,662
+couter_reset.v=0,1,0,-1,0,-1,581,148,2211,743
+[Options]
+DebugEnable=No
+CCEnable=No
+CcOpEnable=No
+[Explorer]
+P1Width=100
+P2Width=1511
+View=Icon
+Scope=counter_reset_tp.counter_reset
+[Group0]
+Name=Default
+0="counter_reset_tp.counter_reset : out[3:0]" default
+1="counter_reset_tp.counter_reset : reset" default
+2="counter_reset_tp.counter_reset : clk" default
+[Analyzer]
+P1Width=100
+P2Width=1544
+C1Width=60
+C2Width=60
+C3Width=60
+[GroupList]
+0=Default
+[Position]
+Width=1440
+Height=753
+X=349
+Y=105
+[OpenFile]
+0="counter_reset_tp.v"
+1="couter_reset.v"
