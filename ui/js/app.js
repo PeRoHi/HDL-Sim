@@ -65,7 +65,7 @@ let splitV = null;
 
 const SPLIT_SIZES = {
   h: { explorer: 18, editor: 82, wave: 0 },
-  v: { main: 72, console: 28 },
+  v: { main: 65, console: 35 },
 };
 
 let currentProject = "";
@@ -194,6 +194,7 @@ function appendConsole(text, kind = "") {
   });
   syncConsoleViews();
   if (kind === "err") {
+    ensureConsoleVisible();
     focusConsole(false);
   }
 }
@@ -819,7 +820,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.9\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.10\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -895,7 +896,7 @@ function initSplits() {
   splitV = Split(["#split-h-main", "#pane-console"], {
     direction: "vertical",
     sizes: [SPLIT_SIZES.v.main, SPLIT_SIZES.v.console],
-    minSize: [160, 60],
+    minSize: [160, 120],
     gutterSize: 4,
     snapOffset: 0,
     onDragEnd: (sizes) => {
@@ -1665,9 +1666,16 @@ async function openExample(id) {
   }
 }
 
+function ensureConsoleVisible() {
+  document.body.classList.remove("view-hide-output-panel");
+  if (!splitV) return;
+  const sizes = splitV.getSizes();
+  if (sizes[1] < 18) splitV.setSizes([65, 35]);
+}
+
 async function runElaborate() {
   setStatus("Elaborating…", "busy");
-  createOutputWindow();
+  ensureConsoleVisible();
   try {
     const payload = getPayload();
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
@@ -1699,7 +1707,7 @@ async function runElaborate() {
 async function runSimulate() {
   setStatus("Running…", "busy");
   setRunning(true);
-  createOutputWindow();
+  ensureConsoleVisible();
   clearConsole();
   abortController = new AbortController();
 

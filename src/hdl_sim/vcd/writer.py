@@ -53,6 +53,8 @@ class VCDWriter:
         self._active_nets = names
 
     def change(self, net: SimNet, time: SimTime) -> None:
+        if net.name not in self._codes:
+            return
         if self._active_nets is not None and net.name not in self._active_nets:
             return
         value = net.vcd_value()

@@ -359,7 +359,11 @@ body.view-hide-project-bar .project-bar { display: none; }
 .pane-console {
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
-  min-height: 80px;
+  min-height: 120px;
+}
+
+.pane-console .console-output {
+  min-height: 96px;
 }
 
 /* Split.js gutters */
@@ -898,14 +902,18 @@ body.view-hide-project-bar .project-bar { display: none; }
 }
 
 .mdi-output {
-  overflow: auto;
-  padding: 18px 24px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  background: #fff;
-  color: #111;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.mdi-output .console-output {
+  flex: 1;
+  min-height: 180px;
+  width: 100%;
 }
 
 .mdi-output .console-line {
