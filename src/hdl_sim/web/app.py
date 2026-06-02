@@ -77,6 +77,10 @@ EXAMPLES_DIR = examples_dir()
 class SourceFile(BaseModel):
     path: str = Field(description="Virtual path, e.g. tb.v")
     content: str
+    include_only: bool = Field(
+        default=False,
+        description="Write to workspace for `include` but do not parse as a top-level module file",
+    )
 
 
 class ProjectCreateRequest(BaseModel):
@@ -298,7 +302,11 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
         path = base / item.path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(item.content, encoding="utf-8")
-        paths.append(path)
+        if not item.include_only:
+            paths.append(path)
+    if not paths:
+        msg = "no elaboration entry files (only include-only sources?)"
+        raise ValueError(msg)
     loaded = load_design_with_meta(paths)
     return loaded, base, tmp
 

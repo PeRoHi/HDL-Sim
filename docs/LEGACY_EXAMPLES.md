@@ -7,6 +7,8 @@
 - **Verilog 本体**: `examples/examples/`（および `examples/examples/新しいフォルダー/`）
 - **HDL-Sim 用 `.spj`**: リポジトリ直下の **`spj/`**（Silos INI 形式は移行済み・削除）
 - IDE で **Open .spj** → `spj/saikoro.spj` などを選択すると、同梱ソースがエディタに展開されます
+- **`silos_vending` / `silos_gate`**: `include` 用の `.v` は `include_only` として同梱（`vending.v` など）
+- **`silos_fltsim` / `silos_analog`**: SPJ には含めない（Silos PLI / `!con` 混合信号は未対応）
 
 ## 動作確認済み
 
