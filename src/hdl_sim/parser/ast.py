@@ -52,6 +52,7 @@ class Port:
     direction: PortDirection
     name: str
     range: ValueRange | None = None
+    net_kind: DeclKind | None = None
 
 
 @dataclass(frozen=True, slots=True)

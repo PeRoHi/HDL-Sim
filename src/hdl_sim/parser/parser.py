@@ -325,12 +325,36 @@ class VerilogTransformer(Transformer):
     def port_name(self, name: Token) -> Port:
         return Port(direction=PortDirection.IMPLICIT, name=str(name))
 
+    @v_args(inline=True)
+    def port_type(self, kind: Token) -> Token:
+        return kind
+
+    def _port_net_kind(self, value: Any) -> DeclKind | None:
+        if isinstance(value, Tree) and str(value.data) == "port_type" and value.children:
+            value = value.children[0]
+        if isinstance(value, Token):
+            text = str(value).lower()
+        elif isinstance(value, str):
+            text = value.lower()
+        else:
+            return None
+        if text == "wire":
+            return DeclKind.WIRE
+        if text == "reg":
+            return DeclKind.REG
+        return None
+
     def _port_decl_with_dir(self, port_dir: PortDirection, *rest: Any) -> Port:
-        if len(rest) == 2:
-            value_range, name = rest
-            return Port(direction=port_dir, name=str(name), range=value_range)
-        (name,) = rest
-        return Port(direction=port_dir, name=str(name))
+        rest_list = list(rest)
+        net_kind = None
+        if rest_list and self._port_net_kind(rest_list[0]) is not None:
+            net_kind = self._port_net_kind(rest_list[0])
+            rest_list = rest_list[1:]
+        if len(rest_list) == 2:
+            value_range, name = rest_list
+            return Port(direction=port_dir, name=str(name), range=value_range, net_kind=net_kind)
+        (name,) = rest_list
+        return Port(direction=port_dir, name=str(name), net_kind=net_kind)
 
     def port_decls_body(self, items: list[Any]) -> list[Port]:
         dir_text = str(items[0]).lower()
@@ -340,14 +364,18 @@ class VerilogTransformer(Transformer):
             port_dir = PortDirection.INOUT
         else:
             port_dir = PortDirection.OUTPUT
-        if len(items) == 2:
-            names = items[1]
-            value_range = None
-        else:
-            value_range = items[1]
-            names = items[2]
+        idx = 1
+        net_kind = None
+        if idx < len(items) and self._port_net_kind(items[idx]) is not None:
+            net_kind = self._port_net_kind(items[idx])
+            idx += 1
+        value_range = None
+        if idx < len(items) and not isinstance(items[idx], list):
+            value_range = items[idx]
+            idx += 1
+        names = items[idx]
         return [
-            self._port_decl_with_dir(port_dir, value_range, name)
+            Port(direction=port_dir, name=str(name), range=value_range, net_kind=net_kind)
             for name in names
         ]
 
