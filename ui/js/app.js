@@ -96,29 +96,52 @@ function setStatus(text, kind = "") {
 }
 
 let lastConsoleErrorText = "";
+let consoleBuffer = "";
+
+function isConsoleElement(el) {
+  return el?.classList?.contains("console-output") || el?.id === "console-output";
+}
+
+function getConsoleElements() {
+  return [$("console-output"), $("mdi-console-output")].filter(Boolean);
+}
 
 function getConsolePlainText() {
   const el = $("console-output");
-  if (!el) return "";
-  return Array.from(el.querySelectorAll(".console-line"))
-    .map((row) => row.textContent || "")
-    .join("\n");
+  if (!el) return consoleBuffer;
+  if (el.tagName === "TEXTAREA") return el.value;
+  return consoleBuffer;
+}
+
+function syncConsoleViews() {
+  getConsoleElements().forEach((el) => {
+    if (el.tagName === "TEXTAREA") {
+      el.value = consoleBuffer;
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+}
+
+function focusConsole(selectAll = false) {
+  const el = $("console-output");
+  if (!el || el.tagName !== "TEXTAREA") return;
+  el.focus();
+  if (selectAll) {
+    el.select();
+  }
 }
 
 function initConsoleKeyboard() {
-  const bind = (el) => {
-    if (!el) return;
-    el.tabIndex = 0;
-    el.addEventListener("keydown", (e) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "c") return;
-      const selected = window.getSelection()?.toString();
-      if (selected) return;
-      e.preventDefault();
-      copyConsoleText({ errorsOnly: e.shiftKey });
+  getConsoleElements().forEach((el) => {
+    if (el.tagName !== "TEXTAREA") return;
+    el.addEventListener("focus", () => {
+      el.scrollTop = el.scrollHeight;
     });
-  };
-  bind($("console-output"));
-  bind($("mdi-console-output"));
+  });
+  $("pane-console")?.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".pane-header-bar button")) return;
+    focusConsole(false);
+  });
 }
 
 async function copyConsoleText({ errorsOnly = false } = {}) {
@@ -150,7 +173,6 @@ async function copyConsoleText({ errorsOnly = false } = {}) {
 }
 
 function appendConsole(text, kind = "") {
-  const targets = [$("console-output"), $("mdi-console-output")].filter(Boolean);
   if (text == null || text === "") return;
   if (kind === "err") {
     lastConsoleErrorText = String(text);
@@ -165,32 +187,18 @@ function appendConsole(text, kind = "") {
   const lines = String(text).replace(/\r\n/g, "\n").split("\n");
   lines.forEach((line, index) => {
     if (line === "" && index === lines.length - 1) return;
-
-    let lineKind = kind;
-    if (!lineKind) {
-      if (/^(Traceback|Error|Exception|SyntaxError|\.{3})/i.test(line) || /\bError:/i.test(line)) {
-        lineKind = "err";
-      } else if (/^\s+File "/.test(line) || /^\s+\^/.test(line)) {
-        lineKind = "trace";
-      } else if (/^PASS|^OK|\bPASS\b/i.test(line)) {
-        lineKind = "ok";
-      }
-    } else if (lineKind === "err" && /^\s+File "/.test(line)) {
-      lineKind = "trace";
-    }
-
-    const row = document.createElement("div");
-    row.className = "console-line" + (lineKind ? ` line-${lineKind}` : "");
-    row.textContent = (index === 0 ? prefix : "") + line;
-    targets.forEach((el) => el.appendChild(row.cloneNode(true)));
+    consoleBuffer += (index === 0 ? prefix : "") + line + "\n";
   });
-  targets.forEach((el) => { el.scrollTop = el.scrollHeight; });
+  syncConsoleViews();
+  if (kind === "err") {
+    focusConsole(false);
+  }
 }
 
 function clearConsole() {
-  $("console-output").innerHTML = "";
-  const mdiOut = $("mdi-console-output");
-  if (mdiOut) mdiOut.innerHTML = "";
+  consoleBuffer = "";
+  lastConsoleErrorText = "";
+  syncConsoleViews();
 }
 
 function saveActiveEditor() {
@@ -808,7 +816,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.7\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.8\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1382,9 +1390,13 @@ function createOutputWindow() {
     bodyClass: "mdi-output",
   });
   const body = win.querySelector(".mdi-body");
-  if (!body.id) {
-    body.id = "mdi-console-output";
-    body.classList.add("console-output");
+  if (!body.querySelector("textarea.console-output")) {
+    const area = document.createElement("textarea");
+    area.id = "mdi-console-output";
+    area.className = "console-output";
+    area.readOnly = true;
+    area.spellcheck = false;
+    body.appendChild(area);
   }
   win.hidden = false;
   bringMdiToFront(win);
@@ -1697,6 +1709,7 @@ function bindUi() {
   $("btn-clear-console").addEventListener("click", clearConsole);
   $("btn-copy-console")?.addEventListener("click", () => copyConsoleText());
   $("btn-copy-console-err")?.addEventListener("click", () => copyConsoleText({ errorsOnly: true }));
+  $("btn-select-console")?.addEventListener("click", () => focusConsole(true));
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
   $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit")?.addEventListener("click", fitWaveform);
@@ -1728,13 +1741,6 @@ function bindUi() {
 
   document.addEventListener("keydown", (e) => {
     if (handleMenuShortcut(e)) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-      const inConsole = e.target?.closest?.("#pane-console, .mdi-output");
-      if (inConsole && !window.getSelection()?.toString()) {
-        e.preventDefault();
-        copyConsoleText({ errorsOnly: e.shiftKey });
-      }
-    }
   });
 
   $("chk-auto-scroll")?.addEventListener("change", () => {
@@ -1837,22 +1843,22 @@ function handleMenuShortcut(e) {
     return true;
   }
   if (!(e.ctrlKey || e.metaKey)) return false;
-  if (inField) return false;
 
   const key = e.key.toLowerCase();
+  if (
+    key === "c" &&
+    (isConsoleElement(e.target) || e.target?.closest?.("#pane-console, .mdi-output"))
+  ) {
+    return false;
+  }
+  if (inField) return false;
   const map = {
     n: () => createProject(),
     o: () => openProjectFilePicker(),
     s: () => saveProjectFile(),
     z: () => triggerEditor("undo"),
     x: () => triggerEditor("editor.action.clipboardCutAction"),
-    c: () => {
-      if (e.target?.closest?.("#pane-console, .mdi-output")) {
-        copyConsoleText({ errorsOnly: e.shiftKey });
-      } else {
-        triggerEditor("editor.action.clipboardCopyAction");
-      }
-    },
+    c: () => triggerEditor("editor.action.clipboardCopyAction"),
     v: () => triggerEditor("editor.action.clipboardPasteAction"),
     a: () => triggerEditor("editor.action.selectAll"),
     f: () => triggerEditor("actions.find"),

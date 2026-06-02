@@ -935,9 +935,14 @@ body.view-hide-project-bar .project-bar { display: none; }
 /* ── Console ── */
 .console-output {
   flex: 1;
+  width: 100%;
   margin: 0;
   padding: 4px 8px;
   overflow: auto;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--bg);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
@@ -946,13 +951,12 @@ body.view-hide-project-bar .project-bar { display: none; }
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
-}
-
-.console-line {
   white-space: pre-wrap;
   word-break: break-word;
-  user-select: text;
-  -webkit-user-select: text;
+}
+
+.console-output:focus {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .console-line.line-err { color: var(--error); }

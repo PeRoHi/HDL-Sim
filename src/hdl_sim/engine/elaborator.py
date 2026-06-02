@@ -36,6 +36,7 @@ class ScopedContinuousAssign:
 class ScopedProcess:
     body: Stmt
     locals: dict[str, SimNet]
+    params: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +47,7 @@ class ElaboratedDesign:
     nets: dict[str, SimNet]
     continuous_assigns: tuple[ScopedContinuousAssign, ...]
     initial_blocks: tuple[ScopedProcess, ...]
-    always_blocks: tuple[tuple[AlwaysBlock, dict[str, SimNet]], ...]
+    always_blocks: tuple[tuple[AlwaysBlock, dict[str, SimNet], dict[str, int]], ...]
     functions: tuple[FunctionDef, ...] = ()
     tasks: tuple[TaskDef, ...] = ()
 
@@ -57,10 +58,17 @@ def elaborate(design: Design, *, top: str | None = None) -> ElaboratedDesign:
     global_nets: dict[str, SimNet] = {}
     continuous: list[ScopedContinuousAssign] = []
     initials: list[ScopedProcess] = []
-    always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]] = []
+    always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet], dict[str, int]]] = []
 
-    functions = tuple(top.functions)
-    tasks = tuple(top.tasks)
+    functions_map: dict[str, FunctionDef] = {}
+    tasks_map: dict[str, TaskDef] = {}
+    for module in design.modules:
+        for func in module.functions:
+            functions_map[func.name] = func
+        for task in module.tasks:
+            tasks_map[task.name] = task
+    functions = tuple(functions_map.values())
+    tasks = tuple(tasks_map.values())
 
     _elaborate_module(
         top,
@@ -92,7 +100,7 @@ def _elaborate_module(
     prefix: str,
     continuous: list[ScopedContinuousAssign],
     initials: list[ScopedProcess],
-    always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet]]],
+    always_blocks: list[tuple[AlwaysBlock, dict[str, SimNet], dict[str, int]]],
     port_bindings: dict[str, SimNet] | None = None,
     param_env: dict[str, int] | None = None,
 ) -> dict[str, SimNet]:
@@ -133,11 +141,12 @@ def _elaborate_module(
             ScopedContinuousAssign(target=target, expr=assign.expr, locals=dict(local))
         )
 
+    module_params = param_evaluator.snapshot()
     for block in module.initial_blocks:
-        initials.append(ScopedProcess(body=block.body, locals=dict(local)))
+        initials.append(ScopedProcess(body=block.body, locals=dict(local), params=dict(module_params)))
 
     for block in module.always_blocks:
-        always_blocks.append((block, dict(local)))
+        always_blocks.append((block, dict(local), dict(module_params)))
 
     for instance in module.instances:
         child = modules[instance.module_type]

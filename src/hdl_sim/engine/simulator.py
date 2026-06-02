@@ -239,6 +239,7 @@ class Simulator:
             nba=self._nba,
             on_net_update=self._record_net,
             caller_nets=process.locals,
+            params=process.params,
         )
 
         def run_process() -> None:
@@ -267,13 +268,18 @@ class Simulator:
             self._spawn_process(process, time=0)
 
     def _start_always_blocks(self) -> None:
-        for block, local_nets in self._elaborated.always_blocks:
+        for block, local_nets, params in self._elaborated.always_blocks:
             if not block.sensitivity:
-                self._register_combinational_always(block, local_nets)
+                self._register_combinational_always(block, local_nets, params)
                 continue
-            self._start_sensitive_always(block, local_nets)
+            self._start_sensitive_always(block, local_nets, params)
 
-    def _register_combinational_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+    def _register_combinational_always(
+        self,
+        block: AlwaysBlock,
+        local_nets: dict[str, SimNet],
+        params: dict[str, int],
+    ) -> None:
         def run_comb() -> bool:
             if self._queue.stopped:
                 return False
@@ -286,6 +292,7 @@ class Simulator:
                 nba=self._nba,
                 on_net_update=self._record_net,
                 caller_nets=local_nets,
+                params=params,
             )
 
             def on_finish() -> None:
@@ -310,9 +317,17 @@ class Simulator:
         self._delta.add_comb(run_comb)
         run_comb()
 
-    def _start_sensitive_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+    def _start_sensitive_always(
+        self,
+        block: AlwaysBlock,
+        local_nets: dict[str, SimNet],
+        params: dict[str, int],
+    ) -> None:
         def trigger() -> None:
-            self._spawn_process(ScopedProcess(body=block.body, locals=local_nets), time=self._queue.now)
+            self._spawn_process(
+                ScopedProcess(body=block.body, locals=local_nets, params=params),
+                time=self._queue.now,
+            )
 
         for edge_kind, name in block.sensitivity:
             if name not in local_nets:

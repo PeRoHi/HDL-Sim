@@ -39,8 +39,10 @@ class ExpressionEvaluator:
         nba: NBARegion | None = None,
         on_net_update=None,
         caller_nets: dict[str, SimNet] | None = None,
+        params: dict[str, int] | None = None,
     ) -> None:
         self._nets = nets
+        self._params = params or {}
         self._functions = functions or {}
         self._tasks = tasks or {}
         self._queue = queue
@@ -110,6 +112,8 @@ class ExpressionEvaluator:
         if isinstance(expr, IntLiteral):
             return expr.value
         if isinstance(expr, IdentRef):
+            if expr.name in self._params:
+                return self._params[expr.name]
             try:
                 return self._nets[expr.name].value
             except KeyError as exc:

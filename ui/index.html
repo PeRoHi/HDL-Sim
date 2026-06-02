@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.5.7" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.7" />
+  <meta name="hdl-sim-ui-build" content="0.5.8" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.8" />
 </head>
 <body>
   <!-- Silos-style menu bar -->
   <nav id="menubar" class="menubar" aria-label="メインメニュー">
     <div class="menubar-brand" title="HDL-Sim UI バージョン">
-      <span id="app-version" class="brand-ver">Ver 0.5.7</span>
+      <span id="app-version" class="brand-ver">Ver 0.5.8</span>
       <span class="brand-name">HDL-Sim</span>
     </div>
     <button type="button" class="menubar-btn" data-menu="file">File</button>
@@ -137,19 +137,20 @@
       <footer id="pane-console" class="pane pane-console" aria-label="コンソール">
         <div class="pane-header-bar">
           <span class="pane-title">Output</span>
-          <button type="button" id="btn-copy-console" class="mini-btn" title="出力をコピー">Copy</button>
+          <button type="button" id="btn-copy-console" class="mini-btn" title="出力をコピー (Ctrl+C)">Copy</button>
           <button type="button" id="btn-copy-console-err" class="mini-btn" title="直近のエラーをコピー">Copy err</button>
+          <button type="button" id="btn-select-console" class="mini-btn" title="出力を全選択">全選択</button>
           <button type="button" id="btn-clear-console" class="mini-btn" title="クリア">Clear</button>
         </div>
-        <div id="console-output" class="console-output"></div>
+        <textarea id="console-output" class="console-output" readonly spellcheck="false" aria-label="シミュレーション出力"></textarea>
       </footer>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.5.7"></script>
-  <script src="/assets/js/menu-bar.js?v=0.5.7"></script>
-  <script src="/assets/js/app.js?v=0.5.7" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.5.8"></script>
+  <script src="/assets/js/menu-bar.js?v=0.5.8"></script>
+  <script src="/assets/js/app.js?v=0.5.8" type="module"></script>
 </body>
 </html>
