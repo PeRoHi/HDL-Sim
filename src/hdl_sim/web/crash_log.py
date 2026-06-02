@@ -21,7 +21,19 @@ def crash_log_paths() -> list[Path]:
     return paths
 
 
+def should_write_crash_log(exc: BaseException) -> bool:
+    """Normal process exit (code 0) is not a crash."""
+    if isinstance(exc, KeyboardInterrupt):
+        return False
+    if isinstance(exc, SystemExit):
+        code = exc.code
+        return not (code is None or code == 0)
+    return True
+
+
 def write_crash_log(exc: BaseException, *, context: str = "") -> Path | None:
+    if not should_write_crash_log(exc):
+        return None
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     body = f"[{stamp}] {context}\n{traceback.format_exc()}\n"
     written: Path | None = None

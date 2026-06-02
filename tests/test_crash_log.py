@@ -1,6 +1,14 @@
 """Tests for crash log helper."""
 
-from hdl_sim.web.crash_log import crash_log_paths, write_crash_log
+from hdl_sim.web.crash_log import crash_log_paths, should_write_crash_log, write_crash_log
+
+
+def test_should_write_crash_log_skips_normal_exit() -> None:
+    assert should_write_crash_log(SystemExit(0)) is False
+    assert should_write_crash_log(SystemExit()) is False
+    assert should_write_crash_log(KeyboardInterrupt()) is False
+    assert should_write_crash_log(SystemExit(1)) is True
+    assert should_write_crash_log(RuntimeError("x")) is True
 
 
 def test_crash_log_paths_returns_list() -> None:

@@ -2,7 +2,7 @@
 ; Build: packaging\build_installer.bat
 
 #define AppName "HDL-Sim"
-#define AppVersion "0.5.4"
+#define AppVersion "0.5.5"
 #define AppPublisher "HDL-Sim"
 #define AppExeName "HDL-Sim.exe"
 #define WebView2Bootstrapper "redist\MicrosoftEdgeWebview2Setup.exe"

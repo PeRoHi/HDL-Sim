@@ -47,6 +47,10 @@ if __name__ == "__main__":
         from hdl_sim.web.gui_launcher import main
 
         raise SystemExit(main())
-    except BaseException as exc:
-        _bootstrap_crash_log(exc)
+    except SystemExit:
         raise
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        _bootstrap_crash_log(exc)
+        raise SystemExit(1) from exc

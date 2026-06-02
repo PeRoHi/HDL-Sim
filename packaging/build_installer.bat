@@ -40,7 +40,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo 完成: dist\HDL-Sim-Setup-0.5.4.exe
+echo 完成: dist\HDL-Sim-Setup-0.5.5.exe
 echo WebView2 未導入 PC では Setup 中にランタイムもインストールします.
 echo インストール時にショートカット作成や保存フォルダを選択できます.
 echo アンインストールは Windows の「アプリと機能」から実行できます.
