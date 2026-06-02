@@ -67,6 +67,9 @@ class Simulator:
                 self._delta.flush(time)
             finally:
                 self._in_delta = False
+            if self._monitor_dirty:
+                self._flush_monitors()
+                self._monitor_dirty = False
 
         self._queue.set_nba_flush(regions_flush)
         self._vcd_path = vcd_path
@@ -75,6 +78,8 @@ class Simulator:
         )
         self._tracer = tracer
         self._monitors: list[tuple[tuple[DisplayArg, ...], dict[str, SimNet]]] = []
+        self._monitor_dirty = False
+        self._monitor_last_sig: list[tuple[int, ...]] = []
 
     @classmethod
     def from_source(
@@ -129,14 +134,33 @@ class Simulator:
         merged = {**self._nets, **locals}
         self._monitors.append((args, merged))
 
-    def _check_monitors(self) -> None:
-        for args, locals in self._monitors:
+    def _monitor_signature(
+        self,
+        args: tuple[DisplayArg, ...],
+        evaluator: ExpressionEvaluator,
+    ) -> tuple[int, ...]:
+        values: list[int] = [self._queue.now]
+        for arg in args:
+            if arg.expr is not None:
+                values.append(evaluator.eval(arg.expr))
+        return tuple(values)
+
+    def _flush_monitors(self) -> None:
+        from hdl_sim.engine.executor import render_display_args
+
+        for index, (args, locals) in enumerate(self._monitors):
             evaluator = ExpressionEvaluator(
                 locals,
                 queue=self._queue,
                 global_nets=self._nets,
                 sim_time=self._queue.now,
             )
+            signature = self._monitor_signature(args, evaluator)
+            if index < len(self._monitor_last_sig) and self._monitor_last_sig[index] == signature:
+                continue
+            while len(self._monitor_last_sig) <= index:
+                self._monitor_last_sig.append(())
+            self._monitor_last_sig[index] = signature
             message = render_display_args(args, evaluator)
             print(message, flush=True)
             if self._tracer is not None:
@@ -218,7 +242,8 @@ class Simulator:
     def _record_net(self, net: SimNet, time: SimTime) -> None:
         if net.previous is not None and self._tracer is not None:
             self._tracer.on_net_change(net, net.previous, net.value, time)
-        self._check_monitors()
+        if self._monitors:
+            self._monitor_dirty = True
         if self._vcd is not None:
             self._vcd.change(net, time)
 

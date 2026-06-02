@@ -40,12 +40,27 @@ NetUpdateCallback = Callable[[SimNet, SimTime], None]
 FinishCallback = Callable[[], None]
 
 
-def _format_verilog(fmt: str, values: list[int]) -> tuple[str, int]:
+def _expr_bit_width(evaluator, expr: Expr) -> int | None:
+    if not isinstance(expr, IdentRef):
+        return None
+    for nets in (evaluator._nets, getattr(evaluator, "_global_nets", {})):
+        net = nets.get(expr.name)
+        if net is not None:
+            return net.width
+    return None
+
+
+def _format_verilog(
+    fmt: str,
+    values: list[int],
+    *,
+    widths: list[int | None] | None = None,
+) -> tuple[str, int]:
     import re
 
     used = 0
 
-    def repl(match):
+    def repl(match: re.Match[str]) -> str:
         nonlocal used
         spec = match.group(0)
         if spec == "%%":
@@ -53,17 +68,32 @@ def _format_verilog(fmt: str, values: list[int]) -> tuple[str, int]:
         if used >= len(values):
             return spec
         value = values[used]
+        width_hint = widths[used] if widths and used < len(widths) else None
         used += 1
-        code = spec[-1].lower()
+        spec_match = re.match(r"%0?(\d*)([bhdBHD])", spec)
+        if not spec_match:
+            return str(value)
+        digits, code = spec_match.group(1), spec_match.group(2).lower()
+        if digits:
+            width = int(digits)
+        elif width_hint is not None:
+            width = width_hint
+        elif code == "b":
+            width = max(1, value.bit_length())
+        else:
+            width = max(1, (value.bit_length() + 3) // 4)
+        mask = (1 << width) - 1 if width < 63 else None
+        masked = (value & mask) if mask is not None else value
         if code == "b":
-            return format(value, "b")
+            return format(masked, f"0{width}b")
         if code == "h":
-            return format(value, "x")
+            hex_width = max(1, (width + 3) // 4)
+            return format(masked, f"0{hex_width}x")
         if code == "d":
             return str(value)
         return str(value)
 
-    rendered = re.sub(r"%%|%0?\d+?[bhdBHD]|%0?[bhdBHD]", repl, fmt)
+    rendered = re.sub(r"%%|%0?\d*?[bhdBHD]", repl, fmt)
     return rendered, used
 
 
@@ -74,11 +104,18 @@ def render_display_args(args: tuple[DisplayArg, ...], evaluator) -> str:
         arg = args[index]
         if arg.text is not None:
             following: list[int] = []
+            following_widths: list[int | None] = []
             lookahead = index + 1
             while lookahead < len(args) and args[lookahead].expr is not None:
-                following.append(evaluator.eval(args[lookahead].expr))
+                expr = args[lookahead].expr
+                following.append(evaluator.eval(expr))
+                following_widths.append(_expr_bit_width(evaluator, expr))
                 lookahead += 1
-            rendered, used = _format_verilog(arg.text, following)
+            rendered, used = _format_verilog(
+                arg.text,
+                following,
+                widths=following_widths,
+            )
             parts.append(rendered)
             index += 1 + used
             continue
