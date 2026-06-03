@@ -52,6 +52,8 @@ let mdiZ = 10;
 let lastWaveform = null;
 let lastWaveformFull = null;
 let lastTopModule = "";
+/** @type {Set<string> | null} */
+let lastSignalNames = null;
 /** @type {string[]} */
 let waveformSelection = [];
 let selectedSignal = null;
@@ -216,9 +218,43 @@ function getSelectedTop() {
   return $("select-top")?.value.trim() || "";
 }
 
+function guessTopModuleName(modules) {
+  if (!modules?.length) return "";
+  const pick =
+    modules.find((m) => m.name.endsWith("_tp")) ||
+    modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_")) ||
+    modules.find((m) => m.name === "tb") ||
+    modules.find((m) => m.name === "stimulus") ||
+    modules[0];
+  return pick?.name || "";
+}
+
+/** Top sent to API: drop stale names (e.g. tb) not in workspace modules. */
+function effectiveTopForPayload() {
+  const selected = getSelectedTop();
+  const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
+  const has = (name) => modules.some((m) => m.name === name);
+  if (selected && has(selected)) return selected;
+  const guessed = guessTopModuleName(modules);
+  return guessed || null;
+}
+
+function syncTopPickerToModules() {
+  const sel = $("select-top");
+  if (!sel) return;
+  const selected = getSelectedTop();
+  const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
+  const has = (name) => modules.some((m) => m.name === name);
+  if (selected && !has(selected)) {
+    const guessed = guessTopModuleName(modules);
+    if (guessed) sel.value = guessed;
+    else sel.value = "";
+  }
+}
+
 function getPayload() {
   saveActiveEditor();
-  const top = getSelectedTop();
+  const top = effectiveTopForPayload();
   const files = [];
   for (const [path, entry] of fileStore) {
     const item = { path, content: entry.content };
@@ -240,7 +276,7 @@ function refreshTopModulePicker(suggestedTop) {
   if (!sel) return;
   const current = sel.value;
   const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
-  sel.innerHTML = '<option value="">(auto)</option>';
+  sel.innerHTML = '<option value="">(auto — *_tp 優先)</option>';
   modules.forEach(({ name, path }) => {
     const opt = document.createElement("option");
     opt.value = name;
@@ -251,17 +287,14 @@ function refreshTopModulePicker(suggestedTop) {
   if (current && has(current)) sel.value = current;
   else if (suggestedTop && has(suggestedTop)) sel.value = suggestedTop;
   else {
-    const pick =
-      modules.find((m) => m.name.endsWith("_tp")) ||
-      modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_")) ||
-      modules.find((m) => m.name === "tb") ||
-      modules[0];
-    if (pick) sel.value = pick.name;
+    const guessed = guessTopModuleName(modules);
+    if (guessed) sel.value = guessed;
   }
 }
 
 function scheduleTopModuleRefresh() {
   refreshTopModulePicker();
+  syncTopPickerToModules();
 }
 
 function syncDeleteButton() {
@@ -435,13 +468,10 @@ function loadWorkspaceFiles(fileEntries, top) {
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
-  if (top != null && top !== "") {
-    const sel = $("select-top");
-    if (sel) sel.value = top;
-  }
   renderEditorTabs();
   workspaceTree?.render();
   refreshTopModulePicker(top || undefined);
+  syncTopPickerToModules();
   syncDeleteButton();
   if (window.monaco) tileFileWindows();
 }
@@ -816,9 +846,15 @@ async function debugRestart() {
 
 function menuHelpGuide() {
   appendConsole(
-    "[help] Run(F5) でシミュレーション / Save .spj で ./spj/ に保存 / 中クリック長押しでワークスペース移動",
-    "info"
+    [
+      "[help] Top: (auto) または *_tp / *_tb モジュールを選択（古い tb は自動補正）",
+      "[help] Elab → Run(F5) → Hierarchy/Signals クリックで波形 / Wave の All で全信号",
+      "[help] Until: 長い TB では 15000 以上推奨 / Save .spj → ./spj/",
+      "[help] 詳細: リポジトリ docs/LOCAL_DEBUG_HANDOFF.md",
+    ].join("\n"),
+    "info",
   );
+  switchExplorerTab("hierarchy");
 }
 
 async function menuHelpAbout() {
@@ -826,7 +862,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.18\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.19\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1287,8 +1323,9 @@ function closeFile(path) {
 /* ── Hierarchy tree ── */
 
 function resolveWaveformSignalNames(path) {
-  if (!path || !lastWaveformFull?.signals) return [];
-  const names = lastWaveformFull.signals.map((s) => s.name);
+  if (!path) return [];
+  const names = lastWaveformFull?.signals?.map((s) => s.name) || [...(lastSignalNames || [])];
+  if (!names.length) return [];
   const candidates = [path];
   if (lastTopModule && !path.startsWith(`${lastTopModule}.`)) {
     candidates.push(`${lastTopModule}.${path}`);
@@ -1316,8 +1353,24 @@ function buildDisplayWaveform() {
   };
 }
 
+function updateWaveSignalCountLabel() {
+  const el = $("wave-signal-count");
+  if (!el) return;
+  const total = lastWaveformFull?.signals?.length || 0;
+  const shown = lastWaveform?.signals?.length || 0;
+  if (!total) {
+    el.textContent = "Run 後に波形表示";
+    return;
+  }
+  el.textContent =
+    waveformSelection.length > 0
+      ? `${shown}/${total} 信号`
+      : `${total} 信号（Hierarchy または All）`;
+}
+
 function refreshWaveformView() {
   lastWaveform = buildDisplayWaveform();
+  updateWaveSignalCountLabel();
   if (lastWaveform) drawWave(lastWaveform);
   syncHierarchyWaveMarks();
 }
@@ -1325,7 +1378,10 @@ function refreshWaveformView() {
 function toggleWaveformSignal(path) {
   const resolved = resolveWaveformSignalNames(path);
   if (!resolved.length) {
-    appendConsole(`[wave] 波形データに "${path}" がありません。先に Run してください。`, "warn");
+    const hint = lastSignalNames?.size
+      ? "Signals タブの名前をクリックするか、Run 後に Wave → All を試してください。"
+      : "先に Run してください。";
+    appendConsole(`[wave] 波形に "${path}" がありません。${hint}`, "warn");
     return;
   }
   const set = new Set(waveformSelection);
@@ -1343,8 +1399,10 @@ function syncHierarchyWaveMarks() {
   const active = new Set(waveformSelection);
   document.querySelectorAll("#hierarchy-tree .tree-node[data-signal-path]").forEach((row) => {
     const path = row.dataset.signalPath;
-    const onWave = resolveWaveformSignalNames(path).some((n) => active.has(n));
+    const resolved = resolveWaveformSignalNames(path);
+    const onWave = resolved.some((n) => active.has(n));
     row.classList.toggle("on-wave", onWave);
+    row.classList.toggle("no-wave-data", Boolean(lastSignalNames?.size && !resolved.length));
   });
 }
 
@@ -1425,7 +1483,10 @@ function renderHierarchy(tree) {
   }
   const hint = document.createElement("div");
   hint.className = "empty-hint hierarchy-hint";
-  hint.textContent = "信号をクリックで波形に追加/削除（複数選択可）";
+  const waveHint = lastSignalNames?.size
+    ? `Run 済み — クリックで波形に追加（VCD ${lastSignalNames.size} 信号）`
+    : "信号をクリックで波形に追加（Run 後に VCD が有効）";
+  hint.textContent = waveHint;
   root.appendChild(hint);
   renderTreeNode(tree, root);
   syncHierarchyWaveMarks();
@@ -1438,9 +1499,22 @@ function applySuggestedUntil(value) {
   if (!current || current <= 50) input.value = String(value);
 }
 
+function updateSignalCountBadge(count) {
+  const badge = $("signal-count-badge");
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = `(${count})`;
+    badge.title = "Run/Elab 後の elaborated 信号数";
+  } else {
+    badge.textContent = "";
+    badge.title = "";
+  }
+}
+
 function renderSignalList(signals) {
   const list = $("signal-list");
   list.innerHTML = "";
+  updateSignalCountBadge(signals?.length || 0);
   if (!signals?.length) {
     const li = document.createElement("li");
     li.textContent = "(none)";
@@ -1509,10 +1583,11 @@ function createWaveformWindow() {
   if (!body.querySelector("#waveform-canvas")) {
     body.innerHTML = `
       <div class="wave-toolbar">
+        <span id="wave-signal-count" class="wave-signal-count">Run 後に波形表示</span>
         <button type="button" id="btn-wave-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
         <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
         <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
-        <button type="button" id="btn-wave-all" class="mini-btn" title="全信号を波形に表示">All</button>
+        <button type="button" id="btn-wave-all" class="mini-btn" title="Run 後の全 VCD 信号を表示">All</button>
         <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
       </div>
       <div id="waveform-wrap" class="waveform-wrap">
@@ -1701,10 +1776,12 @@ async function runElaborate() {
       switchExplorerTab("hierarchy");
       return;
     }
+    lastSignalNames = new Set(data.signal_names || []);
     renderHierarchy(data.hierarchy);
     applySuggestedUntil(data.suggested_until);
     refreshTopModulePicker(data.top);
-    setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
+    syncTopPickerToModules();
+    setStatus(`top=${data.top} · ${data.net_count} nets`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
     if (data.top_requested && data.top_requested !== data.top) {
       appendConsole(
@@ -1732,7 +1809,7 @@ async function runSimulate() {
 
   try {
     const payload = getPayload();
-    const topLabel = payload.top || "(auto)";
+    const topLabel = effectiveTopForPayload() || "(auto)";
     appendConsole(`[run] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
     appendConsole(`[run] top=${topLabel}`, "info");
 
@@ -1757,6 +1834,7 @@ async function runSimulate() {
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
     lastTopModule = data.top_module || "";
+    lastSignalNames = new Set(data.signal_names || data.signals?.map((s) => s.name) || []);
     lastWaveformFull = data.waveform;
     waveformSelection = data.waveform?.signals?.map((s) => s.name) || [];
     applySuggestedUntil(data.suggested_until);
@@ -1771,7 +1849,7 @@ async function runSimulate() {
       data.hints.forEach((h) => appendConsole(`[hint] ${h}`, "warn"));
     }
     switchExplorerTab("hierarchy");
-    setStatus(`Done t=${data.stop_time} ev=${data.events_processed}`, "ok");
+    setStatus(`top=${data.top_module} t=${data.stop_time} ev=${data.events_processed}`, "ok");
   } catch (e) {
     if (e.name === "AbortError") {
       appendConsole("Simulation stopped by user", "warn");

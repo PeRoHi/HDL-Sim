@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.5.18" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.18" />
+  <meta name="hdl-sim-ui-build" content="0.5.19" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.19" />
 </head>
 <body>
   <!-- Silos-style menu bar -->
   <nav id="menubar" class="menubar" aria-label="メインメニュー">
     <div class="menubar-brand" title="HDL-Sim UI バージョン">
-      <span id="app-version" class="brand-ver">Ver 0.5.18</span>
+      <span id="app-version" class="brand-ver">Ver 0.5.19</span>
       <span class="brand-name">HDL-Sim</span>
     </div>
     <button type="button" class="menubar-btn" data-menu="file">File</button>
@@ -42,7 +42,7 @@
           <span class="tb-label">Step</span>
         </button>
         <span class="tb-sep"></span>
-        <button type="button" id="btn-elab" class="tb-btn" title="階層を更新" aria-label="階層更新">
+        <button type="button" id="btn-elab" class="tb-btn" title="Elaborate — 階層・Top・信号名一覧を更新" aria-label="階層更新">
           <svg class="tb-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l7 4v6l-7 4-7-4V5z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 8l7-3M8 8v7M8 8L1 5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
           <span class="tb-label">Elab</span>
         </button>
@@ -55,8 +55,8 @@
     <div class="toolbar-center">
       <label class="tb-field tb-field-top">
         <span class="tb-field-label">Top</span>
-        <select id="select-top" title="開いている .v ファイル内の module 名">
-          <option value="">(auto)</option>
+        <select id="select-top" title="トップモジュール。空欄=自動（*_tp / *_tb 優先）。存在しない名前はサーバー側でも補正されます。">
+          <option value="">(auto — *_tp 優先)</option>
         </select>
       </label>
       <label class="tb-field" title="シミュレーション時間の上限（時間単位）。この時刻に達するか、イベントがなくなると停止します。">
@@ -116,7 +116,7 @@
             <div id="view-hierarchy" class="pane-view" role="tabpanel" hidden>
               <div id="hierarchy-tree" class="tree-view" tabindex="0"></div>
               <div class="signal-section">
-                <div class="signal-section-header">Signals</div>
+                <div class="signal-section-header">Signals <span id="signal-count-badge" class="signal-count-badge"></span></div>
                 <ul id="signal-list" class="signal-list"></ul>
               </div>
             </div>
@@ -149,8 +149,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.5.18"></script>
-  <script src="/assets/js/menu-bar.js?v=0.5.18"></script>
-  <script src="/assets/js/app.js?v=0.5.18" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.5.19"></script>
+  <script src="/assets/js/menu-bar.js?v=0.5.19"></script>
+  <script src="/assets/js/app.js?v=0.5.19" type="module"></script>
 </body>
 </html>

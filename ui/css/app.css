@@ -591,6 +591,10 @@ body.view-hide-project-bar .project-bar { display: none; }
   color: var(--accent);
 }
 
+.tree-node.no-wave-data .label {
+  opacity: 0.55;
+}
+
 .tree-node.on-wave .wave-mark {
   opacity: 1;
 }
@@ -944,6 +948,19 @@ body.view-hide-project-bar .project-bar { display: none; }
   padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.wave-signal-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 8rem;
+  margin-right: 4px;
+}
+
+.signal-count-badge {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: normal;
 }
 
 .check {

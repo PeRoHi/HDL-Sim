@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.18"
+UI_BUILD = "0.5.19"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -553,6 +553,7 @@ def create_app() -> FastAPI:
             payload: dict[str, Any] = {
                 "ok": True,
                 "top": elaborated.top_module,
+                "signal_names": sorted(elaborated.nets.keys()),
                 "module_names": design_overview(design)["module_names"],
                 "overview": design_overview(design),
                 "hierarchy": hierarchy_tree(design, top=top),
@@ -610,6 +611,7 @@ def create_app() -> FastAPI:
                 "vcd": vcd_text,
                 "waveform": waveform,
                 "signals": nets_overview(sim),
+                "signal_names": sorted(sim._nets.keys()),
                 "hierarchy": hierarchy_tree(design, top=top),
                 "overview": design_overview(design),
                 "module_names": design_overview(design)["module_names"],
