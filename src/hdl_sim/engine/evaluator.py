@@ -134,14 +134,20 @@ class ExpressionEvaluator:
             msg = f"unknown identifier: {expr.name}"
             raise EvaluationError(msg)
         if isinstance(expr, BitSelect):
-            return read_lvalue(Lvalue(base=expr.signal, bit=expr.index), self._nets, self.eval)
+            return read_lvalue(
+                Lvalue(base=expr.signal, word=expr.word, bit=expr.index),
+                self._nets,
+                self.eval,
+            )
         if isinstance(expr, PartSelect):
             return read_lvalue(
-                Lvalue(base=expr.signal, msb=expr.msb, lsb=expr.lsb),
+                Lvalue(base=expr.signal, word=expr.word, msb=expr.msb, lsb=expr.lsb),
                 self._nets,
                 self.eval,
             )
         if isinstance(expr, UnaryExpr):
+            if expr.op in {"$signed", "$unsigned"}:
+                return self.eval(expr.operand)
             value = self.eval(expr.operand)
             if expr.op == "~":
                 net = self._operand_net(expr.operand)

@@ -146,32 +146,37 @@ def _fold_binary(op: str, children: tuple[Expr, ...]) -> Expr:
     return result
 
 
-SelectInfo = tuple[str, Expr, Expr | None] | None
+SelectStep = tuple[str, Expr, Expr | None]
 
 
-def _select_info(select: Any | None) -> SelectInfo:
-    if select is None:
-        return None
-    return select
-
-
-def _lvalue_from_signal(name: str, select: SelectInfo) -> Lvalue:
-    if select is None:
+def _lvalue_from_selects(name: str, selects: list[SelectStep]) -> Lvalue:
+    if not selects:
         return Lvalue(base=name)
-    kind, first, second = select
-    if kind == "bit":
+    if len(selects) == 1:
+        kind, first, second = selects[0]
+        if kind == "part":
+            return Lvalue(base=name, msb=first, lsb=second)
         return Lvalue(base=name, bit=first)
-    return Lvalue(base=name, msb=first, lsb=second)
+    word = selects[0][1]
+    kind, first, second = selects[1]
+    if kind == "part":
+        return Lvalue(base=name, word=word, msb=first, lsb=second)
+    return Lvalue(base=name, word=word, bit=first)
 
 
-def _expr_from_signal(name: str, select: SelectInfo) -> Expr:
-    if select is None:
+def _expr_from_selects(name: str, selects: list[SelectStep]) -> Expr:
+    if not selects:
         return IdentRef(name)
-    kind, first, second = select
-    if kind == "bit":
+    if len(selects) == 1:
+        kind, first, second = selects[0]
+        if kind == "part":
+            return PartSelect(signal=name, msb=first, lsb=second)
         return BitSelect(signal=name, index=first)
-    assert second is not None
-    return PartSelect(signal=name, msb=first, lsb=second)
+    word = selects[0][1]
+    kind, first, second = selects[1]
+    if kind == "part":
+        return PartSelect(signal=name, msb=first, lsb=second, word=word)
+    return BitSelect(signal=name, index=first, word=word)
 
 
 class VerilogTransformer(Transformer):
@@ -742,17 +747,19 @@ class VerilogTransformer(Transformer):
     def string_expr(self, lit: StringLiteral) -> StringLiteral:
         return lit
 
-    @v_args(inline=True)
-    def signal_ref(self, name: Token, select: SelectInfo = None) -> tuple[str, SelectInfo]:
-        return (str(name), _select_info(select))
+    def signal_ref(self, children: list[Any]) -> tuple[str, list[SelectStep]]:
+        args = self._child_args(children)
+        name = str(args[0])
+        selects = [item for item in args[1:] if isinstance(item, tuple)]
+        return (name, selects)
 
     @v_args(inline=True)
-    def to_lvalue(self, ref: tuple[str, SelectInfo]) -> Lvalue:
-        return _lvalue_from_signal(ref[0], ref[1])
+    def to_lvalue(self, ref: tuple[str, list[SelectStep]]) -> Lvalue:
+        return _lvalue_from_selects(ref[0], ref[1])
 
     @v_args(inline=True)
-    def signal_expr(self, ref: tuple[str, SelectInfo]) -> Expr:
-        return _expr_from_signal(ref[0], ref[1])
+    def signal_expr(self, ref: tuple[str, list[SelectStep]]) -> Expr:
+        return _expr_from_selects(ref[0], ref[1])
 
     @v_args(inline=True)
     def hier_ident(self, first: Token, *rest: Token) -> IdentRef:
@@ -764,12 +771,20 @@ class VerilogTransformer(Transformer):
         return IdentRef(name=str(token))
 
     @v_args(inline=True)
-    def bit_sel(self, index: Expr) -> SelectInfo:
+    def bit_sel(self, index: Expr) -> SelectStep:
         return ("bit", index, None)
 
     @v_args(inline=True)
-    def part_sel(self, msb: Expr, lsb: Expr) -> SelectInfo:
+    def part_sel(self, msb: Expr, lsb: Expr) -> SelectStep:
         return ("part", msb, lsb)
+
+    @v_args(inline=True)
+    def signed_cast(self, operand: Expr) -> UnaryExpr:
+        return UnaryExpr(op="$signed", operand=operand)
+
+    @v_args(inline=True)
+    def unsigned_cast(self, operand: Expr) -> UnaryExpr:
+        return UnaryExpr(op="$unsigned", operand=operand)
 
     @v_args(inline=True)
     def blocking_assign(self, target: Lvalue, expr: Expr) -> BlockingAssign:

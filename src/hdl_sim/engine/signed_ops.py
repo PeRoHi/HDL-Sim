@@ -87,6 +87,10 @@ def expr_is_signed(expr: Expr, nets: dict[str, SimNet]) -> bool:
         net = nets.get(expr.signal)
         return bool(net and net.is_signed)
     if isinstance(expr, UnaryExpr):
+        if expr.op == "$signed":
+            return True
+        if expr.op == "$unsigned":
+            return False
         return expr_is_signed(expr.operand, nets)
     if isinstance(expr, BinaryExpr):
         if expr.op == "?:":
@@ -103,13 +107,21 @@ def operand_width(expr: Expr, nets: dict[str, SimNet], default: int = 32) -> int
         return net.width if net is not None else default
     if isinstance(expr, BitSelect):
         net = nets.get(expr.signal)
+        if expr.word is not None:
+            return 1
         return net.width if net is not None else 1
     if isinstance(expr, PartSelect):
         net = nets.get(expr.signal)
+        if expr.word is not None:
+            msb_w = operand_width(expr.msb, nets, default)
+            lsb_w = operand_width(expr.lsb, nets, default)
+            return max(msb_w, lsb_w)
         return net.width if net is not None else default
     if isinstance(expr, IntLiteral) and expr.width is not None:
         return expr.width
     if isinstance(expr, UnaryExpr):
+        if expr.op in {"$signed", "$unsigned"}:
+            return operand_width(expr.operand, nets, default)
         return operand_width(expr.operand, nets, default)
     if isinstance(expr, BinaryExpr):
         return max(operand_width(expr.left, nets, default), operand_width(expr.right, nets, default))

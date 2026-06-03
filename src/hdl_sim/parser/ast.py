@@ -200,6 +200,7 @@ class Block(Stmt):
 @dataclass(frozen=True, slots=True)
 class Lvalue:
     base: str
+    word: Expr | None = None
     bit: Expr | None = None
     msb: Expr | None = None
     lsb: Expr | None = None
@@ -292,6 +293,7 @@ class DisplayArg:
 class BitSelect(Expr):
     signal: str
     index: Expr
+    word: Expr | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,6 +301,7 @@ class PartSelect(Expr):
     signal: str
     msb: Expr
     lsb: Expr
+    word: Expr | None = None
 
 
 @dataclass(frozen=True, slots=True)

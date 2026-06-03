@@ -274,6 +274,8 @@ rel_expr: rel_expr OP_LT shift_expr
              | "&" unary_expr -> uand
              | "|" unary_expr -> uor
              | "^" unary_expr -> uxor
+             | "$signed"i "(" expr ")" -> signed_cast
+             | "$unsigned"i "(" expr ")" -> unsigned_cast
              | primary
 
 ?primary: NUMBER
@@ -290,7 +292,7 @@ func_call: IDENT "(" expr ("," expr)* ")"
 
 concat_expr: "{" expr ("," expr)* "}"
 
-signal_ref: IDENT select?
+signal_ref: IDENT select*
 
 hier_ident: IDENT ("." IDENT)+
 

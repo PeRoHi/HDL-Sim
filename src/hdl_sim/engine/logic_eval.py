@@ -55,28 +55,39 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
         width = max(1, value.bit_length())
         return FourStateValue(value=value, width=width)
     if isinstance(expr, BitSelect):
-        net = nets.get(expr.signal)
-        index = eval_int(expr.index)
-        if net is not None and net.is_memory:
-            word = net.read_word(index)
-            return FourStateValue(value=word, width=net.width)
-        base = eval_logic(IdentRef(expr.signal), eval_int, nets)
-        bit = (base.value >> index) & 1
-        x = (base.x_mask >> index) & 1
-        z = (base.z_mask >> index) & 1
-        return FourStateValue(value=bit, width=1, x_mask=x, z_mask=z)
-    if isinstance(expr, PartSelect):
         from hdl_sim.engine.lvalue import read_lvalue
         from hdl_sim.parser.ast import Lvalue
 
         value = read_lvalue(
-            Lvalue(base=expr.signal, msb=expr.msb, lsb=expr.lsb),
+            Lvalue(base=expr.signal, word=expr.word, bit=expr.index),
+            nets,
+            eval_int,
+        )
+        from hdl_sim.engine.signed_ops import operand_width
+
+        net = nets.get(expr.signal)
+        if expr.word is not None:
+            width = 1
+        elif net is not None:
+            width = 1
+        else:
+            width = operand_width(expr, nets, default=1)
+        return FourStateValue.from_int(value, width=width)
+    if isinstance(expr, PartSelect):
+        from hdl_sim.engine.lvalue import read_lvalue
+        from hdl_sim.engine.signed_ops import operand_width
+        from hdl_sim.parser.ast import Lvalue
+
+        value = read_lvalue(
+            Lvalue(base=expr.signal, word=expr.word, msb=expr.msb, lsb=expr.lsb),
             nets,
             eval_int,
         )
         width = abs(eval_int(expr.msb) - eval_int(expr.lsb)) + 1
         return FourStateValue.from_int(value, width=width)
     if isinstance(expr, UnaryExpr):
+        if expr.op in {"$signed", "$unsigned"}:
+            return eval_logic(expr.operand, eval_int, nets)
         operand = eval_logic(expr.operand, eval_int, nets)
         if expr.op == "~":
             return bitwise_not(operand)

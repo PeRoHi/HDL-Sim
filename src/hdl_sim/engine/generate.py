@@ -329,6 +329,7 @@ def _substitute_lvalue(target: Lvalue, genvar: str, value: int) -> Lvalue:
     return replace(
         target,
         base=target.base,
+        word=_substitute_expr(target.word, genvar, value) if target.word is not None else None,
         bit=_substitute_expr(target.bit, genvar, value) if target.bit is not None else None,
         msb=_substitute_expr(target.msb, genvar, value) if target.msb is not None else None,
         lsb=_substitute_expr(target.lsb, genvar, value) if target.lsb is not None else None,
@@ -353,11 +354,13 @@ def _substitute_expr(expr: Expr, genvar: str, value: int) -> Expr:
     if isinstance(expr, BitSelect):
         return replace(
             expr,
+            word=_substitute_expr(expr.word, genvar, value) if expr.word is not None else None,
             index=_substitute_expr(expr.index, genvar, value),
         )
     if isinstance(expr, PartSelect):
         return replace(
             expr,
+            word=_substitute_expr(expr.word, genvar, value) if expr.word is not None else None,
             msb=_substitute_expr(expr.msb, genvar, value),
             lsb=_substitute_expr(expr.lsb, genvar, value),
         )

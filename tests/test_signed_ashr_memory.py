@@ -77,6 +77,75 @@ def test_memory_word_access() -> None:
     assert sim._nets["x"].value == 0
 
 
+def test_memory_word_bit_select() -> None:
+    source = """
+    module m;
+      reg [7:0] mem [0:1];
+      reg bitv;
+      initial begin
+        mem[0] = 8'b1010_1100;
+        mem[1] = 8'h00;
+        bitv = mem[0][2];
+        mem[1][3] = 1'b1;
+      end
+    endmodule
+    """
+    sim = Simulator.from_source(source)
+    sim.run(until=0, max_events=40)
+    mem = sim._nets["mem"]
+    assert mem.read_word(0) == 0xAC
+    assert sim._nets["bitv"].value == 1
+    assert mem.read_word(1) == 0x08
+
+
+def test_memory_word_part_select() -> None:
+    source = """
+    module m;
+      reg [7:0] mem [0:0];
+      reg [3:0] nibble;
+      initial begin
+        mem[0] = 8'hF0;
+        nibble = mem[0][7:4];
+      end
+    endmodule
+    """
+    sim = Simulator.from_source(source)
+    sim.run(until=0, max_events=20)
+    assert sim._nets["nibble"].value == 0xF
+
+
+def test_signed_cast_arithmetic_shift() -> None:
+    source = """
+    module m;
+      reg [7:0] u;
+      reg [7:0] s;
+      initial begin
+        u = 8'hF8;
+        s = $signed(u) >>> 2;
+      end
+    endmodule
+    """
+    sim = Simulator.from_source(source)
+    sim.run(until=0, max_events=20)
+    assert sim._nets["s"].value == 0xFE
+
+
+def test_unsigned_cast_logical_shift() -> None:
+    source = """
+    module m;
+      reg signed [7:0] a;
+      reg [7:0] b;
+      initial begin
+        a = -8;
+        b = $unsigned(a) >>> 2;
+      end
+    endmodule
+    """
+    sim = Simulator.from_source(source)
+    sim.run(until=0, max_events=20)
+    assert sim._nets["b"].value == 0x3E
+
+
 def test_signed_shift_in_initial() -> None:
     source = """
     module m;

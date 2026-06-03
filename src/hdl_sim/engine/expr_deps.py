@@ -39,9 +39,15 @@ def identifiers_in_expr(expr: Expr) -> set[str]:
     if isinstance(expr, IdentRef):
         return {expr.name}
     if isinstance(expr, BitSelect):
-        return {expr.signal} | identifiers_in_expr(expr.index)
+        names = {expr.signal} | identifiers_in_expr(expr.index)
+        if expr.word is not None:
+            names |= identifiers_in_expr(expr.word)
+        return names
     if isinstance(expr, PartSelect):
-        return {expr.signal} | identifiers_in_expr(expr.msb) | identifiers_in_expr(expr.lsb)
+        names = {expr.signal} | identifiers_in_expr(expr.msb) | identifiers_in_expr(expr.lsb)
+        if expr.word is not None:
+            names |= identifiers_in_expr(expr.word)
+        return names
     if isinstance(expr, UnaryExpr):
         return identifiers_in_expr(expr.operand)
     if isinstance(expr, BinaryExpr):
@@ -57,6 +63,8 @@ def identifiers_in_expr(expr: Expr) -> set[str]:
 
 def identifiers_in_lvalue(lvalue: Lvalue) -> set[str]:
     names = {lvalue.base}
+    if lvalue.word is not None:
+        names |= identifiers_in_expr(lvalue.word)
     if lvalue.bit is not None:
         names |= identifiers_in_expr(lvalue.bit)
     if lvalue.msb is not None and lvalue.lsb is not None:

@@ -13,6 +13,17 @@ EvalFn = Callable[[Expr], int]
 
 def read_lvalue(lvalue: Lvalue, nets: dict[str, SimNet], eval_fn: EvalFn) -> int:
     net = _require_net(lvalue.base, nets)
+    if lvalue.word is not None:
+        word_index = eval_fn(lvalue.word)
+        word_value = net.read_word(word_index)
+        if lvalue.bit is not None:
+            bit_index = eval_fn(lvalue.bit)
+            return (word_value >> bit_index) & 1
+        if lvalue.msb is not None and lvalue.lsb is not None:
+            msb = eval_fn(lvalue.msb)
+            lsb = eval_fn(lvalue.lsb)
+            return _extract_part(word_value, msb, lsb)
+        return word_value
     if lvalue.bit is not None:
         index = eval_fn(lvalue.bit)
         if net.is_memory:
@@ -21,7 +32,8 @@ def read_lvalue(lvalue: Lvalue, nets: dict[str, SimNet], eval_fn: EvalFn) -> int
     if lvalue.msb is not None and lvalue.lsb is not None:
         msb = eval_fn(lvalue.msb)
         lsb = eval_fn(lvalue.lsb)
-        return _extract_part(net.value, msb, lsb)
+        base_value = net.read_word(0) if net.is_memory else net.value
+        return _extract_part(base_value, msb, lsb)
     return net.value if not net.is_memory else net.read_word(0)
 
 
@@ -35,6 +47,23 @@ def write_lvalue(
     on_update,
 ) -> bool:
     net = _require_net(lvalue.base, nets)
+    if lvalue.word is not None:
+        word_index = eval_fn(lvalue.word)
+        current = net.read_word(word_index)
+        if lvalue.bit is not None:
+            bit_index = eval_fn(lvalue.bit)
+            bit_value = value & 1
+            next_value = (current & ~(1 << bit_index)) | (bit_value << bit_index)
+        elif lvalue.msb is not None and lvalue.lsb is not None:
+            msb = eval_fn(lvalue.msb)
+            lsb = eval_fn(lvalue.lsb)
+            next_value = _insert_part(current, msb, lsb, value, net.width)
+        else:
+            next_value = value
+        if net.update_word(word_index, next_value, time=time):
+            on_update(net, time)
+            return True
+        return False
     if lvalue.bit is not None:
         index = eval_fn(lvalue.bit)
         if net.is_memory:
@@ -51,7 +80,8 @@ def write_lvalue(
     if lvalue.msb is not None and lvalue.lsb is not None:
         msb = eval_fn(lvalue.msb)
         lsb = eval_fn(lvalue.lsb)
-        next_value = _insert_part(net.value, msb, lsb, value, net.width)
+        base_value = net.read_word(0) if net.is_memory else net.value
+        next_value = _insert_part(base_value, msb, lsb, value, net.width)
         if net.is_memory:
             if net.update_word(0, next_value, time=time):
                 on_update(net, time)
@@ -111,6 +141,33 @@ def write_lvalue_logic(
     x_mask = state.x_mask
     z_mask = state.z_mask
     net = _require_net(lvalue.base, nets)
+    if lvalue.word is not None:
+        word_index = eval_fn(lvalue.word)
+        current = net.read_word(word_index)
+        if lvalue.bit is not None:
+            bit_index = eval_fn(lvalue.bit)
+            bit_value = value & 1
+            x_bit = (x_mask >> bit_index) & 1
+            z_bit = (z_mask >> bit_index) & 1
+            next_value = (current & ~(1 << bit_index)) | (bit_value << bit_index)
+            next_x = (net.memory_x_mask[word_index] & ~(1 << bit_index)) | (x_bit << bit_index)
+            next_z = (net.memory_z_mask[word_index] & ~(1 << bit_index)) | (z_bit << bit_index)
+            if net.update_word(word_index, next_value, time=time, x_mask=next_x, z_mask=next_z):
+                on_update(net, time)
+                return True
+            return False
+        if lvalue.msb is not None and lvalue.lsb is not None:
+            msb = eval_fn(lvalue.msb)
+            lsb = eval_fn(lvalue.lsb)
+            next_value = _insert_part(current, msb, lsb, value, net.width)
+            if net.update_word(word_index, next_value, time=time):
+                on_update(net, time)
+                return True
+            return False
+        if net.update_word(word_index, value, time=time, x_mask=x_mask, z_mask=z_mask):
+            on_update(net, time)
+            return True
+        return False
     if lvalue.bit is not None:
         index = eval_fn(lvalue.bit)
         if net.is_memory:
@@ -139,7 +196,8 @@ def write_lvalue_logic(
     if lvalue.msb is not None and lvalue.lsb is not None:
         msb = eval_fn(lvalue.msb)
         lsb = eval_fn(lvalue.lsb)
-        next_value = _insert_part(net.value, msb, lsb, value, net.width)
+        base_value = net.read_word(0) if net.is_memory else net.value
+        next_value = _insert_part(base_value, msb, lsb, value, net.width)
         if net.is_memory:
             if net.update_word(0, next_value, time=time):
                 on_update(net, time)
