@@ -597,8 +597,16 @@ def create_app() -> FastAPI:
 
             waveform: dict[str, Any] | None = None
             vcd_text = ""
-            if vcd_path is not None and vcd_path.is_file():
-                vcd_text = vcd_path.read_text(encoding="utf-8")
+            vcd_read = vcd_path
+            if (
+                vcd_read is not None
+                and not vcd_read.is_file()
+                and result.vcd_path is not None
+                and result.vcd_path.is_file()
+            ):
+                vcd_read = result.vcd_path
+            if vcd_read is not None and vcd_read.is_file():
+                vcd_text = vcd_read.read_text(encoding="utf-8")
                 waveform = timeline_to_json(parse_vcd_timeline(vcd_text))
 
             payload = {

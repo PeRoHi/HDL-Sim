@@ -73,6 +73,10 @@ class Simulator:
 
         self._queue.set_nba_flush(regions_flush)
         self._vcd_path = vcd_path
+        # Anchor relative $dumpfile paths (e.g. "wave.vcd") to the API-provided directory.
+        self._vcd_anchor: Path | None = (
+            vcd_path.parent.resolve() if vcd_path is not None else None
+        )
         self._vcd = (
             VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
         )
@@ -183,7 +187,10 @@ class Simulator:
             self._tracer.log(f"#{time} $display {message}")
 
     def _on_dumpfile(self, path: str) -> None:
-        self._vcd_path = Path(path)
+        candidate = Path(path)
+        if not candidate.is_absolute() and self._vcd_anchor is not None:
+            candidate = self._vcd_anchor / candidate
+        self._vcd_path = candidate
         self._ensure_vcd()
         if self._tracer is not None:
             self._tracer.log(f"$dumpfile {path}")
