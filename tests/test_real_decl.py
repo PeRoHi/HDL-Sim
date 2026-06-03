@@ -82,4 +82,29 @@ def test_moving_avg_tb_elaborates_and_runs() -> None:
     loaded = load_design_with_meta(paths)
     elaborated = elaborate(loaded.design, top="tb_moving_avg_filter")
     result = Simulator(elaborated).run(until=50_000, max_events=50_000)
-    assert result.events_processed > 0
+    assert result.events_processed > 100
+    assert result.stop_time >= 1000
+
+
+def test_for_loop_waits_on_negedge_before_next_iteration() -> None:
+    """for 本文の @(negedge clk) が次の反復より先に進むこと（同期実行バグの回帰）。"""
+    sim = Simulator.from_source(
+        """
+        module m;
+          reg clk;
+          integer n;
+          initial clk = 0;
+          always #5 clk = ~clk;
+          initial begin
+            n = 0;
+            for (n = 0; n < 4; n = n + 1) begin
+              @(negedge clk);
+            end
+            $finish;
+          end
+        endmodule
+        """
+    )
+    result = sim.run(until=500, max_events=500)
+    assert result.stop_time >= 35
+    assert sim._nets["n"].value == 4

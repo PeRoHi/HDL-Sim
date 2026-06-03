@@ -296,20 +296,27 @@ class StatementRunner:
             value = self._ctx.evaluator.eval(stmt.init.expr)
             self._state.assign_lvalue(stmt.init.target, value, blocking=True, time=self._now())
 
-        iterations = 0
-        while stmt.condition is None or self._ctx.evaluator.eval(stmt.condition):
-            iterations += 1
-            if iterations > 10_000:
+        def loop(iterations: int) -> None:
+            if stmt.condition is not None and not self._ctx.evaluator.eval(stmt.condition):
+                if on_complete is not None:
+                    on_complete()
+                return
+            if iterations >= 10_000:
                 msg = "for loop iteration limit exceeded"
                 raise RuntimeError(msg)
-            StatementRunner(self._state).execute(stmt.body)
-            if stmt.step is None:
-                break
-            value = self._ctx.evaluator.eval(stmt.step.expr)
-            self._state.assign_lvalue(stmt.step.target, value, blocking=True, time=self._now())
 
-        if on_complete is not None:
-            on_complete()
+            def after_body() -> None:
+                if stmt.step is None:
+                    if on_complete is not None:
+                        on_complete()
+                    return
+                value = self._ctx.evaluator.eval(stmt.step.expr)
+                self._state.assign_lvalue(stmt.step.target, value, blocking=True, time=self._now())
+                loop(iterations + 1)
+
+            StatementRunner(self._state).execute(stmt.body, on_complete=after_body)
+
+        loop(0)
 
     def _execute_while(self, stmt: WhileStmt, *, on_complete: ContinueCallback | None = None) -> None:
         if self._ctx.evaluator.eval(stmt.condition):
@@ -417,9 +424,16 @@ class StatementRunner:
             self._ctx.schedule(target_time, resume_after_delay)
             return
 
-        if isinstance(stmt, (BlockingAssign, NonBlockingAssign, IfStmt, WhileStmt, ForStmt, CaseStmt)):
+        if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             self.execute(stmt)
             self._execute_statement_list(statements, index + 1, on_complete=on_complete)
+            return
+
+        if isinstance(stmt, (IfStmt, WhileStmt, ForStmt, CaseStmt)):
+            def after_control() -> None:
+                self._execute_statement_list(statements, index + 1, on_complete=on_complete)
+
+            self.execute(stmt, on_complete=after_control)
             return
 
         if isinstance(stmt, Block):
@@ -511,7 +525,20 @@ class StatementRunner:
         for net in self._nets_in_events(stmt.events):
             net.subscribe(lambda *_args, cb=try_fire: cb())
 
-        try_fire()
+        # Edge-sensitive waits must not re-sample the current value (same negedge would refire).
+        if not self._events_are_edge_sensitive(stmt.events):
+            try_fire()
+
+    def _events_are_edge_sensitive(self, events: tuple[Expr, ...]) -> bool:
+        if not events:
+            return False
+
+        for event in events:
+            if isinstance(event, UnaryExpr) and event.op in {"posedge", "negedge"}:
+                if isinstance(event.operand, IdentRef):
+                    continue
+            return False
+        return True
 
     def _await_events(self, events: tuple[Expr, ...]) -> Callable[[], bool]:
         if not events:
