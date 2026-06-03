@@ -5,6 +5,7 @@
 REG.2: "reg"i
 WIRE.2: "wire"i
 INTEGER.2: "integer"i
+REAL.2: "real"i
 SIGNED.3: "signed"i
 PORT_DIR.2: "input"i | "output"i | "inout"i
 INITIAL.2: "initial"i
@@ -21,8 +22,11 @@ module: "module" IDENT parameter_list? port_list? ";" decl_or_stmt* "endmodule" 
 
 parameter_list: "#" "(" parameter_decl ("," parameter_decl)* ")"
 
-parameter_decl: "parameter"i IDENT "=" expr
-               | "localparam"i IDENT "=" expr
+parameter_decl: "parameter"i parameter_body
+               | "localparam"i parameter_body
+
+parameter_body: IDENT "=" expr -> parameter_body
+               | INTEGER IDENT "=" expr -> parameter_body
 
 param_instance: "#" "(" param_override ("," param_override)* ")"
 
@@ -55,6 +59,7 @@ declaration: REG signed_opt? range? IDENT "=" expr ";" -> make_reg_decl_assign
           | REG signed_opt? range? ident_decl_list ";" -> make_reg_decls
           | WIRE signed_opt? range? ident_decl_list ";" -> make_wire_decls
           | INTEGER signed_opt? range? ident_decl_list ";" -> make_integer_decls
+          | REAL ident_decl_list ";" -> make_real_decls
           | genvar_decl
 
 signed_opt: SIGNED
@@ -70,7 +75,8 @@ unpacked_dimension: "[" expr ":" expr "]"
 parameter_decl_stmt: "parameter"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
                     | "localparam"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
 
-parameter_assign: IDENT "=" expr
+parameter_assign: IDENT "=" expr -> parameter_assign
+                 | INTEGER IDENT "=" expr -> parameter_assign
 
 genvar_decl: "genvar"i IDENT ";"
 
@@ -278,9 +284,11 @@ rel_expr: rel_expr OP_LT shift_expr
              | "$unsigned"i "(" expr ")" -> unsigned_cast
              | primary
 
-?primary: NUMBER
+?primary: REAL_NUMBER
+        | NUMBER
         | sized_number
         | func_call
+        | sys_func_call
         | signal_ref -> signal_expr
         | hier_ident
         | SYS_IDENT -> sys_ident
@@ -290,7 +298,13 @@ rel_expr: rel_expr OP_LT shift_expr
 
 func_call: IDENT "(" expr ("," expr)* ")"
 
-concat_expr: "{" expr ("," expr)* "}"
+sys_func_call: SYS_IDENT "(" expr ("," expr)* ")" -> func_call
+
+concat_expr: "{" brace_contents "}"
+
+brace_contents: expr "," expr ("," expr)* -> concat_list
+              | expr "{" brace_contents "}" -> replication
+              | expr -> concat_single
 
 signal_ref: IDENT select*
 
@@ -300,6 +314,7 @@ lvalue: signal_ref -> to_lvalue
 
 sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 
+REAL_NUMBER.3: /\d+\.\d+([eE][+-]?\d+)?|\d*\.\d+([eE][+-]?\d+)?/
 NUMBER: /\d+/
 STRING: /"[^"\n]*"/
 OP_SHL: "<<"

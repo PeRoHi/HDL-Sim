@@ -186,6 +186,14 @@ class StatementRunner:
 
         if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             if isinstance(stmt, BlockingAssign):
+                from hdl_sim.parser.ast import DeclKind
+
+                target_net = self._ctx.nets.get(stmt.target.base)
+                if target_net is not None and target_net.kind is DeclKind.REAL:
+                    target_net.real_value = self._ctx.evaluator.eval_real(stmt.expr)
+                    if on_complete is not None:
+                        on_complete()
+                    return
                 from hdl_sim.engine.lvalue import write_lvalue_logic
 
                 state = self._ctx.evaluator.eval_logic(stmt.expr)

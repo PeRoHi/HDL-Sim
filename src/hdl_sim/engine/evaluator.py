@@ -10,6 +10,8 @@ from hdl_sim.parser.ast import (
     BinaryExpr,
     BitSelect,
     ConcatExpr,
+    DeclKind,
+    ReplicationExpr,
     FunctionCall,
     FunctionDef,
     TaskDef,
@@ -18,6 +20,7 @@ from hdl_sim.parser.ast import (
     IntLiteral,
     Lvalue,
     PartSelect,
+    RealLiteral,
     StringLiteral,
     UnaryExpr,
 )
@@ -100,8 +103,55 @@ class ExpressionEvaluator:
             return bitwise_xor(left, right)
         return FourStateValue.from_int(self.eval(expr))
 
+    def eval_real(self, expr: Expr) -> float:
+        import math
+
+        if isinstance(expr, RealLiteral):
+            return expr.value
+        if isinstance(expr, IntLiteral):
+            return float(expr.value)
+        if isinstance(expr, FunctionCall):
+            if expr.name == "$sin" and len(expr.args) == 1:
+                return math.sin(self.eval_real(expr.args[0]))
+            if expr.name == "$rtoi" and len(expr.args) == 1:
+                return float(int(self.eval_real(expr.args[0])))
+            msg = f"unsupported real function: {expr.name}"
+            raise EvaluationError(msg)
+        if isinstance(expr, IdentRef):
+            net = self._nets.get(expr.name) or self._global_nets.get(expr.name)
+            if net is not None and net.kind is DeclKind.REAL:
+                return net.real_value
+            if expr.name in self._params:
+                return float(self._params[expr.name])
+            if net is not None:
+                return float(net.value)
+            msg = f"unknown identifier: {expr.name}"
+            raise EvaluationError(msg)
+        if isinstance(expr, UnaryExpr):
+            if expr.op == "-":
+                return -self.eval_real(expr.operand)
+            msg = f"unsupported unary operator in real expression: {expr.op}"
+            raise EvaluationError(msg)
+        if isinstance(expr, BinaryExpr):
+            left = self.eval_real(expr.left)
+            right = self.eval_real(expr.right)
+            if expr.op == "+":
+                return left + right
+            if expr.op == "-":
+                return left - right
+            if expr.op == "*":
+                return left * right
+            if expr.op == "/":
+                return left / right
+            msg = f"unsupported binary operator in real expression: {expr.op}"
+            raise EvaluationError(msg)
+        msg = f"unsupported real expression: {type(expr).__name__}"
+        raise EvaluationError(msg)
+
     def eval(self, expr: Expr) -> int:
         if isinstance(expr, FunctionCall):
+            if expr.name == "$rtoi" and len(expr.args) == 1:
+                return int(self.eval_real(expr.args[0]))
             args = tuple(self.eval(arg) for arg in expr.args)
             from hdl_sim.engine.functions import call_function
 
@@ -128,9 +178,15 @@ class ExpressionEvaluator:
             if expr.name in self._params:
                 return self._params[expr.name]
             if expr.name in self._nets:
-                return self._nets[expr.name].value
+                net = self._nets[expr.name]
+                if net.kind is DeclKind.REAL:
+                    return int(net.real_value)
+                return net.value
             if expr.name in self._global_nets:
-                return self._global_nets[expr.name].value
+                net = self._global_nets[expr.name]
+                if net.kind is DeclKind.REAL:
+                    return int(net.real_value)
+                return net.value
             msg = f"unknown identifier: {expr.name}"
             raise EvaluationError(msg)
         if isinstance(expr, BitSelect):
@@ -250,6 +306,15 @@ class ExpressionEvaluator:
                 value |= part_value << shift
                 shift += self._width_of(part)
             return value
+        if isinstance(expr, ReplicationExpr):
+            count = self.eval(expr.count)
+            inner_value = self.eval(expr.expr)
+            part_width = self._width_of(expr.expr)
+            mask = (1 << part_width) - 1 if part_width else 0
+            value = 0
+            for index in range(count):
+                value |= (inner_value & mask) << (index * part_width)
+            return value
         msg = f"unsupported expression node: {type(expr).__name__}"
         raise EvaluationError(msg)
 
@@ -279,6 +344,10 @@ class ExpressionEvaluator:
             return net.width
         if isinstance(expr, IntLiteral) and expr.width is not None:
             return expr.width
+        if isinstance(expr, ConcatExpr):
+            return sum(self._width_of(part) for part in expr.parts)
+        if isinstance(expr, ReplicationExpr):
+            return self.eval(expr.count) * self._width_of(expr.expr)
         return 32
 
     def _reduction(self, value: int, width: int, op: str) -> int:

@@ -2,13 +2,13 @@
   "format": "hdl-sim-project",
   "version": 1,
   "name": "movefilter",
-  "top": "tb",
+  "top": "tb_moving_avg_filter",
   "until": 15000,
   "max_events": 2000,
   "files": [
     {
-      "path": "design.v",
-      "content": "// Verilog を編集して Run (F5) で実行\n`timescale 1ns/1ps\n\nmodule counter #(parameter WIDTH = 4) (\n    input clk,\n    input rst,\n    output [WIDTH-1:0] q\n);\n    reg [WIDTH-1:0] q;\n    always @(posedge clk) begin\n        if (rst) q <= 0;\n        else q <= q + 1;\n    end\nendmodule\n\nmodule tb;\n    reg clk, rst;\n    wire [3:0] count;\n    counter dut (.clk(clk), .rst(rst), .q(count));\n    initial begin\n        clk = 0;\n        forever #5 clk = ~clk;\n    end\n    initial begin\n        rst = 1;\n        #12 rst = 0;\n    end\n    initial begin\n        #50 begin\n            $display(\"PASS count=%0d\", count);\n            $finish;\n        end\n    end\nendmodule\n"
+      "path": "delay_line.v",
+      "content": "`timescale 1ns/1ps\r\n//\r\n// delay_line\r\n//   入力データを DELAY_CYCLE クロック分だけ遅延させるシフトレジスタ。\r\n//   - 完全非同期リセット (rst_n Low で即時 0 クリア)\r\n//   - DELAY_CYCLE = 0 のときは入力をそのまま通す\r\n//\r\nmodule delay_line #(\r\n  parameter integer DATA_WIDTH  = 12,\r\n  parameter integer DELAY_CYCLE = 2\r\n) (\r\n  input  wire                         clk,\r\n  input  wire                         rst_n,\r\n  input  wire signed [DATA_WIDTH-1:0] data_in,\r\n  output wire signed [DATA_WIDTH-1:0] data_out\r\n);\r\n\r\n  generate\r\n    if (DELAY_CYCLE == 0) begin : g_passthrough\r\n      assign data_out = data_in;\r\n    end else begin : g_delay\r\n      reg signed [DATA_WIDTH-1:0] sreg [0:DELAY_CYCLE-1];\r\n      integer i;\r\n\r\n      always @(posedge clk or negedge rst_n) begin\r\n        if (!rst_n) begin\r\n          for (i = 0; i < DELAY_CYCLE; i = i + 1) begin\r\n            sreg[i] <= {DATA_WIDTH{1'b0}};\r\n          end\r\n        end else begin\r\n          for (i = DELAY_CYCLE-1; i > 0; i = i - 1) begin\r\n            sreg[i] <= sreg[i-1];\r\n          end\r\n          sreg[0] <= data_in;\r\n        end\r\n      end\r\n\r\n      assign data_out = sreg[DELAY_CYCLE-1];\r\n    end\r\n  endgenerate\r\n\r\nendmodule\r\n"
     },
     {
       "path": "moving_avg_core.v",

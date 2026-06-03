@@ -41,6 +41,7 @@ from hdl_sim.parser.ast import (
     IfStmt,
     InitialBlock,
     IntLiteral,
+    RealLiteral,
     Lvalue,
     Module,
     ModuleInstance,
@@ -63,6 +64,7 @@ from hdl_sim.parser.ast import (
     GenerateFor,
     GenerateBlock,
     ConcatExpr,
+    ReplicationExpr,
     UnaryExpr,
     WhileStmt,
 )
@@ -186,6 +188,14 @@ class VerilogTransformer(Transformer):
         return list(children)
 
     def _resolve_expr(self, value: Any) -> Any:
+        if isinstance(value, list):
+            if len(value) == 1:
+                return self._resolve_expr(value[0])
+            if not value:
+                msg = "empty expression list"
+                raise ValueError(msg)
+            msg = "ambiguous expression list"
+            raise ValueError(msg)
         if isinstance(value, Tree):
             return self.transform(value)
         return value
@@ -451,12 +461,19 @@ class VerilogTransformer(Transformer):
     def parameter_list(self, params: list[ParameterDecl]) -> list[ParameterDecl]:
         return params
 
-    @v_args(inline=True)
-    def parameter_assign(self, name: Token, expr: Expr) -> ParameterDecl:
-        return ParameterDecl(name=str(name), expr=expr)
+    def parameter_assign(self, items: list[Any]) -> ParameterDecl:
+        return self.parameter_body(items)
 
-    @v_args(inline=True)
-    def parameter_decl(self, name: Token, expr: Expr) -> ParameterDecl:
+    def parameter_decl(self, body: ParameterDecl) -> ParameterDecl:
+        return body
+
+    def parameter_body(self, items: list[Any]) -> ParameterDecl:
+        expr = items[-1]
+        name = items[-2]
+        if not isinstance(name, Token):
+            raise TypeError(f"expected parameter name token, got {type(name)!r}")
+        if not isinstance(expr, Expr):
+            raise TypeError(f"expected parameter expr, got {type(expr)!r}")
         return ParameterDecl(name=str(name), expr=expr)
 
     def parameter_decl_stmt_multi(self, items: list[Any]) -> list[ParameterDecl]:
@@ -513,7 +530,11 @@ class VerilogTransformer(Transformer):
         return _signed is not None
 
     def _parse_decl_head(self, children: list[Any]) -> tuple[bool, ValueRange | None, Any]:
-        filtered = [c for c in children if not isinstance(c, Token) or str(c.type) not in {"REG", "WIRE", "INTEGER"}]
+        filtered = [
+            c
+            for c in children
+            if not isinstance(c, Token) or str(c.type) not in {"REG", "WIRE", "INTEGER", "REAL"}
+        ]
         is_signed = False
         idx = 0
         if idx < len(filtered) and filtered[idx] is True:
@@ -580,6 +601,9 @@ class VerilogTransformer(Transformer):
 
     def make_integer_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
         return self._multi_decl(DeclKind.INTEGER, children)
+
+    def make_real_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
+        return self._multi_decl(DeclKind.REAL, children)
 
     def _decl_assign(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
         is_signed, range_node, rest = self._parse_decl_head(children)
@@ -787,12 +811,12 @@ class VerilogTransformer(Transformer):
         return UnaryExpr(op="$unsigned", operand=operand)
 
     @v_args(inline=True)
-    def blocking_assign(self, target: Lvalue, expr: Expr) -> BlockingAssign:
-        return BlockingAssign(target=target, expr=expr)
+    def blocking_assign(self, target: Lvalue, expr: Any) -> BlockingAssign:
+        return BlockingAssign(target=target, expr=self._resolve_expr(expr))
 
     @v_args(inline=True)
-    def nonblocking_assign(self, target: Lvalue, expr: Expr) -> NonBlockingAssign:
-        return NonBlockingAssign(target=target, expr=expr)
+    def nonblocking_assign(self, target: Lvalue, expr: Any) -> NonBlockingAssign:
+        return NonBlockingAssign(target=target, expr=self._resolve_expr(expr))
 
     @v_args(inline=True)
     def empty_stmt(self) -> Block:
@@ -1020,8 +1044,19 @@ class VerilogTransformer(Transformer):
     def func_call(self, name: Token, *args: Expr) -> FunctionCall:
         return FunctionCall(name=str(name), args=tuple(args))
 
-    def concat_expr(self, children: list[Any]) -> ConcatExpr:
-        return ConcatExpr(parts=tuple(self._child_args(tuple(children))))
+    def concat_expr(self, body: Expr) -> Expr:
+        return body
+
+    def concat_single(self, value: Any) -> ConcatExpr:
+        expr = self._resolve_expr(value)
+        return ConcatExpr(parts=(expr,))
+
+    def concat_list(self, *exprs: Any) -> ConcatExpr:
+        return ConcatExpr(parts=tuple(self._resolve_expr(e) for e in exprs))
+
+    @v_args(inline=True)
+    def replication(self, count: Expr, inner: Expr) -> ReplicationExpr:
+        return ReplicationExpr(count=count, expr=inner)
 
     @v_args(inline=True)
     def for_init(self, target: Lvalue, expr: Expr) -> BlockingAssign:
@@ -1252,6 +1287,10 @@ class VerilogTransformer(Transformer):
     @v_args(inline=True)
     def NUMBER(self, token: Token) -> IntLiteral:
         return IntLiteral(value=_int(token))
+
+    @v_args(inline=True)
+    def REAL_NUMBER(self, token: Token) -> RealLiteral:
+        return RealLiteral(value=float(str(token)))
 
     @v_args(inline=True)
     def sized_number(self, token: Token) -> IntLiteral:

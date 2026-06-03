@@ -24,6 +24,7 @@ from hdl_sim.parser.ast import (
     WhileStmt,
     ForStmt,
     ConcatExpr,
+    ReplicationExpr,
     WaitStmt,
 )
 
@@ -36,6 +37,8 @@ def identifiers_in_expr(expr: Expr) -> set[str]:
         for part in expr.parts:
             names |= identifiers_in_expr(part)
         return names
+    if isinstance(expr, ReplicationExpr):
+        return identifiers_in_expr(expr.count) | identifiers_in_expr(expr.expr)
     if isinstance(expr, IdentRef):
         return {expr.name}
     if isinstance(expr, BitSelect):

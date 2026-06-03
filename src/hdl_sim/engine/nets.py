@@ -20,6 +20,7 @@ class SimNet:
     width: int
     kind: DeclKind
     value: int = 0
+    real_value: float = 0.0
     x_mask: int = 0
     z_mask: int = 0
     previous: int | None = None
@@ -68,6 +69,8 @@ class SimNet:
     ) -> SimNet:
         if kind is DeclKind.INTEGER:
             width = value_range.width if value_range is not None else 32
+        elif kind is DeclKind.REAL:
+            width = 64
         else:
             width = value_range.width if value_range is not None else 1
         memory: list[int] = []

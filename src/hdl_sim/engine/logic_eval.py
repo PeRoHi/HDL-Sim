@@ -13,10 +13,13 @@ from hdl_sim.parser.ast import (
     BinaryExpr,
     BitSelect,
     ConcatExpr,
+    DeclKind,
+    ReplicationExpr,
     Expr,
     IdentRef,
     IntLiteral,
     PartSelect,
+    RealLiteral,
     StringLiteral,
     UnaryExpr,
 )
@@ -36,6 +39,8 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
 
     if isinstance(expr, IntLiteral):
         return FourStateValue.from_literal(expr)
+    if isinstance(expr, RealLiteral):
+        return FourStateValue.from_int(int(expr.value), width=32)
     if isinstance(expr, StringLiteral):
         value = 0
         for ch in expr.value.encode("utf-8"):
@@ -45,6 +50,8 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
     if isinstance(expr, IdentRef):
         net = nets.get(expr.name)
         if net is not None:
+            if net.kind is DeclKind.REAL:
+                return FourStateValue.from_int(int(net.real_value), width=32)
             return FourStateValue(
                 value=net.value,
                 width=net.width,
@@ -189,6 +196,24 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
             return FourStateValue(value=1 if ok else 0, width=1)
         msg = f"unsupported binary operator: {expr.op}"
         raise ValueError(msg)
+    if isinstance(expr, ReplicationExpr):
+        count = eval_int(expr.count)
+        inner = eval_logic(expr.expr, eval_int, nets)
+        total_width = inner.width * count
+        value = x_mask = z_mask = 0
+        inner_mask = (1 << inner.width) - 1 if inner.width else 0
+        for index in range(count):
+            shift = index * inner.width
+            value |= (inner.value & inner_mask) << shift
+            x_mask |= (inner.x_mask & inner_mask) << shift
+            z_mask |= (inner.z_mask & inner_mask) << shift
+        mask = (1 << total_width) - 1 if total_width else 0
+        return FourStateValue(
+            value=value & mask,
+            width=total_width,
+            x_mask=x_mask & mask,
+            z_mask=z_mask & mask,
+        )
     if isinstance(expr, ConcatExpr):
         parts = [eval_logic(part, eval_int, nets) for part in expr.parts]
         total_width = sum(part.width for part in parts)

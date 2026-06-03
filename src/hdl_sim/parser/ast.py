@@ -11,6 +11,7 @@ class DeclKind(Enum):
     REG = auto()
     WIRE = auto()
     INTEGER = auto()
+    REAL = auto()
 
 
 class PortDirection(Enum):
@@ -85,6 +86,11 @@ class IntLiteral(Expr):
 
 
 @dataclass(frozen=True, slots=True)
+class RealLiteral(Expr):
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
 class FunctionCall(Expr):
     name: str
     args: tuple[Expr, ...]
@@ -146,6 +152,12 @@ class BinaryExpr(Expr):
 @dataclass(frozen=True, slots=True)
 class ConcatExpr(Expr):
     parts: tuple[Expr, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplicationExpr(Expr):
+    count: Expr
+    expr: Expr
 
 
 class Stmt:

@@ -125,12 +125,17 @@ class Simulator:
                 nba=self._nba,
                 on_net_update=self._record_net,
                 params=assign.params,
+                global_nets=self._nets,
             )
 
-            def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> bool:
+            def recompute(
+                time: SimTime,
+                scoped: ScopedContinuousAssign = assign,
+                scoped_evaluator: ExpressionEvaluator = evaluator,
+            ) -> bool:
                 from hdl_sim.engine.net_state import apply_four_state
 
-                state = evaluator.eval_logic(scoped.expr)
+                state = scoped_evaluator.eval_logic(scoped.expr)
                 net = self._nets[scoped.target]
                 return apply_four_state(net, state, time=time, on_update=self._record_net)
 

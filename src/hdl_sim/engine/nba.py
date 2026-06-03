@@ -25,6 +25,8 @@ class PendingState:
     value: int
     x_mask: int = 0
     z_mask: int = 0
+    net_name: str | None = None
+    word_index: int | None = None
 
 
 @dataclass
@@ -76,6 +78,22 @@ class NBARegion:
             return
 
         net = self.nets[global_name]
+        if net.is_memory:
+            if target.word is not None:
+                word_index = eval_fn(target.word)
+            elif target.bit is not None:
+                word_index = eval_fn(target.bit)
+            else:
+                msg = "memory NBA requires a word index"
+                raise ValueError(msg)
+            key = f"{global_name}@{word_index}"
+            self.pending[key] = PendingState(
+                value=value,
+                net_name=global_name,
+                word_index=word_index,
+            )
+            return
+
         pending = self.pending.get(global_name)
         current = pending.value if pending else net.value
         cur_x = pending.x_mask if pending else net.x_mask
@@ -109,7 +127,13 @@ class NBARegion:
         items = list(self.pending.items())
         self.pending.clear()
         for target, pending in items:
-            net = self.nets[target]
+            net_name = pending.net_name or target
+            net = self.nets[net_name]
+            if pending.word_index is not None:
+                if net.update_word(pending.word_index, pending.value, time=time):
+                    self.on_update(net, time)
+                    changed = True
+                continue
             if net.update(
                 pending.value,
                 time=time,

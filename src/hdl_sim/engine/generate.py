@@ -15,6 +15,7 @@ from hdl_sim.parser.ast import (
     CaseItem,
     CaseStmt,
     ConcatExpr,
+    ReplicationExpr,
     ContinuousAssign,
     Declaration,
     Expr,
@@ -368,5 +369,11 @@ def _substitute_expr(expr: Expr, genvar: str, value: int) -> Expr:
         return replace(
             expr,
             parts=tuple(_substitute_expr(part, genvar, value) for part in expr.parts),
+        )
+    if isinstance(expr, ReplicationExpr):
+        return replace(
+            expr,
+            count=_substitute_expr(expr.count, genvar, value),
+            expr=_substitute_expr(expr.expr, genvar, value),
         )
     return expr
