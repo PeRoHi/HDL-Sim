@@ -55,8 +55,12 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
         width = max(1, value.bit_length())
         return FourStateValue(value=value, width=width)
     if isinstance(expr, BitSelect):
-        base = eval_logic(IdentRef(expr.signal), eval_int, nets)
+        net = nets.get(expr.signal)
         index = eval_int(expr.index)
+        if net is not None and net.is_memory:
+            word = net.read_word(index)
+            return FourStateValue(value=word, width=net.width)
+        base = eval_logic(IdentRef(expr.signal), eval_int, nets)
         bit = (base.value >> index) & 1
         x = (base.x_mask >> index) & 1
         z = (base.z_mask >> index) & 1
@@ -137,9 +141,28 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
             return FourStateValue.from_int((lv * rv) & mask, width=width)
         if expr.op == "<<":
             return FourStateValue.from_int((lv << rv) & mask, width=width)
-        if expr.op == ">>":
-            return FourStateValue.from_int(lv >> rv, width=width)
+        if expr.op in {">>", ">>>"}:
+            from hdl_sim.engine.signed_ops import (
+                expr_is_signed,
+                operand_width,
+                shift_right_arithmetic,
+                shift_right_logical,
+            )
+
+            lwidth = operand_width(expr.left, nets)
+            if expr_is_signed(expr.left, nets):
+                result = shift_right_arithmetic(lv, rv, lwidth)
+            else:
+                result = shift_right_logical(lv, rv, lwidth)
+            return FourStateValue.from_int(result, width=lwidth)
         if expr.op in {"==", "!=", "<", "<=", ">", ">="}:
+            from hdl_sim.engine.signed_ops import compare_signed, expr_is_signed, operand_width
+
+            lwidth = operand_width(expr.left, nets)
+            rwidth = operand_width(expr.right, nets)
+            if expr_is_signed(expr.left, nets) or expr_is_signed(expr.right, nets):
+                ok = compare_signed(lv, rv, lwidth, rwidth, expr.op)
+                return FourStateValue(value=ok, width=1)
             if expr.op == "==":
                 ok = lv == rv
             elif expr.op == "!=":

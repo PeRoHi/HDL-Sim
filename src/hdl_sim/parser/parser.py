@@ -36,6 +36,7 @@ from hdl_sim.parser.ast import (
     TaskPortKind,
     TaskPort,
     TaskDef,
+    IdentDecl,
     IdentRef,
     IfStmt,
     InitialBlock,
@@ -346,16 +347,26 @@ class VerilogTransformer(Transformer):
         return None
 
     def _port_decl_with_dir(self, port_dir: PortDirection, *rest: Any) -> Port:
-        rest_list = list(rest)
+        rest_list = [r for r in rest if not isinstance(r, Token) or str(r.type) != "SIGNED"]
+        is_signed = any(isinstance(r, Token) and str(r.type) == "SIGNED" for r in rest)
         net_kind = None
         if rest_list and self._port_net_kind(rest_list[0]) is not None:
             net_kind = self._port_net_kind(rest_list[0])
             rest_list = rest_list[1:]
+        if rest_list and rest_list[0] is True:
+            is_signed = True
+            rest_list = rest_list[1:]
         if len(rest_list) == 2:
             value_range, name = rest_list
-            return Port(direction=port_dir, name=str(name), range=value_range, net_kind=net_kind)
+            return Port(
+                direction=port_dir,
+                name=str(name),
+                range=value_range,
+                net_kind=net_kind,
+                is_signed=is_signed,
+            )
         (name,) = rest_list
-        return Port(direction=port_dir, name=str(name), net_kind=net_kind)
+        return Port(direction=port_dir, name=str(name), net_kind=net_kind, is_signed=is_signed)
 
     def port_decls_body(self, items: list[Any]) -> list[Port]:
         dir_text = str(items[0]).lower()
@@ -370,13 +381,23 @@ class VerilogTransformer(Transformer):
         if idx < len(items) and self._port_net_kind(items[idx]) is not None:
             net_kind = self._port_net_kind(items[idx])
             idx += 1
+        is_signed = False
+        if idx < len(items) and items[idx] is True:
+            is_signed = True
+            idx += 1
         value_range = None
         if idx < len(items) and not isinstance(items[idx], list):
             value_range = items[idx]
             idx += 1
         names = items[idx]
         return [
-            Port(direction=port_dir, name=str(name), range=value_range, net_kind=net_kind)
+            Port(
+                direction=port_dir,
+                name=str(name),
+                range=value_range,
+                net_kind=net_kind,
+                is_signed=is_signed,
+            )
             for name in names
         ]
 
@@ -471,32 +492,80 @@ class VerilogTransformer(Transformer):
     def ident_list(self, first: Token, *rest: Token) -> list[str]:
         return [str(first), *(str(r) for r in rest)]
 
+    def ident_decl_list(self, items: list[IdentDecl]) -> list[IdentDecl]:
+        return items
+
+    @v_args(inline=True)
+    def ident_decl(self, name: Token, unpacked: ValueRange | None = None) -> IdentDecl:
+        return IdentDecl(name=str(name), unpacked_range=unpacked)
+
+    @v_args(inline=True)
+    def unpacked_dimension(self, msb: Expr, lsb: Expr) -> ValueRange:
+        return ValueRange(msb=msb, lsb=lsb)
+
+    @v_args(inline=True)
+    def signed_opt(self, _signed: Token | None = None) -> bool:
+        return _signed is not None
+
+    def _parse_decl_head(self, children: list[Any]) -> tuple[bool, ValueRange | None, Any]:
+        filtered = [c for c in children if not isinstance(c, Token) or str(c.type) not in {"REG", "WIRE", "INTEGER"}]
+        is_signed = False
+        idx = 0
+        if idx < len(filtered) and filtered[idx] is True:
+            is_signed = True
+            idx += 1
+        range_node = None
+        if idx < len(filtered) and isinstance(filtered[idx], ValueRange):
+            range_node = filtered[idx]
+            idx += 1
+        rest = filtered[idx:]
+        return is_signed, range_node, rest[0] if rest else None
+
+    def _decls_from_ident_decls(
+        self,
+        kind: DeclKind,
+        ident_decls: list[IdentDecl],
+        range_node: ValueRange | None,
+        *,
+        is_signed: bool = False,
+    ) -> tuple[Declaration, ...]:
+        decls: list[Declaration] = []
+        for item in ident_decls:
+            decls.append(
+                Declaration(
+                    kind=kind,
+                    name=item.name,
+                    range=range_node,
+                    unpacked_range=item.unpacked_range,
+                    is_signed=is_signed,
+                )
+            )
+        return tuple(decls)
+
     def _decls_from_names(
         self,
         kind: DeclKind,
         names: list[str],
         range_node: ValueRange | None = None,
+        *,
+        is_signed: bool = False,
     ) -> tuple[Declaration, ...]:
-        decls: list[Declaration] = []
-        for name in names:
-            if range_node is not None:
-                decls.append(Declaration(kind=kind, name=name, range=range_node))
-            else:
-                decls.append(Declaration(kind=kind, name=name))
-        return tuple(decls)
+        return self._decls_from_ident_decls(
+            kind,
+            [IdentDecl(name=name) for name in names],
+            range_node,
+            is_signed=is_signed,
+        )
 
     def _multi_decl(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ...]:
-        filtered = [c for c in children if not isinstance(c, Token)]
-        if not filtered:
+        is_signed, range_node, payload = self._parse_decl_head(children)
+        if payload is None:
             return ()
-        if len(filtered) == 1:
-            names = filtered[0]
-            return self._decls_from_names(kind, names, None)
-        range_node, names = filtered[0], filtered[1]
-        if not isinstance(range_node, ValueRange):
-            names = filtered[0]
-            range_node = None
-        return self._decls_from_names(kind, names, range_node)
+        if isinstance(payload, list) and payload and isinstance(payload[0], IdentDecl):
+            return self._decls_from_ident_decls(kind, payload, range_node, is_signed=is_signed)
+        if isinstance(payload, list):
+            return self._decls_from_names(kind, payload, range_node, is_signed=is_signed)
+        return ()
 
     def make_reg_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
         return self._multi_decl(DeclKind.REG, children)
@@ -508,13 +577,20 @@ class VerilogTransformer(Transformer):
         return self._multi_decl(DeclKind.INTEGER, children)
 
     def _decl_assign(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
-        filtered = [c for c in children if not isinstance(c, Token) or str(c) not in {"reg", "wire", "integer"}]
-        range_node = None
-        if len(filtered) == 3:
-            range_node, name, expr = filtered
+        is_signed, range_node, rest = self._parse_decl_head(children)
+        if not rest:
+            msg = "invalid declaration with assignment"
+            raise ValueError(msg)
+        if isinstance(rest, list) and len(rest) >= 2:
+            name, expr = rest[0], rest[1]
         else:
-            name, expr = filtered[-2], filtered[-1]
-        decl = Declaration(kind=kind, name=str(name), range=range_node if isinstance(range_node, ValueRange) else None)
+            name, expr = rest, children[-1]
+        decl = Declaration(
+            kind=kind,
+            name=str(name),
+            range=range_node,
+            is_signed=is_signed,
+        )
         return (decl, ContinuousAssign(target=str(name), expr=expr))
 
     def make_reg_decl_assign(self, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
@@ -1104,7 +1180,12 @@ class VerilogTransformer(Transformer):
         while index < len(resolved):
             op = str(resolved[index])
             if op.startswith("OP_"):
-                op = "<<" if "SHL" in op else ">>"
+                if "ASHR" in op:
+                    op = ">>>"
+                elif "SHL" in op:
+                    op = "<<"
+                else:
+                    op = ">>"
             right = resolved[index + 1]
             result = BinaryExpr(op, result, right)
             index += 2

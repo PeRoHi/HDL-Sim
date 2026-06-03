@@ -53,6 +53,13 @@ class Port:
     name: str
     range: ValueRange | None = None
     net_kind: DeclKind | None = None
+    is_signed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class IdentDecl:
+    name: str
+    unpacked_range: ValueRange | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +67,8 @@ class Declaration:
     kind: DeclKind
     name: str
     range: ValueRange | None = None
+    unpacked_range: ValueRange | None = None
+    is_signed: bool = False
     loc: SourceLocation | None = None
 
 

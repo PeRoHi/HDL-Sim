@@ -70,7 +70,8 @@ class VCDWriter:
             self.change(net, time)
 
     def _nets_for_render(self) -> dict[str, SimNet]:
-        """Always emit the full elaborated netlist (web viewer + GTKWave)."""
+        if self._active_nets is not None:
+            return {name: self.nets[name] for name in self._active_nets if name in self.nets}
         return self.nets
 
     def render(self) -> str:

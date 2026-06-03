@@ -5,6 +5,7 @@
 REG.2: "reg"i
 WIRE.2: "wire"i
 INTEGER.2: "integer"i
+SIGNED.3: "signed"i
 PORT_DIR.2: "input"i | "output"i | "inout"i
 INITIAL.2: "initial"i
 ALWAYS.2: "always"i
@@ -31,11 +32,11 @@ port_list: "(" port ("," port)* ")"
 
 port: port_decl | IDENT -> port_name
 
-port_decl: PORT_DIR port_type? range? IDENT
+port_decl: PORT_DIR port_type? signed_opt? range? IDENT
 
 port_type: WIRE | REG
 
-port_body_decl.10: PORT_DIR port_type? range? ident_list ";" -> port_decls_body
+port_body_decl.10: PORT_DIR port_type? signed_opt? range? ident_list ";" -> port_decls_body
 
 decl_or_stmt: port_body_decl
              | declaration
@@ -48,15 +49,23 @@ decl_or_stmt: port_body_decl
              | generate_block
              | module_instance
 
-declaration: REG range? IDENT "=" expr ";" -> make_reg_decl_assign
-          | WIRE range? IDENT "=" expr ";" -> make_wire_decl_assign
-          | INTEGER range? IDENT "=" expr ";" -> make_integer_decl_assign
-          | REG range? ident_list ";" -> make_reg_decls
-          | WIRE range? ident_list ";" -> make_wire_decls
-          | INTEGER range? ident_list ";" -> make_integer_decls
+declaration: REG signed_opt? range? IDENT "=" expr ";" -> make_reg_decl_assign
+          | WIRE signed_opt? range? IDENT "=" expr ";" -> make_wire_decl_assign
+          | INTEGER signed_opt? range? IDENT "=" expr ";" -> make_integer_decl_assign
+          | REG signed_opt? range? ident_decl_list ";" -> make_reg_decls
+          | WIRE signed_opt? range? ident_decl_list ";" -> make_wire_decls
+          | INTEGER signed_opt? range? ident_decl_list ";" -> make_integer_decls
           | genvar_decl
 
+signed_opt: SIGNED
+
 ident_list: IDENT ("," IDENT)*
+
+ident_decl_list: ident_decl ("," ident_decl)*
+
+ident_decl: IDENT unpacked_dimension?
+
+unpacked_dimension: "[" expr ":" expr "]"
 
 parameter_decl_stmt: "parameter"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
                     | "localparam"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
@@ -247,6 +256,7 @@ rel_expr: rel_expr OP_LT shift_expr
 
 ?shift_expr: shift_expr OP_SHL add_expr
             | shift_expr OP_SHR add_expr
+            | shift_expr OP_ASHR add_expr
             | add_expr
 
 ?add_expr: add_expr ADD_OP mul_expr
@@ -291,6 +301,7 @@ sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 NUMBER: /\d+/
 STRING: /"[^"\n]*"/
 OP_SHL: "<<"
+OP_ASHR: ">>>"
 OP_SHR: ">>"
 OP_LE: "<="
 OP_GE: ">="

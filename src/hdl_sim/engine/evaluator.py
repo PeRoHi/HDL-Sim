@@ -190,22 +190,50 @@ class ExpressionEvaluator:
                 return 0 if right == 0 else left // right
             if expr.op == "%":
                 return 0 if right == 0 else left % right
-            if expr.op == "==":
-                return 1 if left == right else 0
-            if expr.op == "!=":
-                return 1 if left != right else 0
-            if expr.op == "<":
-                return 1 if left < right else 0
-            if expr.op == "<=":
-                return 1 if left <= right else 0
-            if expr.op == ">":
-                return 1 if left > right else 0
-            if expr.op == ">=":
+            if expr.op in {"==", "!=", "<", "<=", ">", ">="}:
+                from hdl_sim.engine.signed_ops import compare_signed, expr_is_signed, operand_width
+
+                lwidth = operand_width(expr.left, self._nets)
+                rwidth = operand_width(expr.right, self._nets)
+                if expr_is_signed(expr.left, self._nets) or expr_is_signed(expr.right, self._nets):
+                    return compare_signed(left, right, lwidth, rwidth, expr.op)
+                if expr.op == "==":
+                    return 1 if left == right else 0
+                if expr.op == "!=":
+                    return 1 if left != right else 0
+                if expr.op == "<":
+                    return 1 if left < right else 0
+                if expr.op == "<=":
+                    return 1 if left <= right else 0
+                if expr.op == ">":
+                    return 1 if left > right else 0
                 return 1 if left >= right else 0
             if expr.op == "<<":
                 return left << right
             if expr.op == ">>":
-                return left >> right
+                from hdl_sim.engine.signed_ops import (
+                    expr_is_signed,
+                    operand_width,
+                    shift_right_arithmetic,
+                    shift_right_logical,
+                )
+
+                width = operand_width(expr.left, self._nets)
+                if expr_is_signed(expr.left, self._nets):
+                    return shift_right_arithmetic(left, right, width)
+                return shift_right_logical(left, right, width)
+            if expr.op == ">>>":
+                from hdl_sim.engine.signed_ops import (
+                    expr_is_signed,
+                    operand_width,
+                    shift_right_arithmetic,
+                    shift_right_logical,
+                )
+
+                width = operand_width(expr.left, self._nets)
+                if expr_is_signed(expr.left, self._nets):
+                    return shift_right_arithmetic(left, right, width)
+                return shift_right_logical(left, right, width)
             msg = f"unsupported binary operator: {expr.op}"
             raise EvaluationError(msg)
         if isinstance(expr, ConcatExpr):

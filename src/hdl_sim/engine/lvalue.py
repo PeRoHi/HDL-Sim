@@ -1,4 +1,4 @@
-"""Read and write Verilog lvalues including bit/part selects."""
+"""Read and write Verilog lvalues including bit/part selects and memory words."""
 
 from __future__ import annotations
 
@@ -15,12 +15,14 @@ def read_lvalue(lvalue: Lvalue, nets: dict[str, SimNet], eval_fn: EvalFn) -> int
     net = _require_net(lvalue.base, nets)
     if lvalue.bit is not None:
         index = eval_fn(lvalue.bit)
+        if net.is_memory:
+            return net.read_word(index)
         return net.bit(index)
     if lvalue.msb is not None and lvalue.lsb is not None:
         msb = eval_fn(lvalue.msb)
         lsb = eval_fn(lvalue.lsb)
         return _extract_part(net.value, msb, lsb)
-    return net.value
+    return net.value if not net.is_memory else net.read_word(0)
 
 
 def write_lvalue(
@@ -35,6 +37,11 @@ def write_lvalue(
     net = _require_net(lvalue.base, nets)
     if lvalue.bit is not None:
         index = eval_fn(lvalue.bit)
+        if net.is_memory:
+            if net.update_word(index, value, time=time):
+                on_update(net, time)
+                return True
+            return False
         bit_value = value & 1
         next_value = (net.value & ~(1 << index)) | (bit_value << index)
         if net.update(next_value, time=time):
@@ -45,7 +52,17 @@ def write_lvalue(
         msb = eval_fn(lvalue.msb)
         lsb = eval_fn(lvalue.lsb)
         next_value = _insert_part(net.value, msb, lsb, value, net.width)
+        if net.is_memory:
+            if net.update_word(0, next_value, time=time):
+                on_update(net, time)
+                return True
+            return False
         if net.update(next_value, time=time):
+            on_update(net, time)
+            return True
+        return False
+    if net.is_memory:
+        if net.update_word(0, value, time=time):
             on_update(net, time)
             return True
         return False
@@ -96,6 +113,11 @@ def write_lvalue_logic(
     net = _require_net(lvalue.base, nets)
     if lvalue.bit is not None:
         index = eval_fn(lvalue.bit)
+        if net.is_memory:
+            if net.update_word(index, value, time=time, x_mask=x_mask, z_mask=z_mask):
+                on_update(net, time)
+                return True
+            return False
         bit_value = value & 1
         x_bit = (x_mask >> index) & 1
         z_bit = (z_mask >> index) & 1
@@ -118,10 +140,20 @@ def write_lvalue_logic(
         msb = eval_fn(lvalue.msb)
         lsb = eval_fn(lvalue.lsb)
         next_value = _insert_part(net.value, msb, lsb, value, net.width)
+        if net.is_memory:
+            if net.update_word(0, next_value, time=time):
+                on_update(net, time)
+                return True
+            return False
         if net.update(next_value, time=time, x_mask=net.x_mask, z_mask=net.z_mask):
             on_update(net, time)
             return True
         return False
+    if net.is_memory:
+        changed = net.update_word(0, value, time=time, x_mask=x_mask, z_mask=z_mask)
+        if changed:
+            on_update(net, time)
+        return changed
     changed = net.update(value, time=time, x_mask=x_mask, z_mask=z_mask)
     if changed:
         on_update(net, time)

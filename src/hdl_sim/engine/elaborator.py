@@ -129,7 +129,12 @@ def _elaborate_module(
                 kind = DeclKind.WIRE
             else:
                 kind = DeclKind.REG
-            net = SimNet.from_declaration(full_name, kind, param_evaluator.resolve_range(port.range))
+            net = SimNet.from_declaration(
+                full_name,
+                kind,
+                param_evaluator.resolve_range(port.range),
+                is_signed=port.is_signed,
+            )
             global_nets[full_name] = net
         local[port.name] = net
 
@@ -137,7 +142,17 @@ def _elaborate_module(
         if decl.name in local:
             continue
         full_name = _scoped_name(prefix, decl.name)
-        net = SimNet.from_declaration(full_name, decl.kind, param_evaluator.resolve_range(decl.range))
+        net = SimNet.from_declaration(
+            full_name,
+            decl.kind,
+            param_evaluator.resolve_range(decl.range),
+            unpacked_range=(
+                param_evaluator.resolve_range(decl.unpacked_range)
+                if decl.unpacked_range is not None
+                else None
+            ),
+            is_signed=decl.is_signed,
+        )
         local[decl.name] = net
         global_nets[full_name] = net
 
