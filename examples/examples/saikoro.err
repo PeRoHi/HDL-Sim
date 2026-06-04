@@ -1,0 +1,42 @@
+error# 2.248    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+ ^ variable 'Å' was not declared
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+ ^ expecting ":"
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+ ^ expecting "endcase", or case expression
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+          ^ expecting ":"
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+            ^ expecting "endcase", or case expression
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+  expecting ":" ^
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+                  ^ expecting "endcase", or case expression
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+      expecting ":" ^
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+                expecting ":" ^
+error# 3.229    line   23    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+Å@  default : dec = 7'b0000000;
+                              ^ expecting "endcase", or case expression
+error# 3.229    line   24    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+  endcase
+        ^ expecting ":"
+error# 3.229    line   25    file C:\Users\t230g\Desktop\å¬êlóp\program file\Silos2001Demo\Examples\sai.v
+endfunction
+          ^ expecting "endcase", or case expression, not keyword "endfunction"
+error# 2.188
+sim to 0
+        ^ errors are too severe to simulate
+error# 2.188
+sim 
+    ^ errors are too severe to simulate

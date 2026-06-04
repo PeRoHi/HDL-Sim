@@ -2,26 +2,48 @@
 
 ?start: design
 
+REG.2: "reg"i
+WIRE.2: "wire"i
+INTEGER.2: "integer"i
+REAL.2: "real"i
+SIGNED.3: "signed"i
+PORT_DIR.2: "input"i | "output"i | "inout"i
+INITIAL.2: "initial"i
+ALWAYS.2: "always"i
+ASSIGN.2: "assign"i
+WAIT.2: /wait(?=\s*\()/i
+BEGIN.2: "begin"i
+SYS_IDENT.0: /\$[A-Za-z_]\w+/
+IDENT: /[A-Za-z_]\w*/
+
 design: module+
 
 module: "module" IDENT parameter_list? port_list? ";" decl_or_stmt* "endmodule" [";"]
 
 parameter_list: "#" "(" parameter_decl ("," parameter_decl)* ")"
 
-parameter_decl: "parameter"i IDENT "=" expr
-               | "localparam"i IDENT "=" expr
+parameter_decl: "parameter"i parameter_body
+               | "localparam"i parameter_body
+
+parameter_body: IDENT "=" expr -> parameter_body
+               | INTEGER IDENT "=" expr -> parameter_body
 
 param_instance: "#" "(" param_override ("," param_override)* ")"
 
 param_override: "." IDENT "(" expr ")"
 
-port_list: "(" port_decl ("," port_decl)* ")"
+port_list: "(" port ("," port)* ")"
 
-port_decl: PORT_DIR range? IDENT
+port: port_decl | IDENT -> port_name
 
-PORT_DIR: "input"i | "output"i | "inout"i
+port_decl: PORT_DIR port_type? signed_opt? range? IDENT
 
-decl_or_stmt: declaration
+port_type: WIRE | REG
+
+port_body_decl.10: PORT_DIR port_type? signed_opt? range? ident_list ";" -> port_decls_body
+
+decl_or_stmt: port_body_decl
+             | declaration
              | parameter_decl_stmt
              | continuous_assign
              | initial_block
@@ -31,19 +53,30 @@ decl_or_stmt: declaration
              | generate_block
              | module_instance
 
-declaration: REG range? ident_list ";" -> make_reg_decls
-          | WIRE range? ident_list ";" -> make_wire_decls
-          | INTEGER range? ident_list ";" -> make_integer_decls
+declaration: REG signed_opt? range? IDENT "=" expr ";" -> make_reg_decl_assign
+          | WIRE signed_opt? range? IDENT "=" expr ";" -> make_wire_decl_assign
+          | INTEGER signed_opt? range? IDENT "=" expr ";" -> make_integer_decl_assign
+          | REG signed_opt? range? ident_decl_list ";" -> make_reg_decls
+          | WIRE signed_opt? range? ident_decl_list ";" -> make_wire_decls
+          | INTEGER signed_opt? range? ident_decl_list ";" -> make_integer_decls
+          | REAL ident_decl_list ";" -> make_real_decls
           | genvar_decl
+
+signed_opt: SIGNED
 
 ident_list: IDENT ("," IDENT)*
 
-parameter_decl_stmt: "parameter"i IDENT "=" expr ";"
-                    | "localparam"i IDENT "=" expr ";"
+ident_decl_list: ident_decl ("," ident_decl)*
 
-REG: "reg"i
-WIRE: "wire"i
-INTEGER: "integer"i
+ident_decl: IDENT unpacked_dimension?
+
+unpacked_dimension: "[" expr ":" expr "]"
+
+parameter_decl_stmt: "parameter"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
+                    | "localparam"i parameter_assign ("," parameter_assign)* ";" -> parameter_decl_stmt_multi
+
+parameter_assign: IDENT "=" expr -> parameter_assign
+                 | INTEGER IDENT "=" expr -> parameter_assign
 
 genvar_decl: "genvar"i IDENT ";"
 
@@ -67,8 +100,8 @@ generate_for: "for" "(" genvar_init ";" expr ";" for_step ")" generate_body -> g
 
 genvar_init: "genvar"i? IDENT "=" expr
 
-generate_body: "begin" ":" IDENT generate_item+ "end" -> gen_begin_labeled
-              | "begin" generate_item+ "end" -> gen_begin
+generate_body: BEGIN ":" IDENT generate_item+ "end" -> gen_begin_labeled
+              | BEGIN generate_item+ "end" -> gen_begin
               | generate_item -> gen_single
 
 generate_if: "if" "(" expr ")" generate_body ["else" generate_body] -> gen_if
@@ -84,30 +117,39 @@ function_item: "input" range? IDENT ";" -> func_input
                | declaration
                | blocking_assign
                | if_stmt
+               | case_stmt
                | begin_end_block
 
-continuous_assign: "assign" lvalue "=" expr ";"
+continuous_assign: ASSIGN lvalue "=" expr ";"
 
-module_instance: IDENT param_instance? IDENT "(" port_connections? ")" ";"
+module_instance.1: IDENT param_instance? IDENT "(" port_connections? ")" ";"
 
 port_connections: port_connection ("," port_connection)*
 
-port_connection: "." IDENT "(" expr ")"
+port_connection: "." IDENT "(" expr ")" -> named_port_connection
+                 | expr -> positional_port_connection
 
-initial_block: "initial" stmt
+initial_block: INITIAL stmt
 
-always_block: "always" sensitivity stmt
+always_block: ALWAYS sensitivity stmt
+             | ALWAYS delay_control -> always_delay
+             | ALWAYS begin_end_block -> always_plain
 
-sensitivity: "@" "(" sensitivity_item ("," sensitivity_item)* ")"
+sensitivity: "@" "(" sensitivity_list ")"
             | "@" "(" "*" ")"
             | "@" sensitivity_item
             | "@" "*"
+
+sensitivity_list: sensitivity_item (sensitivity_sep sensitivity_item)*
+
+sensitivity_sep: "," | "or"i
 
 sensitivity_item: "posedge"i IDENT -> posedge
                   | "negedge"i IDENT -> negedge
                   | IDENT -> level
 
-?stmt: begin_end_block
+?stmt: ";" -> empty_stmt
+     | begin_end_block
      | system_task
      | blocking_assign
      | nonblocking_assign
@@ -118,12 +160,15 @@ sensitivity_item: "posedge"i IDENT -> posedge
      | for_stmt
      | if_stmt
      | case_stmt
+     | wait_stmt
      | task_enable
      | fork_stmt
      | event_control
 
-begin_end_block: "begin" ":" IDENT stmt_list "end" -> begin_labeled
-                 | "begin" stmt_list "end" -> begin_plain
+wait_stmt: WAIT "(" expr ")" ";" -> wait_stmt
+
+begin_end_block: BEGIN ":" IDENT stmt_list "end" -> begin_labeled
+                 | BEGIN stmt_list "end" -> begin_plain
 
 stmt_list: stmt+
 
@@ -133,10 +178,11 @@ system_task: "$display"i "(" display_args? ")" ";" -> display
             | "$dumpfile"i "(" STRING ")" ";" -> dumpfile
             | "$dumpvars"i ["(" display_args? ")"] ";" -> dumpvars
             | "$monitor"i "(" display_args? ")" ";" -> monitor
+            | SYS_IDENT "(" display_args? ")" ";" -> generic_system_task
 
 display_args: display_arg ("," display_arg)*
 
-display_arg: STRING | expr
+display_arg: expr
 
 blocking_assign: lvalue "=" expr ";"
 nonblocking_assign: lvalue "<=" expr ";"
@@ -144,7 +190,7 @@ nonblocking_assign: lvalue "<=" expr ";"
 select: "[" expr ":" expr "]" -> part_sel
        | "[" expr "]" -> bit_sel
 
-delay_control: "#" NUMBER stmt
+delay_control: "#" expr stmt
 
 forever_stmt: "forever" stmt
 
@@ -160,8 +206,11 @@ for_stmt: "for" "(" for_init? ";" expr? ";" for_step? ")" stmt
 if_stmt: "if" "(" expr ")" stmt ["else" stmt]
 
 fork_stmt: "fork" begin_end_block "join" -> fork_join
+          | "fork" stmt_list "join" -> fork_join
           | "fork" begin_end_block "join_any" -> fork_join_any
+          | "fork" stmt_list "join_any" -> fork_join_any
           | "fork" begin_end_block "join_none" -> fork_join_none
+          | "fork" stmt_list "join_none" -> fork_join_none
 
 task_enable: IDENT "(" expr ("," expr)* ")" ";" -> task_call
           | IDENT "(" ")" ";" -> task_call_empty
@@ -213,6 +262,7 @@ rel_expr: rel_expr OP_LT shift_expr
 
 ?shift_expr: shift_expr OP_SHL add_expr
             | shift_expr OP_SHR add_expr
+            | shift_expr OP_ASHR add_expr
             | add_expr
 
 ?add_expr: add_expr ADD_OP mul_expr
@@ -230,31 +280,45 @@ rel_expr: rel_expr OP_LT shift_expr
              | "&" unary_expr -> uand
              | "|" unary_expr -> uor
              | "^" unary_expr -> uxor
+             | "$signed"i "(" expr ")" -> signed_cast
+             | "$unsigned"i "(" expr ")" -> unsigned_cast
              | primary
 
-?primary: NUMBER
+?primary: REAL_NUMBER
+        | NUMBER
         | sized_number
         | func_call
+        | sys_func_call
         | signal_ref -> signal_expr
+        | hier_ident
+        | SYS_IDENT -> sys_ident
+        | STRING -> string_expr
         | concat_expr
         | "(" expr ")"
 
 func_call: IDENT "(" expr ("," expr)* ")"
 
-concat_expr: "{" expr ("," expr)* "}"
+sys_func_call: SYS_IDENT "(" expr ("," expr)* ")" -> func_call
 
-signal_ref: IDENT select?
+concat_expr: "{" brace_contents "}"
+
+brace_contents: expr "," expr ("," expr)* -> concat_list
+              | expr "{" brace_contents "}" -> replication
+              | expr -> concat_single
+
+signal_ref: IDENT select*
+
+hier_ident: IDENT ("." IDENT)+
 
 lvalue: signal_ref -> to_lvalue
 
 sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 
+REAL_NUMBER.3: /\d+\.\d+([eE][+-]?\d+)?|\d*\.\d+([eE][+-]?\d+)?/
 NUMBER: /\d+/
 STRING: /"[^"\n]*"/
-IDENT: /[A-Za-z_]\w*/
-
-
 OP_SHL: "<<"
+OP_ASHR: ">>>"
 OP_SHR: ">>"
 OP_LE: "<="
 OP_GE: ">="

@@ -37,6 +37,32 @@ def test_function_call() -> None:
     assert sim._nets["y"].value == 4
 
 
+def test_dumpfile_relative_path_uses_api_vcd_directory(tmp_path: Path) -> None:
+    """TB $dumpfile(\"wave.vcd\") must not escape the run directory set by the API."""
+    from hdl_sim.engine.elaborator import elaborate
+    from hdl_sim.parser.parser import parse_design
+
+    api_vcd = tmp_path / "run" / "wave.vcd"
+    api_vcd.parent.mkdir(parents=True)
+    design = parse_design(
+        """
+        module m;
+          reg clk;
+          initial begin
+            $dumpfile("wave.vcd");
+            $dumpvars(0, m);
+            clk = 1;
+          end
+        endmodule
+        """
+    )
+    elaborated = elaborate(design, top="m")
+    result = Simulator(elaborated, vcd_path=api_vcd).run(until=0, max_events=20)
+    assert result.vcd_path == api_vcd
+    assert api_vcd.is_file()
+    assert api_vcd.stat().st_size > 0
+
+
 def test_dumpfile_dumpvars(tmp_path: Path) -> None:
     vcd_path = tmp_path / "wave.vcd"
     simulate_source(

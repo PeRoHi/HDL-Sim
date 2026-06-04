@@ -3,6 +3,13 @@
  */
 
 import { createWorkspaceTree, scanModulesInWorkspace } from "./workspace-tree.js";
+import { createWaveSignalPanel } from "./wave-signal-panel.js";
+import {
+  mergeWavePrefsWithSignals,
+  loadWavePrefsForKey,
+  saveWavePrefsForKey,
+  wavePrefsFromProjectPayload,
+} from "./wave-prefs.js";
 
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
 \`timescale 1ns/1ps
@@ -50,7 +57,20 @@ const fileEditors = new Map();
 const mdiWindows = new Map();
 let mdiZ = 10;
 let lastWaveform = null;
+let lastWaveformFull = null;
+let lastTopModule = "";
+/** @type {Set<string> | null} */
+let lastSignalNames = null;
+/** @type {string[]} */
+let waveformSelection = [];
+/** @type {string[]} 波形ビューでの表示順 */
+let waveformDisplayOrder = [];
+/** @type {import("./wave-prefs.js").WavePrefs | null} ワークスペース読み込み時に復元する波形設定 */
+let workspaceWavePrefs = null;
+let wavePrefsPersistTimer = null;
 let selectedSignal = null;
+/** @type {ReturnType<typeof createWaveSignalPanel> | null} */
+let waveSignalPanel = null;
 let waveformVisible = false;
 let waveZoom = 1;
 let abortController = null;
@@ -62,7 +82,7 @@ let splitV = null;
 
 const SPLIT_SIZES = {
   h: { explorer: 18, editor: 82, wave: 0 },
-  v: { main: 72, console: 28 },
+  v: { main: 65, console: 35 },
 };
 
 let currentProject = "";
@@ -95,9 +115,88 @@ function setStatus(text, kind = "") {
   bar.className = "status-pill" + (kind ? ` ${kind}` : "");
 }
 
+let lastConsoleErrorText = "";
+let consoleBuffer = "";
+
+function isConsoleElement(el) {
+  return el?.classList?.contains("console-output") || el?.id === "console-output";
+}
+
+function getConsoleElements() {
+  return [$("console-output"), $("mdi-console-output")].filter(Boolean);
+}
+
+function getConsolePlainText() {
+  const el = $("console-output");
+  if (!el) return consoleBuffer;
+  if (el.tagName === "TEXTAREA") return el.value;
+  return consoleBuffer;
+}
+
+function syncConsoleViews() {
+  getConsoleElements().forEach((el) => {
+    if (el.tagName === "TEXTAREA") {
+      el.value = consoleBuffer;
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+}
+
+function focusConsole(selectAll = false) {
+  const el = $("console-output");
+  if (!el || el.tagName !== "TEXTAREA") return;
+  el.focus();
+  if (selectAll) {
+    el.select();
+  }
+}
+
+function initConsoleKeyboard() {
+  getConsoleElements().forEach((el) => {
+    if (el.tagName !== "TEXTAREA") return;
+    el.addEventListener("focus", () => {
+      el.scrollTop = el.scrollHeight;
+    });
+  });
+  $("pane-console")?.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".pane-header-bar button")) return;
+    focusConsole(false);
+  });
+}
+
+async function copyConsoleText({ errorsOnly = false } = {}) {
+  const text = errorsOnly
+    ? lastConsoleErrorText || getConsolePlainText()
+    : getConsolePlainText();
+  if (!text) {
+    appendConsole("[console] コピーする内容がありません", "warn");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    appendConsole(errorsOnly ? "[console] エラー内容をクリップボードにコピーしました" : "[console] 出力をコピーしました", "info");
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+      appendConsole(errorsOnly ? "[console] エラー内容をコピーしました" : "[console] 出力をコピーしました", "info");
+    } catch (err) {
+      appendConsole(`[console] コピーに失敗: ${err}`, "err");
+    }
+    area.remove();
+  }
+}
+
 function appendConsole(text, kind = "") {
-  const targets = [$("console-output"), $("mdi-console-output")].filter(Boolean);
   if (text == null || text === "") return;
+  if (kind === "err") {
+    lastConsoleErrorText = String(text);
+  }
 
   const prefix =
     kind === "err" ? "[ERROR] " :
@@ -108,32 +207,19 @@ function appendConsole(text, kind = "") {
   const lines = String(text).replace(/\r\n/g, "\n").split("\n");
   lines.forEach((line, index) => {
     if (line === "" && index === lines.length - 1) return;
-
-    let lineKind = kind;
-    if (!lineKind) {
-      if (/^(Traceback|Error|Exception|SyntaxError|\.{3})/i.test(line) || /\bError:/i.test(line)) {
-        lineKind = "err";
-      } else if (/^\s+File "/.test(line) || /^\s+\^/.test(line)) {
-        lineKind = "trace";
-      } else if (/^PASS|^OK|\bPASS\b/i.test(line)) {
-        lineKind = "ok";
-      }
-    } else if (lineKind === "err" && /^\s+File "/.test(line)) {
-      lineKind = "trace";
-    }
-
-    const row = document.createElement("div");
-    row.className = "console-line" + (lineKind ? ` line-${lineKind}` : "");
-    row.textContent = (index === 0 ? prefix : "") + line;
-    targets.forEach((el) => el.appendChild(row.cloneNode(true)));
+    consoleBuffer += (index === 0 ? prefix : "") + line + "\n";
   });
-  targets.forEach((el) => { el.scrollTop = el.scrollHeight; });
+  syncConsoleViews();
+  if (kind === "err") {
+    ensureConsoleVisible();
+    focusConsole(false);
+  }
 }
 
 function clearConsole() {
-  $("console-output").innerHTML = "";
-  const mdiOut = $("mdi-console-output");
-  if (mdiOut) mdiOut.innerHTML = "";
+  consoleBuffer = "";
+  lastConsoleErrorText = "";
+  syncConsoleViews();
 }
 
 function saveActiveEditor() {
@@ -146,12 +232,48 @@ function getSelectedTop() {
   return $("select-top")?.value.trim() || "";
 }
 
+function guessTopModuleName(modules) {
+  if (!modules?.length) return "";
+  const pick =
+    modules.find((m) => m.name.endsWith("_tp")) ||
+    modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_")) ||
+    modules.find((m) => m.name === "tb") ||
+    modules.find((m) => m.name === "stimulus") ||
+    modules[0];
+  return pick?.name || "";
+}
+
+/** Top sent to API: drop stale names (e.g. tb) not in workspace modules. */
+function effectiveTopForPayload() {
+  const selected = getSelectedTop();
+  const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
+  const has = (name) => modules.some((m) => m.name === name);
+  if (selected && has(selected)) return selected;
+  const guessed = guessTopModuleName(modules);
+  return guessed || null;
+}
+
+function syncTopPickerToModules() {
+  const sel = $("select-top");
+  if (!sel) return;
+  const selected = getSelectedTop();
+  const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
+  const has = (name) => modules.some((m) => m.name === name);
+  if (selected && !has(selected)) {
+    const guessed = guessTopModuleName(modules);
+    if (guessed) sel.value = guessed;
+    else sel.value = "";
+  }
+}
+
 function getPayload() {
   saveActiveEditor();
-  const top = getSelectedTop();
+  const top = effectiveTopForPayload();
   const files = [];
   for (const [path, entry] of fileStore) {
-    files.push({ path, content: entry.content });
+    const item = { path, content: entry.content };
+    if (entry.includeOnly) item.include_only = true;
+    files.push(item);
   }
   files.sort((a, b) => a.path.localeCompare(b.path));
   return {
@@ -168,7 +290,7 @@ function refreshTopModulePicker(suggestedTop) {
   if (!sel) return;
   const current = sel.value;
   const modules = scanModulesInWorkspace(fileStore, saveActiveEditor);
-  sel.innerHTML = '<option value="">(auto)</option>';
+  sel.innerHTML = '<option value="">(auto — *_tp 優先)</option>';
   modules.forEach(({ name, path }) => {
     const opt = document.createElement("option");
     opt.value = name;
@@ -178,15 +300,15 @@ function refreshTopModulePicker(suggestedTop) {
   const has = (name) => modules.some((m) => m.name === name);
   if (current && has(current)) sel.value = current;
   else if (suggestedTop && has(suggestedTop)) sel.value = suggestedTop;
-  else if (has("tb")) sel.value = "tb";
   else {
-    const tb = modules.find((m) => m.name.endsWith("_tb") || m.name.startsWith("tb_"));
-    if (tb) sel.value = tb.name;
+    const guessed = guessTopModuleName(modules);
+    if (guessed) sel.value = guessed;
   }
 }
 
 function scheduleTopModuleRefresh() {
   refreshTopModulePicker();
+  syncTopPickerToModules();
 }
 
 function syncDeleteButton() {
@@ -206,11 +328,109 @@ function bringMdiToFront(win) {
   win.classList.add("active");
 }
 
-function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "" } = {}) {
+function showMdiWindow(win) {
+  if (!win) return;
+  win.hidden = false;
+  win.style.removeProperty("display");
+  bringMdiToFront(win);
+}
+
+function hideMdiWindow(win) {
+  if (!win) return;
+  win.hidden = true;
+}
+
+function minimizeMdiWindow(win) {
+  if (!win) return;
+  win.classList.add("mdi-minimized");
+  win.dataset.mdiMaximized = "0";
+}
+
+function restoreMdiWindow(win) {
+  if (!win) return;
+  win.classList.remove("mdi-minimized");
+  if (win.dataset.mdiMaximized === "1") {
+    delete win.dataset.mdiMaximized;
+    win.style.left = win.dataset.mdiPrevLeft || win.style.left;
+    win.style.top = win.dataset.mdiPrevTop || win.style.top;
+    win.style.width = win.dataset.mdiPrevWidth || win.style.width;
+    win.style.height = win.dataset.mdiPrevHeight || win.style.height;
+  }
+  showMdiWindow(win);
+}
+
+function toggleMaximizeMdiWindow(win) {
+  if (!win) return;
+  const canvas = mdiCanvas();
+  if (win.dataset.mdiMaximized === "1") {
+    restoreMdiWindow(win);
+    return;
+  }
+  win.dataset.mdiPrevLeft = win.style.left;
+  win.dataset.mdiPrevTop = win.style.top;
+  win.dataset.mdiPrevWidth = win.style.width;
+  win.dataset.mdiPrevHeight = win.style.height;
+  win.classList.remove("mdi-minimized");
+  win.style.left = "8px";
+  win.style.top = "8px";
+  win.style.width = `${Math.max(260, canvas.clientWidth - 16)}px`;
+  win.style.height = `${Math.max(160, canvas.clientHeight - 16)}px`;
+  win.dataset.mdiMaximized = "1";
+  showMdiWindow(win);
+  layoutAllEditors();
+  if (win.dataset.mdiId === "waveform" && lastWaveform) drawWave(lastWaveform);
+}
+
+function closeMdiWindow(id, win) {
+  if (id === "waveform") {
+    toggleWaveform(false);
+    return;
+  }
+  hideMdiWindow(win);
+}
+
+function attachMdiTitlebar(win, id, titlebar) {
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  titlebar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".mdi-controls")) return;
+    dragging = true;
+    bringMdiToFront(win);
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = win.offsetLeft;
+    startTop = win.offsetTop;
+    titlebar.setPointerCapture(e.pointerId);
+  });
+  titlebar.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
+    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
+  });
+  titlebar.addEventListener("pointerup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      titlebar.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  });
+  titlebar.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".mdi-controls")) return;
+    toggleMaximizeMdiWindow(win);
+  });
+}
+
+function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "", show = true } = {}) {
   const existing = mdiWindows.get(id);
   if (existing) {
-    existing.hidden = false;
-    bringMdiToFront(existing);
+    if (show) showMdiWindow(existing);
     return existing;
   }
 
@@ -231,20 +451,56 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
 
   const controls = document.createElement("div");
   controls.className = "mdi-controls";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "mdi-btn close";
-  close.title = "閉じる";
-  close.textContent = "×";
-  close.addEventListener("click", (e) => {
+
+  const btnMin = document.createElement("button");
+  btnMin.type = "button";
+  btnMin.className = "mdi-btn min";
+  btnMin.title = "最小化";
+  btnMin.setAttribute("aria-label", "最小化");
+  btnMin.textContent = "─";
+
+  const btnRestore = document.createElement("button");
+  btnRestore.type = "button";
+  btnRestore.className = "mdi-btn restore";
+  btnRestore.title = "ウィンドウを表示 / 最大化";
+  btnRestore.setAttribute("aria-label", "ウィンドウ表示");
+  btnRestore.textContent = "□";
+
+  const btnClose = document.createElement("button");
+  btnClose.type = "button";
+  btnClose.className = "mdi-btn close";
+  btnClose.title = "ウィンドウを閉じる（ファイルはワークスペースに残す）";
+  btnClose.setAttribute("aria-label", "閉じる");
+  btnClose.textContent = "×";
+
+  const stopCtl = (e) => {
     e.stopPropagation();
-    win.hidden = true;
-    if (id === "waveform") {
-      waveformVisible = false;
-      $("btn-wave-toggle")?.classList.remove("active");
-    }
+    e.preventDefault();
+  };
+
+  btnMin.addEventListener("pointerdown", stopCtl);
+  btnMin.addEventListener("click", (e) => {
+    stopCtl(e);
+    minimizeMdiWindow(win);
   });
-  controls.appendChild(close);
+
+  btnRestore.addEventListener("pointerdown", stopCtl);
+  btnRestore.addEventListener("click", (e) => {
+    stopCtl(e);
+    if (win.hidden || win.classList.contains("mdi-minimized")) {
+      restoreMdiWindow(win);
+      return;
+    }
+    toggleMaximizeMdiWindow(win);
+  });
+
+  btnClose.addEventListener("pointerdown", stopCtl);
+  btnClose.addEventListener("click", (e) => {
+    stopCtl(e);
+    closeMdiWindow(id, win);
+  });
+
+  controls.append(btnMin, btnRestore, btnClose);
   titlebar.appendChild(controls);
 
   const body = document.createElement("div");
@@ -254,34 +510,10 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
   win.appendChild(body);
   mdiCanvas().appendChild(win);
   mdiWindows.set(id, win);
-  bringMdiToFront(win);
-
-  let dragging = false;
-  let startX = 0;
-  let startY = 0;
-  let startLeft = 0;
-  let startTop = 0;
-  titlebar.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    dragging = true;
-    bringMdiToFront(win);
-    startX = e.clientX;
-    startY = e.clientY;
-    startLeft = win.offsetLeft;
-    startTop = win.offsetTop;
-    titlebar.setPointerCapture(e.pointerId);
-  });
-  titlebar.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
-    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
-  });
-  titlebar.addEventListener("pointerup", (e) => {
-    dragging = false;
-    titlebar.releasePointerCapture(e.pointerId);
-  });
+  attachMdiTitlebar(win, id, titlebar);
   win.addEventListener("pointerdown", () => bringMdiToFront(win));
 
+  if (show) showMdiWindow(win);
   return win;
 }
 
@@ -333,7 +565,90 @@ function tileFileWindows() {
   }
 }
 
-function loadWorkspaceFiles(fileEntries, top) {
+function workspaceFilePaths() {
+  return [...fileStore.keys()].sort();
+}
+
+function sameFilePathSet(a, b) {
+  if (!a?.length && !b?.length) return true;
+  if (!a?.length || !b?.length || a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((p, i) => p === right[i]);
+}
+
+function getWavePrefsKey() {
+  if (currentProject) return `project:${currentProject}`;
+  const spj = $("select-spj")?.value;
+  if (spj) return `spj:${spj}`;
+  const paths = workspaceFilePaths();
+  if (!paths.length) return "";
+  return `ws:${paths.join("\0")}`;
+}
+
+function getCurrentWavePrefs() {
+  return {
+    selection: waveformSelection.slice(),
+    order: waveformDisplayOrder.slice(),
+    filePaths: workspaceFilePaths(),
+  };
+}
+
+function shouldReuseWavePrefs(saved) {
+  if (!saved) return false;
+  if (!saved.filePaths?.length) return true;
+  return sameFilePathSet(saved.filePaths, workspaceFilePaths());
+}
+
+function stashWorkspaceWavePrefs(waveFromPayload) {
+  const key = getWavePrefsKey();
+  const fromLs = key ? loadWavePrefsForKey(key) : null;
+  const fromPayload = wavePrefsFromProjectPayload(waveFromPayload);
+  let prefs = fromLs;
+  if (fromPayload && shouldReuseWavePrefs(fromPayload)) {
+    prefs = fromLs || fromPayload;
+  } else if (fromLs && shouldReuseWavePrefs(fromLs)) {
+    prefs = fromLs;
+  } else if (fromPayload) {
+    prefs = fromPayload;
+  }
+  workspaceWavePrefs = prefs;
+}
+
+function applyWavePrefsForSignals(available) {
+  const key = getWavePrefsKey();
+  let saved = workspaceWavePrefs;
+  if (!saved && key) saved = loadWavePrefsForKey(key);
+  if (saved && !shouldReuseWavePrefs(saved)) {
+    saved = { selection: saved.selection, order: saved.order };
+  }
+  const merged = mergeWavePrefsWithSignals(available, saved);
+  waveformSelection = merged.selection;
+  waveformDisplayOrder = merged.order;
+  workspaceWavePrefs = {
+    selection: merged.selection.slice(),
+    order: merged.order.slice(),
+    filePaths: workspaceFilePaths(),
+  };
+}
+
+function persistWavePrefsNow() {
+  const key = getWavePrefsKey();
+  if (!key) return;
+  const prefs = getCurrentWavePrefs();
+  workspaceWavePrefs = prefs;
+  saveWavePrefsForKey(key, prefs);
+}
+
+function schedulePersistWavePrefs() {
+  if (wavePrefsPersistTimer) clearTimeout(wavePrefsPersistTimer);
+  wavePrefsPersistTimer = setTimeout(() => {
+    wavePrefsPersistTimer = null;
+    persistWavePrefsNow();
+  }, 250);
+}
+
+function loadWorkspaceFiles(fileEntries, top, wavePrefs) {
   if (!fileEntries?.length) {
     appendConsole("[load] 読み込むファイルがありません", "warn");
     setStatus("No files loaded", "warn");
@@ -352,18 +667,16 @@ function loadWorkspaceFiles(fileEntries, top) {
   }
   fileStore.clear();
 
-  fileEntries.forEach(({ path, content }) => {
-    fileStore.set(path, { content, model: null });
+  fileEntries.forEach(({ path, content, include_only }) => {
+    fileStore.set(path, { content, model: null, includeOnly: Boolean(include_only) });
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
-  if (top != null && top !== "") {
-    const sel = $("select-top");
-    if (sel) sel.value = top;
-  }
+  stashWorkspaceWavePrefs(wavePrefs);
   renderEditorTabs();
   workspaceTree?.render();
   refreshTopModulePicker(top || undefined);
+  syncTopPickerToModules();
   syncDeleteButton();
   if (window.monaco) tileFileWindows();
 }
@@ -404,7 +717,7 @@ async function openProject(name) {
     }
     currentProject = data.name;
     $("select-example").value = "";
-    loadWorkspaceFiles(data.files, data.top || "");
+    loadWorkspaceFiles(data.files, data.top || "", data.wave);
     $("select-project").value = data.name;
     appendConsole(`[project] opened: ${data.name} (${data.files.length} files)`, "info");
     setStatus(`Project: ${data.name}`, "ok");
@@ -453,9 +766,15 @@ async function saveCurrentProject(showPrompt = true) {
 
   try {
     const payload = getPayload();
+    persistWavePrefsNow();
     const data = await api(
       `/api/projects/${encodeURIComponent(name)}`,
-      { files: payload.files, top: payload.top, label: name },
+      {
+        files: payload.files,
+        top: payload.top,
+        label: name,
+        wave: getCurrentWavePrefs(),
+      },
       undefined,
       "PUT"
     );
@@ -477,6 +796,7 @@ function currentProjectFileName() {
 
 function buildSpjPayload() {
   const payload = getPayload();
+  persistWavePrefsNow();
   return {
     format: "hdl-sim-project",
     version: 1,
@@ -485,6 +805,7 @@ function buildSpjPayload() {
     until: payload.until,
     max_events: payload.max_events,
     files: payload.files,
+    wave: getCurrentWavePrefs(),
   };
 }
 
@@ -497,7 +818,7 @@ function applySpjData(data, filename) {
   $("select-example").value = "";
   if (data.until != null) $("input-until").value = data.until;
   if (data.max_events != null) $("input-max-events").value = data.max_events;
-  loadWorkspaceFiles(data.files, data.top || "");
+  loadWorkspaceFiles(data.files, data.top || "", data.wave);
 }
 
 async function loadSpjFileList(selectName) {
@@ -738,9 +1059,15 @@ async function debugRestart() {
 
 function menuHelpGuide() {
   appendConsole(
-    "[help] Run(F5) でシミュレーション / Save .spj で ./spj/ に保存 / 中クリック長押しでワークスペース移動",
-    "info"
+    [
+      "[help] Top: (auto) または *_tp / *_tb モジュールを選択（古い tb は自動補正）",
+      "[help] Elab → Run(F5) → Hierarchy/Signals クリックで波形 / Wave の All で全信号",
+      "[help] Until: 長い TB では 15000 以上推奨 / Save .spj → ./spj/",
+      "[help] 詳細: リポジトリ docs/LOCAL_DEBUG_HANDOFF.md",
+    ].join("\n"),
+    "info",
   );
+  switchExplorerTab("hierarchy");
 }
 
 async function menuHelpAbout() {
@@ -748,7 +1075,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.1\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.21\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -824,7 +1151,7 @@ function initSplits() {
   splitV = Split(["#split-h-main", "#pane-console"], {
     direction: "vertical",
     sizes: [SPLIT_SIZES.v.main, SPLIT_SIZES.v.console],
-    minSize: [160, 60],
+    minSize: [160, 120],
     gutterSize: 4,
     snapOffset: 0,
     onDragEnd: (sizes) => {
@@ -856,12 +1183,12 @@ function toggleWaveform(show) {
 
   if (waveformVisible) {
     createWaveformWindow();
-    btn.classList.add("active");
+    btn?.classList.add("active");
     if (lastWaveform) drawWave(lastWaveform);
   } else {
     const win = mdiWindows.get("waveform");
-    if (win) win.hidden = true;
-    btn.classList.remove("active");
+    if (win) hideMdiWindow(win);
+    btn?.classList.remove("active");
   }
   layoutAllEditors();
 }
@@ -878,6 +1205,9 @@ function switchExplorerTab(name) {
   $("view-files").hidden = name !== "files";
   $("view-hierarchy").classList.toggle("active", name === "hierarchy");
   $("view-hierarchy").hidden = name !== "hierarchy";
+  $("view-wave")?.classList.toggle("active", name === "wave");
+  if ($("view-wave")) $("view-wave").hidden = name !== "wave";
+  if (name === "wave") waveSignalPanel?.render();
 }
 
 /* ── File tree & editor tabs ── */
@@ -1060,7 +1390,7 @@ function openFile(path, options = {}) {
     height: 390,
     bodyClass: "mdi-editor",
   });
-  win.hidden = false;
+  showMdiWindow(win);
 
   let view = fileEditors.get(path);
   if (!view) {
@@ -1205,11 +1535,118 @@ function closeFile(path) {
 
 /* ── Hierarchy tree ── */
 
+function resolveWaveformSignalNames(path) {
+  if (!path) return [];
+  const names = lastWaveformFull?.signals?.map((s) => s.name) || [...(lastSignalNames || [])];
+  if (!names.length) return [];
+  const candidates = [path];
+  if (lastTopModule && !path.startsWith(`${lastTopModule}.`)) {
+    candidates.push(`${lastTopModule}.${path}`);
+  }
+  for (const candidate of candidates) {
+    if (names.includes(candidate)) return [candidate];
+    const suffix = `.${candidate}`;
+    const matches = names.filter((n) => n === candidate || n.endsWith(suffix));
+    if (matches.length) return matches;
+  }
+  return [];
+}
+
+function allWaveformSignalNames() {
+  return lastWaveformFull?.signals?.map((s) => s.name) || [];
+}
+
+function buildDisplayWaveform() {
+  if (!lastWaveformFull) return null;
+  const byName = new Map(lastWaveformFull.signals.map((s) => [s.name, s]));
+  let order = waveformDisplayOrder.length
+    ? waveformDisplayOrder.filter((n) => byName.has(n))
+    : lastWaveformFull.signals.map((s) => s.name);
+  for (const s of lastWaveformFull.signals) {
+    if (!order.includes(s.name)) order.push(s.name);
+  }
+  const pick = waveformSelection.length ? new Set(waveformSelection) : null;
+  if (pick) order = order.filter((n) => pick.has(n));
+  let signals = order.map((n) => byName.get(n)).filter(Boolean);
+  if (!signals.length) {
+    signals = pick
+      ? [...pick].map((n) => byName.get(n)).filter(Boolean)
+      : lastWaveformFull.signals.slice(0, 12);
+  }
+  return {
+    timescale: lastWaveformFull.timescale,
+    signals,
+  };
+}
+
+function updateWaveSignalCountLabel() {
+  const el = $("wave-signal-count");
+  if (!el) return;
+  const total = lastWaveformFull?.signals?.length || 0;
+  const shown = lastWaveform?.signals?.length || 0;
+  if (!total) {
+    el.textContent = "Run 後に波形表示";
+    return;
+  }
+  el.textContent =
+    waveformSelection.length > 0
+      ? `${shown}/${total} 信号`
+      : `${total} 信号（Hierarchy または All）`;
+}
+
+function refreshWaveformView() {
+  lastWaveform = buildDisplayWaveform();
+  updateWaveSignalCountLabel();
+  if (lastWaveform) drawWave(lastWaveform);
+  syncHierarchyWaveMarks();
+  waveSignalPanel?.render();
+}
+
+function toggleWaveformSignal(path) {
+  const resolved = resolveWaveformSignalNames(path);
+  if (!resolved.length) {
+    const hint = lastSignalNames?.size
+      ? "Wave タブで選択するか、Hierarchy の信号をクリックしてください。"
+      : "先に Run してください。";
+    appendConsole(`[wave] 波形に "${path}" がありません。${hint}`, "warn");
+    return;
+  }
+  const set = new Set(waveformSelection);
+  const removing = resolved.every((n) => set.has(n));
+  for (const name of resolved) {
+    if (removing) set.delete(name);
+    else set.add(name);
+  }
+  waveformSelection = [...set];
+  const order = waveformDisplayOrder.length ? [...waveformDisplayOrder] : allWaveformSignalNames();
+  for (const name of resolved) {
+    if (!order.includes(name)) order.push(name);
+  }
+  waveformDisplayOrder = order;
+  if (!waveformVisible) toggleWaveform(true);
+  switchExplorerTab("wave");
+  refreshWaveformView();
+  schedulePersistWavePrefs();
+}
+
+function syncHierarchyWaveMarks() {
+  const active = new Set(waveformSelection);
+  document.querySelectorAll("#hierarchy-tree .tree-node[data-signal-path]").forEach((row) => {
+    const path = row.dataset.signalPath;
+    const resolved = resolveWaveformSignalNames(path);
+    const onWave = resolved.some((n) => active.has(n));
+    row.classList.toggle("on-wave", onWave);
+    row.classList.toggle("no-wave-data", Boolean(lastSignalNames?.size && !resolved.length));
+  });
+}
+
 function renderTreeNode(node, parentEl, depth = 0) {
   const hasChildren = node.children && node.children.length > 0;
+  const signalPath = node.signalPath || null;
   const row = document.createElement("div");
-  row.className = "tree-node" + (node.name === selectedSignal ? " selected" : "");
+  row.className = "tree-node" + (signalPath && signalPath === selectedSignal ? " selected" : "");
   row.style.paddingLeft = `${depth * 4 + 4}px`;
+  if (signalPath) row.dataset.signalPath = signalPath;
 
   const twist = document.createElement("span");
   twist.className = "twist" + (hasChildren ? "" : " empty");
@@ -1233,12 +1670,26 @@ function renderTreeNode(node, parentEl, depth = 0) {
     row.appendChild(badge);
   }
 
+  if (signalPath) {
+    const waveMark = document.createElement("span");
+    waveMark.className = "wave-mark";
+    waveMark.title = "クリックで Wave タブに追加/削除";
+    waveMark.textContent = "〜";
+    row.appendChild(waveMark);
+  }
+
   row.addEventListener("click", (e) => {
     e.stopPropagation();
+    if (signalPath) {
+      selectedSignal = signalPath;
+      document.querySelectorAll("#hierarchy-tree .tree-node").forEach((n) => n.classList.remove("selected"));
+      row.classList.add("selected");
+      toggleWaveformSignal(signalPath);
+      return;
+    }
     selectedSignal = node.name;
     document.querySelectorAll("#hierarchy-tree .tree-node").forEach((n) => n.classList.remove("selected"));
     row.classList.add("selected");
-    highlightSignal(node.name);
   });
 
   parentEl.appendChild(row);
@@ -1264,12 +1715,40 @@ function renderHierarchy(tree) {
     root.innerHTML = '<div class="empty-hint">Run または Elab で階層を表示</div>';
     return;
   }
+  const hint = document.createElement("div");
+  hint.className = "empty-hint hierarchy-hint";
+  const waveHint = lastSignalNames?.size
+    ? `Run 済み — クリックで Wave に追加（詳細は Wave タブ）`
+    : "信号クリックで Wave タブへ（Run 後）";
+  hint.textContent = waveHint;
+  root.appendChild(hint);
   renderTreeNode(tree, root);
+  syncHierarchyWaveMarks();
+}
+
+function applySuggestedUntil(value) {
+  const input = $("input-until");
+  if (!input || value == null) return;
+  const current = Number(input.value);
+  if (!current || current <= 50) input.value = String(value);
+}
+
+function updateSignalCountBadge(count) {
+  const badge = $("signal-count-badge");
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = `(${count})`;
+    badge.title = "Run/Elab 後の elaborated 信号数";
+  } else {
+    badge.textContent = "";
+    badge.title = "";
+  }
 }
 
 function renderSignalList(signals) {
   const list = $("signal-list");
   list.innerHTML = "";
+  updateSignalCountBadge(signals?.length || 0);
   if (!signals?.length) {
     const li = document.createElement("li");
     li.textContent = "(none)";
@@ -1280,6 +1759,8 @@ function renderSignalList(signals) {
   signals.forEach((sig) => {
     const li = document.createElement("li");
     li.dataset.name = sig.name;
+    const onWave = waveformSelection.includes(sig.name);
+    if (onWave) li.classList.add("on-wave");
     const name = document.createElement("span");
     name.textContent = sig.name;
     const val = document.createElement("span");
@@ -1287,27 +1768,20 @@ function renderSignalList(signals) {
     val.textContent = sig.value;
     li.appendChild(name);
     li.appendChild(val);
+    li.title = "クリックで Wave タブに追加/削除";
     li.addEventListener("click", () => {
       list.querySelectorAll("li").forEach((n) => n.classList.remove("active"));
       li.classList.add("active");
       selectedSignal = sig.name;
-      highlightSignal(sig.name);
-      if (!waveformVisible) toggleWaveform(true);
+      toggleWaveformSignal(sig.name);
     });
     list.appendChild(li);
   });
 }
 
 function highlightSignal(name) {
-  if (!lastWaveform) return;
-  const filtered = {
-    timescale: lastWaveform.timescale,
-    signals: lastWaveform.signals.filter(
-      (s) => s.name === name || s.name.endsWith("." + name) || name.endsWith(s.name)
-    ),
-  };
-  if (!filtered.signals.length) filtered.signals = lastWaveform.signals.slice(0, 12);
-  drawWave(filtered);
+  if (!name) return;
+  toggleWaveformSignal(name);
 }
 
 function createOutputWindow() {
@@ -1319,12 +1793,15 @@ function createOutputWindow() {
     bodyClass: "mdi-output",
   });
   const body = win.querySelector(".mdi-body");
-  if (!body.id) {
-    body.id = "mdi-console-output";
-    body.classList.add("console-output");
+  if (!body.querySelector("textarea.console-output")) {
+    const area = document.createElement("textarea");
+    area.id = "mdi-console-output";
+    area.className = "console-output";
+    area.readOnly = true;
+    area.spellcheck = false;
+    body.appendChild(area);
   }
-  win.hidden = false;
-  bringMdiToFront(win);
+  showMdiWindow(win);
   return win;
 }
 
@@ -1335,14 +1812,17 @@ function createWaveformWindow() {
     width: 720,
     height: 360,
     bodyClass: "mdi-waveform",
+    show: waveformVisible,
   });
   const body = win.querySelector(".mdi-body");
   if (!body.querySelector("#waveform-canvas")) {
     body.innerHTML = `
       <div class="wave-toolbar">
+        <span id="wave-signal-count" class="wave-signal-count">Run 後に波形表示</span>
         <button type="button" id="btn-wave-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
         <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
         <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
+        <button type="button" id="btn-wave-all" class="mini-btn" title="Run 後の全 VCD 信号を表示">All</button>
         <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
       </div>
       <div id="waveform-wrap" class="waveform-wrap">
@@ -1350,33 +1830,49 @@ function createWaveformWindow() {
       </div>
     `;
     body.querySelector("#btn-wave-fit")?.addEventListener("click", fitWaveform);
+    body.querySelector("#btn-wave-all")?.addEventListener("click", () => {
+      if (!lastWaveformFull) return;
+      const names = lastWaveformFull.signals.map((s) => s.name);
+      waveformSelection = names;
+      waveformDisplayOrder = names.slice();
+      refreshWaveformView();
+      schedulePersistWavePrefs();
+      switchExplorerTab("wave");
+    });
     body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
     body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
     body.querySelector("#chk-auto-scroll")?.addEventListener("change", () => {
-      if (lastWaveform) drawWave(lastWaveform);
+      if (waveformVisible && lastWaveform) redrawWaveformCanvas(lastWaveform);
     });
     if (window.ResizeObserver) {
       const observer = new ResizeObserver(() => {
-        if (!win.hidden && lastWaveform) drawWave(lastWaveform);
+        if (waveformVisible && !win.hidden && lastWaveform) {
+          redrawWaveformCanvas(lastWaveform);
+        }
       });
       observer.observe(body);
     }
   }
-  win.hidden = false;
-  waveformVisible = true;
-  bringMdiToFront(win);
+  if (waveformVisible) showMdiWindow(win);
   return win;
+}
+
+function redrawWaveformCanvas(waveform) {
+  if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
+  const canvas = $("waveform-canvas");
+  if (!canvas) return;
+  window.HDLSimWaveform.drawWaveform(canvas, waveform, {
+    wrap: $("waveform-wrap"),
+    zoom: waveZoom,
+    autoScroll: $("chk-auto-scroll")?.checked !== false,
+  });
 }
 
 function drawWave(waveform) {
   if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
+  if (!waveformVisible) return;
   createWaveformWindow();
-  const canvas = $("waveform-canvas");
-  window.HDLSimWaveform.drawWaveform(canvas, waveform, {
-    wrap: $("waveform-wrap"),
-    autoScroll: $("chk-auto-scroll")?.checked,
-    zoom: waveZoom,
-  });
+  redrawWaveformCanvas(waveform);
 }
 
 function fitWaveform() {
@@ -1493,26 +1989,44 @@ async function openExample(id) {
   }
 }
 
+function ensureConsoleVisible() {
+  document.body.classList.remove("view-hide-output-panel");
+  if (!splitV) return;
+  const sizes = splitV.getSizes();
+  if (sizes[1] < 18) splitV.setSizes([65, 35]);
+}
+
 async function runElaborate() {
   setStatus("Elaborating…", "busy");
-  createOutputWindow();
+  ensureConsoleVisible();
   try {
     const payload = getPayload();
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
     const data = await api("/api/elaborate", payload);
     if (!data.ok) {
-      appendConsole(data.error, "err");
-      if (data.trace) appendConsole(data.trace, "err");
+      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
       renderHierarchy(null);
       renderSignalList([]);
       setStatus("Elab error", "err");
       switchExplorerTab("hierarchy");
       return;
     }
+    lastSignalNames = new Set(data.signal_names || []);
     renderHierarchy(data.hierarchy);
+    applySuggestedUntil(data.suggested_until);
     refreshTopModulePicker(data.top);
-    setStatus(`${data.net_count} nets · ${data.overview.module_names.length} modules`, "ok");
+    syncTopPickerToModules();
+    setStatus(`top=${data.top} · ${data.net_count} nets`, "ok");
     appendConsole(`[elab] top=${data.top} nets=${data.net_count}`, "ok");
+    if (data.top_requested && data.top_requested !== data.top) {
+      appendConsole(
+        `[hint] Top を ${data.top_requested} → ${data.top} に自動変更しました（モジュール一覧に合わせて選択）`,
+        "warn",
+      );
+    }
+    if (data.suggested_until != null) {
+      appendConsole(`[hint] Until の推奨値: ${data.suggested_until}（parameter STEP ベンチ向け）`, "info");
+    }
   } catch (e) {
     if (e.name !== "AbortError") {
       setStatus("Network error", "err");
@@ -1524,20 +2038,19 @@ async function runElaborate() {
 async function runSimulate() {
   setStatus("Running…", "busy");
   setRunning(true);
-  createOutputWindow();
+  ensureConsoleVisible();
   clearConsole();
   abortController = new AbortController();
 
   try {
     const payload = getPayload();
-    const topLabel = payload.top || "(auto)";
+    const topLabel = effectiveTopForPayload() || "(auto)";
     appendConsole(`[run] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
     appendConsole(`[run] top=${topLabel}`, "info");
 
     const data = await api("/api/simulate", payload, abortController.signal);
     if (!data.ok) {
-      appendConsole(data.error, "err");
-      if (data.trace) appendConsole(data.trace, "err");
+      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
       if (data.console) appendConsole(data.console);
       renderHierarchy(null);
       renderSignalList([]);
@@ -1546,14 +2059,39 @@ async function runSimulate() {
     }
     if (data.console) appendConsole(data.console);
     appendConsole(`time=${data.stop_time} events=${data.events_processed} top=${data.top_module}`, "ok");
-    refreshTopModulePicker(data.top_module);
+    if (data.top_requested && data.top_requested !== data.top) {
+      appendConsole(
+        `[hint] Top を ${data.top_requested} → ${data.top} に自動変更しました`,
+        "warn",
+      );
+    }
+    refreshTopModulePicker(data.top_module || data.top);
     renderHierarchy(data.hierarchy);
     renderSignalList(data.signals);
-    lastWaveform = data.waveform;
-    if (!waveformVisible) toggleWaveform(true);
-    drawWave(data.waveform);
+    lastTopModule = data.top_module || "";
+    lastSignalNames = new Set(data.signal_names || data.signals?.map((s) => s.name) || []);
+    lastWaveformFull = data.waveform;
+    const waveNames = data.waveform?.signals?.map((s) => s.name) || [];
+    if (waveNames.length) {
+      applyWavePrefsForSignals(waveNames);
+      persistWavePrefsNow();
+    } else {
+      waveformSelection = [];
+      waveformDisplayOrder = [];
+    }
+    applySuggestedUntil(data.suggested_until);
+    refreshWaveformView();
+    const waveCount = data.waveform?.signals?.length || 0;
+    if (waveCount > 0) {
+      appendConsole(`[wave] ${waveCount} signals — Wave タブで選択・並べ替え`, "info");
+    } else {
+      appendConsole("[wave] 波形データが空です。Run が成功していても VCD に信号がありません。", "warn");
+    }
+    if (data.hints?.length) {
+      data.hints.forEach((h) => appendConsole(`[hint] ${h}`, "warn"));
+    }
     switchExplorerTab("hierarchy");
-    setStatus(`Done t=${data.stop_time} ev=${data.events_processed}`, "ok");
+    setStatus(`top=${data.top_module} t=${data.stop_time} ev=${data.events_processed}`, "ok");
   } catch (e) {
     if (e.name === "AbortError") {
       appendConsole("Simulation stopped by user", "warn");
@@ -1616,12 +2154,38 @@ function initMonaco() {
   });
 }
 
+function initWaveSignalPanelUi() {
+  const root = $("wave-signal-panel");
+  if (!root) return;
+  waveSignalPanel = createWaveSignalPanel(root, {
+    getSignalNames: () => allWaveformSignalNames(),
+    getSelection: () => waveformSelection.slice(),
+    setSelection: (names) => {
+      waveformSelection = names;
+    },
+    getOrder: () => waveformDisplayOrder.slice(),
+    setOrder: (names) => {
+      waveformDisplayOrder = names;
+    },
+    onChange: () => {
+      if (!waveformVisible && waveformSelection.length) toggleWaveform(true);
+      refreshWaveformView();
+      schedulePersistWavePrefs();
+    },
+  });
+  waveSignalPanel.render();
+}
+
 function bindUi() {
+  initWaveSignalPanelUi();
   $("btn-run").addEventListener("click", runSimulate);
   $("btn-stop").addEventListener("click", stopSimulation);
   $("btn-step").addEventListener("click", runStep);
   $("btn-elab").addEventListener("click", runElaborate);
   $("btn-clear-console").addEventListener("click", clearConsole);
+  $("btn-copy-console")?.addEventListener("click", () => copyConsoleText());
+  $("btn-copy-console-err")?.addEventListener("click", () => copyConsoleText({ errorsOnly: true }));
+  $("btn-select-console")?.addEventListener("click", () => focusConsole(true));
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
   $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit")?.addEventListener("click", fitWaveform);
@@ -1656,8 +2220,10 @@ function bindUi() {
   });
 
   $("chk-auto-scroll")?.addEventListener("change", () => {
-    if (lastWaveform) drawWave(lastWaveform);
+    if (waveformVisible && lastWaveform) redrawWaveformCanvas(lastWaveform);
   });
+
+  initConsoleKeyboard();
 
   initMenuBar();
 }
@@ -1753,9 +2319,15 @@ function handleMenuShortcut(e) {
     return true;
   }
   if (!(e.ctrlKey || e.metaKey)) return false;
-  if (inField) return false;
 
   const key = e.key.toLowerCase();
+  if (
+    key === "c" &&
+    (isConsoleElement(e.target) || e.target?.closest?.("#pane-console, .mdi-output"))
+  ) {
+    return false;
+  }
+  if (inField) return false;
   const map = {
     n: () => createProject(),
     o: () => openProjectFilePicker(),
@@ -1802,7 +2374,9 @@ function showUpdateBanner(options) {
   } = options;
 
   const url = downloadUrl || releaseUrl || "https://github.com/PeRoHi/HDL-Sim/releases/latest";
-  const linkLabel = downloadUrl ? "インストーラーをダウンロード" : "リリースを見る";
+  const linkLabel = downloadUrl
+    ? (downloadUrl.toLowerCase().endsWith(".zip") ? "ZIP をダウンロード" : "ダウンロード")
+    : "リリースを見る";
 
   let message;
   if (mode === "local") {
@@ -1813,7 +2387,7 @@ function showUpdateBanner(options) {
     message =
       `<strong>新しいバージョンがあります:</strong> ${latestVersion} ` +
       `(現在 ${currentVersion})。` +
-      ` インストール済みの exe も、新しい Setup を取得して更新できます。`;
+      ` 新しい ZIP を取得し、フォルダごと入れ替えて更新してください。`;
   }
 
   banner.innerHTML =

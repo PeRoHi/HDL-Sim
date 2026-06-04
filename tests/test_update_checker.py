@@ -34,6 +34,21 @@ def test_check_for_updates_uses_github_payload(monkeypatch) -> None:
     assert result["download_url"] == "https://example.com/setup.exe"
 
 
+def test_pick_windows_asset_prefers_zip(monkeypatch) -> None:
+    payload = {
+        "tag_name": "v1.0.0",
+        "assets": [
+            {"name": "HDL-Sim-Setup-1.0.0.exe", "browser_download_url": "https://example.com/setup.exe"},
+            {"name": "HDL-Sim-1.0.0-windows-x64.zip", "browser_download_url": "https://example.com/app.zip"},
+        ],
+    }
+    monkeypatch.setattr("hdl_sim.web.update_checker._fetch_latest_release", lambda *a, **k: payload)
+    monkeypatch.setattr("hdl_sim.web.update_checker._cache", {"at": 0.0, "payload": None})
+
+    result = check_for_updates("0.5.0", force_refresh=True)
+    assert result["download_url"] == "https://example.com/app.zip"
+
+
 def test_check_for_updates_no_update_when_current(monkeypatch) -> None:
     payload = {"tag_name": "v0.5.0", "html_url": "https://example.com", "assets": []}
     monkeypatch.setattr("hdl_sim.web.update_checker._fetch_latest_release", lambda *a, **k: payload)

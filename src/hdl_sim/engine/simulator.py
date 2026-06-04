@@ -10,12 +10,12 @@ from hdl_sim.core.events import EventQueue, SimTime
 from hdl_sim.engine.delta import DeltaRegion
 from hdl_sim.engine.elaborator import ElaboratedDesign, ScopedContinuousAssign, ScopedProcess, elaborate
 from hdl_sim.engine.evaluator import ExpressionEvaluator
-from hdl_sim.engine.executor import ProcessContext, ProcessState
+from hdl_sim.engine.executor import ProcessContext, ProcessState, render_display_args
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.engine.trace import SimulationTracer
-from hdl_sim.parser.ast import AlwaysBlock, Design, DisplayArg, EdgeKind, Module
-from hdl_sim.parser.loader import load_design, load_design_with_meta
+from hdl_sim.parser.ast import AlwaysBlock, Design, DisplayArg, EdgeKind, Forever, Module
+from hdl_sim.parser.loader import load_design, load_design_with_meta, read_verilog_text
 from hdl_sim.parser.parser import parse_design, parse_module
 from hdl_sim.vcd.writer import VCDWriter
 
@@ -67,14 +67,23 @@ class Simulator:
                 self._delta.flush(time)
             finally:
                 self._in_delta = False
+            if self._monitor_dirty:
+                self._flush_monitors()
+                self._monitor_dirty = False
 
         self._queue.set_nba_flush(regions_flush)
         self._vcd_path = vcd_path
+        # Anchor relative $dumpfile paths (e.g. "wave.vcd") to the API-provided directory.
+        self._vcd_anchor: Path | None = (
+            vcd_path.parent.resolve() if vcd_path is not None else None
+        )
         self._vcd = (
             VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
         )
         self._tracer = tracer
         self._monitors: list[tuple[tuple[DisplayArg, ...], dict[str, SimNet]]] = []
+        self._monitor_dirty = False
+        self._monitor_last_sig: list[tuple[int, ...]] = []
 
     @classmethod
     def from_source(
@@ -97,7 +106,7 @@ class Simulator:
         top: str | None = None,
     ) -> Simulator:
         return cls.from_source(
-            path.read_text(encoding="utf-8"),
+            read_verilog_text(path),
             timescale=timescale,
             vcd_path=vcd_path,
             top=top,
@@ -113,12 +122,24 @@ class Simulator:
 
     def _register_continuous_updates(self) -> None:
         for assign in self._elaborated.continuous_assigns:
-            evaluator = ExpressionEvaluator(assign.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
+            evaluator = ExpressionEvaluator(
+                assign.locals,
+                functions=self._functions,
+                queue=self._queue,
+                nba=self._nba,
+                on_net_update=self._record_net,
+                params=assign.params,
+                global_nets=self._nets,
+            )
 
-            def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> bool:
+            def recompute(
+                time: SimTime,
+                scoped: ScopedContinuousAssign = assign,
+                scoped_evaluator: ExpressionEvaluator = evaluator,
+            ) -> bool:
                 from hdl_sim.engine.net_state import apply_four_state
 
-                state = evaluator.eval_logic(scoped.expr)
+                state = scoped_evaluator.eval_logic(scoped.expr)
                 net = self._nets[scoped.target]
                 return apply_four_state(net, state, time=time, on_update=self._record_net)
 
@@ -126,26 +147,37 @@ class Simulator:
             recompute(0)
 
     def _register_monitor(self, args: tuple[DisplayArg, ...], locals: dict[str, SimNet]) -> None:
-        self._monitors.append((args, locals))
+        merged = {**self._nets, **locals}
+        self._monitors.append((args, merged))
 
-    def _check_monitors(self) -> None:
-        for args, locals in self._monitors:
-            evaluator = ExpressionEvaluator(locals)
-            parts: list[str] = []
-            values: list[int] = []
-            for arg in args:
-                if arg.text is not None:
-                    parts.append(arg.text)
-                elif arg.expr is not None:
-                    values.append(evaluator.eval(arg.expr))
-            if parts and values:
-                message = parts[0] % tuple(values)
-            elif parts:
-                message = "".join(parts)
-            elif values:
-                message = " ".join(str(value) for value in values)
-            else:
-                message = ""
+    def _monitor_signature(
+        self,
+        args: tuple[DisplayArg, ...],
+        evaluator: ExpressionEvaluator,
+    ) -> tuple[int, ...]:
+        values: list[int] = [self._queue.now]
+        for arg in args:
+            if arg.expr is not None:
+                values.append(evaluator.eval(arg.expr))
+        return tuple(values)
+
+    def _flush_monitors(self) -> None:
+        from hdl_sim.engine.executor import render_display_args
+
+        for index, (args, locals) in enumerate(self._monitors):
+            evaluator = ExpressionEvaluator(
+                locals,
+                queue=self._queue,
+                global_nets=self._nets,
+                sim_time=self._queue.now,
+            )
+            signature = self._monitor_signature(args, evaluator)
+            if index < len(self._monitor_last_sig) and self._monitor_last_sig[index] == signature:
+                continue
+            while len(self._monitor_last_sig) <= index:
+                self._monitor_last_sig.append(())
+            self._monitor_last_sig[index] = signature
+            message = render_display_args(args, evaluator)
             print(message, flush=True)
             if self._tracer is not None:
                 self._tracer.log(f"#{self._queue.now} $monitor {message}")
@@ -155,7 +187,10 @@ class Simulator:
             self._tracer.log(f"#{time} $display {message}")
 
     def _on_dumpfile(self, path: str) -> None:
-        self._vcd_path = Path(path)
+        candidate = Path(path)
+        if not candidate.is_absolute() and self._vcd_anchor is not None:
+            candidate = self._vcd_anchor / candidate
+        self._vcd_path = candidate
         self._ensure_vcd()
         if self._tracer is not None:
             self._tracer.log(f"$dumpfile {path}")
@@ -226,7 +261,8 @@ class Simulator:
     def _record_net(self, net: SimNet, time: SimTime) -> None:
         if net.previous is not None and self._tracer is not None:
             self._tracer.on_net_change(net, net.previous, net.value, time)
-        self._check_monitors()
+        if self._monitors:
+            self._monitor_dirty = True
         if self._vcd is not None:
             self._vcd.change(net, time)
 
@@ -239,6 +275,7 @@ class Simulator:
             nba=self._nba,
             on_net_update=self._record_net,
             caller_nets=process.locals,
+            params=process.params,
         )
 
         def run_process() -> None:
@@ -267,13 +304,24 @@ class Simulator:
             self._spawn_process(process, time=0)
 
     def _start_always_blocks(self) -> None:
-        for block, local_nets in self._elaborated.always_blocks:
-            if not block.sensitivity:
-                self._register_combinational_always(block, local_nets)
+        for block, local_nets, params in self._elaborated.always_blocks:
+            if isinstance(block.body, Forever) and block.sensitivity == ():
+                self._spawn_process(
+                    ScopedProcess(body=block.body, locals=local_nets, params=params),
+                    time=self._queue.now,
+                )
                 continue
-            self._start_sensitive_always(block, local_nets)
+            if not block.sensitivity:
+                self._register_combinational_always(block, local_nets, params)
+                continue
+            self._start_sensitive_always(block, local_nets, params)
 
-    def _register_combinational_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+    def _register_combinational_always(
+        self,
+        block: AlwaysBlock,
+        local_nets: dict[str, SimNet],
+        params: dict[str, int],
+    ) -> None:
         def run_comb() -> bool:
             if self._queue.stopped:
                 return False
@@ -286,6 +334,7 @@ class Simulator:
                 nba=self._nba,
                 on_net_update=self._record_net,
                 caller_nets=local_nets,
+                params=params,
             )
 
             def on_finish() -> None:
@@ -310,9 +359,17 @@ class Simulator:
         self._delta.add_comb(run_comb)
         run_comb()
 
-    def _start_sensitive_always(self, block: AlwaysBlock, local_nets: dict[str, SimNet]) -> None:
+    def _start_sensitive_always(
+        self,
+        block: AlwaysBlock,
+        local_nets: dict[str, SimNet],
+        params: dict[str, int],
+    ) -> None:
         def trigger() -> None:
-            self._spawn_process(ScopedProcess(body=block.body, locals=local_nets), time=self._queue.now)
+            self._spawn_process(
+                ScopedProcess(body=block.body, locals=local_nets, params=params),
+                time=self._queue.now,
+            )
 
         for edge_kind, name in block.sensitivity:
             if name not in local_nets:
@@ -353,6 +410,7 @@ class Simulator:
         stop_time = self._queue.now
 
         if self._vcd_path is not None and self._vcd is not None:
+            self._vcd.set_active_nets(None)
             self._vcd.write(self._vcd_path)
 
         return SimulationResult(

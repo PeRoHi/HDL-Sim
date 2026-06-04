@@ -28,6 +28,14 @@ _TIMESCALE_RE = re.compile(r"^\$timescale\s+(\S+)\s+\$end\s*$")
 _BUS_VAL_RE = re.compile(r"^b([0-9a-zA-ZxzXZ]+)(\S+)$")
 
 
+def _qualify_vcd_signal(scope_stack: list[str], short_name: str) -> str:
+    """Map scoped VCD identifiers to flat net names (e.g. sai.cnt)."""
+
+    if len(scope_stack) <= 1:
+        return short_name
+    return ".".join(scope_stack[1:]) + "." + short_name
+
+
 def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
     """Parse VCD into signal metadata and per-code change lists."""
 
@@ -36,6 +44,7 @@ def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
     changes: dict[str, list[tuple[int, str]]] = {}
     current_time = 0
     in_defs = True
+    scope_stack: list[str] = []
 
     for raw_line in vcd_text.splitlines():
         line = raw_line.strip()
@@ -46,6 +55,15 @@ def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
             if match:
                 timescale = match.group(1)
             continue
+        if line.startswith("$scope"):
+            parts = line.split()
+            if len(parts) >= 3:
+                scope_stack.append(parts[2])
+            continue
+        if line.startswith("$upscope"):
+            if scope_stack:
+                scope_stack.pop()
+            continue
         if line.startswith("$enddefinitions"):
             in_defs = False
             continue
@@ -53,9 +71,11 @@ def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
             match = _VAR_RE.match(line)
             if match:
                 kind, width_s, code, name = match.groups()
+                short_name = name.strip()
+                full_name = _qualify_vcd_signal(scope_stack, short_name)
                 meta = VCDSignalMeta(
                     code=code,
-                    name=name.strip(),
+                    name=full_name,
                     width=int(width_s),
                     kind=kind,
                 )

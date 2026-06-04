@@ -104,7 +104,8 @@ def test_dumpvars_explicit_signals(tmp_path) -> None:
     text = vcd_path.read_text(encoding="utf-8")
     assert "$var" in text
     assert "clk" in text
-    assert "rst" not in text.split("$enddefinitions")[0]
+    # VCD definitions include the full elaborated netlist for the web waveform viewer.
+    assert "rst" in text.split("$enddefinitions")[0]
 
 
 def test_four_state_bitwise_and_unit() -> None:

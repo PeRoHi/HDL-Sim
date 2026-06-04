@@ -53,6 +53,7 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 
 - [docs/architecture.md](docs/architecture.md) — パイプラインと主要コンポーネント
 - [docs/SUPPORTED_SUBSET.md](docs/SUPPORTED_SUBSET.md) — 対応文法・制約
+- [docs/LOCAL_DEBUG_HANDOFF.md](docs/LOCAL_DEBUG_HANDOFF.md) — ローカルデバッグ用の引き継ぎプロンプト（Cursor 向け）
 
 ## 既知の制約（抜粋）
 
@@ -76,7 +77,7 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 2. 次をダブルクリック: **`start-ui.vbs`** または **`start_ui_gui.pyw`**
 3. 初回だけ GUI の **「依存関係をインストール」** を押す
 
-**Python なし配布**: `packaging/build_windows.bat` で `dist/HDL-Sim.exe` を作成
+**Python なし配布**: `packaging/build_windows.bat` → `packaging/build_zip.bat` で ZIP 配布（`HDL-Sim.exe` 起動ウィンドウと IDE でバージョン確認可）
 
 **macOS / Linux**: `start-ui.command` または `./start-ui.sh`
 

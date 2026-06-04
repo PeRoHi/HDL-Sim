@@ -67,6 +67,8 @@ def test_dumpvars_level_filter(tmp_path: Path) -> None:
     )
     text = vcd_path.read_text(encoding="utf-8")
     assert "top_sig" in text or "tb.top_sig" in text
+    # Web viewer exports the full netlist even when $dumpvars limits scope.
+    assert "sub_sig" in text or "tb.sub_sig" in text
 
 
 def test_monitor_system_task(capsys) -> None:

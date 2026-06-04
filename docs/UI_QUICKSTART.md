@@ -12,26 +12,43 @@
 初回だけ GUI の **「依存関係をインストール」** ボタンを押してください。
 ターミナルは不要です。
 
-## Python なしで配布する場合
+## Python なしで配布する場合（ZIP 推奨）
 
-Windows PC で一度だけ `packaging/build_windows.bat` を実行すると `dist/HDL-Sim.exe` ができます。
-この exe を配るだけで、受け取った人は Python もターミナルも不要です。
-**exe は Chrome ではなく専用ウィンドウで IDE が開きます**（Windows 11 では WebView2 が標準搭載）。
+Windows PC で一度だけ:
 
-### インストーラー版（保存フォルダを選べる）
+```bat
+packaging\build_windows.bat
+packaging\build_zip.bat
+```
 
-1. [Inno Setup 6](https://jrsoftware.org/isdl.php) をインストール
-2. `packaging\build_windows.bat` で exe をビルド
-3. `packaging\build_installer.bat` を実行
-4. 完成: `dist\HDL-Sim-Setup-0.4.5.exe`
+- 実行物: `dist\HDL-Sim\` フォルダ一式（`HDL-Sim.exe` + `_internal\`）
+- 配布物: `dist\HDL-Sim-x.x.x-windows-x64.zip`（解凍して `HDL-Sim.exe` を起動）
+- **exe は Chrome ではなく専用ウィンドウで IDE が開きます**（WebView2 未導入時は [ランタイム](https://go.microsoft.com/fwlink/p/?LinkId=2124703)）
 
-インストール時に次を選択できます:
+### バージョン更新の通知（利用者）
 
-- **デスクトップにショートカット**（オン/オフ）
-- **スタートメニュー**（フォルダ名も選択可）
-- **保存フォルダ**（`.spj` / `projects/`、既定: `ドキュメント\HDL-Sim`）
+起動して IDE を開くと、GitHub の **最新 Release**（`PeRoHi/HDL-Sim`）と同梱 exe のバージョンを比較します。新しい版があれば画面上部にバナーが出ます（**自動ダウンロード・自動更新はしません**）。ZIP を取得してフォルダごと入れ替えてください。
 
-アンインストールは Windows の **設定 → アプリ → インストールされているアプリ** から「HDL-Sim」を選んで実行できます。ユーザーデータ（プロジェクト）を残すか削除するかも選べます。
+### バージョンの確認（`HDL-Sim.exe`）
+
+1. **起動ウィンドウ** … 起動直後の小さな GUI に `Ver x.x.x` と表示
+2. **IDE** … 左上メニューバーの `Ver x.x.x` バッジ（サーバー `/api/version` と同期）
+3. **Help → About** … ダイアログでバージョン表示
+
+### 課題 RTL をローカルでデバッグするとき
+
+Cursor などエディタ AI に渡す引き継ぎ文は [LOCAL_DEBUG_HANDOFF.md](LOCAL_DEBUG_HANDOFF.md)（コピペ用プロンプト付き）を参照してください。正式リリース用の修正は GitHub の Release / PR、手元の 6 ファイル確認はローカル、の役割分担を書いてあります。
+
+### リリース時のバージョン上げ（開発者）
+
+1. `src/hdl_sim/__init__.py` の `__version__` を更新（ここが exe の正）
+2. 同じ番号を `pyproject.toml`・`src/hdl_sim/web/app.py` の `UI_BUILD`・`ui/index.html` の `?v=` とバッジに反映
+3. `packaging\build_windows.bat` → `packaging\build_zip.bat`
+4. GitHub Release に `HDL-Sim-x.x.x-windows-x64.zip` を添付し、タグ `vx.x.x` を付ける
+
+### インストーラー版（当面は使用停止）
+
+Inno Setup 版（`build_installer.bat`）はスクリプトは残していますが、**フリー配布の主経路は ZIP** です。署名・スマート アプリ コントロールの都合で再開する場合は `packaging/SIGNING.md` を参照。
 
 ## macOS / Linux
 

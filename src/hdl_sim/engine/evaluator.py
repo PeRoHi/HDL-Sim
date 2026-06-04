@@ -10,6 +10,8 @@ from hdl_sim.parser.ast import (
     BinaryExpr,
     BitSelect,
     ConcatExpr,
+    DeclKind,
+    ReplicationExpr,
     FunctionCall,
     FunctionDef,
     TaskDef,
@@ -18,6 +20,8 @@ from hdl_sim.parser.ast import (
     IntLiteral,
     Lvalue,
     PartSelect,
+    RealLiteral,
+    StringLiteral,
     UnaryExpr,
 )
 
@@ -39,8 +43,14 @@ class ExpressionEvaluator:
         nba: NBARegion | None = None,
         on_net_update=None,
         caller_nets: dict[str, SimNet] | None = None,
+        params: dict[str, int] | None = None,
+        global_nets: dict[str, SimNet] | None = None,
+        sim_time: int | None = None,
     ) -> None:
         self._nets = nets
+        self._params = params or {}
+        self._global_nets = global_nets or {}
+        self._sim_time = sim_time
         self._functions = functions or {}
         self._tasks = tasks or {}
         self._queue = queue
@@ -93,8 +103,55 @@ class ExpressionEvaluator:
             return bitwise_xor(left, right)
         return FourStateValue.from_int(self.eval(expr))
 
+    def eval_real(self, expr: Expr) -> float:
+        import math
+
+        if isinstance(expr, RealLiteral):
+            return expr.value
+        if isinstance(expr, IntLiteral):
+            return float(expr.value)
+        if isinstance(expr, FunctionCall):
+            if expr.name == "$sin" and len(expr.args) == 1:
+                return math.sin(self.eval_real(expr.args[0]))
+            if expr.name == "$rtoi" and len(expr.args) == 1:
+                return float(int(self.eval_real(expr.args[0])))
+            msg = f"unsupported real function: {expr.name}"
+            raise EvaluationError(msg)
+        if isinstance(expr, IdentRef):
+            net = self._nets.get(expr.name) or self._global_nets.get(expr.name)
+            if net is not None and net.kind is DeclKind.REAL:
+                return net.real_value
+            if expr.name in self._params:
+                return float(self._params[expr.name])
+            if net is not None:
+                return float(net.value)
+            msg = f"unknown identifier: {expr.name}"
+            raise EvaluationError(msg)
+        if isinstance(expr, UnaryExpr):
+            if expr.op == "-":
+                return -self.eval_real(expr.operand)
+            msg = f"unsupported unary operator in real expression: {expr.op}"
+            raise EvaluationError(msg)
+        if isinstance(expr, BinaryExpr):
+            left = self.eval_real(expr.left)
+            right = self.eval_real(expr.right)
+            if expr.op == "+":
+                return left + right
+            if expr.op == "-":
+                return left - right
+            if expr.op == "*":
+                return left * right
+            if expr.op == "/":
+                return left / right
+            msg = f"unsupported binary operator in real expression: {expr.op}"
+            raise EvaluationError(msg)
+        msg = f"unsupported real expression: {type(expr).__name__}"
+        raise EvaluationError(msg)
+
     def eval(self, expr: Expr) -> int:
         if isinstance(expr, FunctionCall):
+            if expr.name == "$rtoi" and len(expr.args) == 1:
+                return int(self.eval_real(expr.args[0]))
             args = tuple(self.eval(arg) for arg in expr.args)
             from hdl_sim.engine.functions import call_function
 
@@ -106,24 +163,47 @@ class ExpressionEvaluator:
                 queue=self._queue or EventQueue(),
                 nba=self._nba or NBARegion(self._nets, on_update=lambda *_: None),
                 on_net_update=self._on_net_update or (lambda *_: None),
+                params=self._params,
             )
         if isinstance(expr, IntLiteral):
             return expr.value
+        if isinstance(expr, StringLiteral):
+            value = 0
+            for ch in expr.value.encode("utf-8"):
+                value = (value << 8) | ch
+            return value
         if isinstance(expr, IdentRef):
-            try:
-                return self._nets[expr.name].value
-            except KeyError as exc:
-                msg = f"unknown identifier: {expr.name}"
-                raise EvaluationError(msg) from exc
+            if expr.name in ("$stime", "$time") and self._sim_time is not None:
+                return self._sim_time
+            if expr.name in self._params:
+                return self._params[expr.name]
+            if expr.name in self._nets:
+                net = self._nets[expr.name]
+                if net.kind is DeclKind.REAL:
+                    return int(net.real_value)
+                return net.value
+            if expr.name in self._global_nets:
+                net = self._global_nets[expr.name]
+                if net.kind is DeclKind.REAL:
+                    return int(net.real_value)
+                return net.value
+            msg = f"unknown identifier: {expr.name}"
+            raise EvaluationError(msg)
         if isinstance(expr, BitSelect):
-            return read_lvalue(Lvalue(base=expr.signal, bit=expr.index), self._nets, self.eval)
+            return read_lvalue(
+                Lvalue(base=expr.signal, word=expr.word, bit=expr.index),
+                self._nets,
+                self.eval,
+            )
         if isinstance(expr, PartSelect):
             return read_lvalue(
-                Lvalue(base=expr.signal, msb=expr.msb, lsb=expr.lsb),
+                Lvalue(base=expr.signal, word=expr.word, msb=expr.msb, lsb=expr.lsb),
                 self._nets,
                 self.eval,
             )
         if isinstance(expr, UnaryExpr):
+            if expr.op in {"$signed", "$unsigned"}:
+                return self.eval(expr.operand)
             value = self.eval(expr.operand)
             if expr.op == "~":
                 net = self._operand_net(expr.operand)
@@ -172,22 +252,50 @@ class ExpressionEvaluator:
                 return 0 if right == 0 else left // right
             if expr.op == "%":
                 return 0 if right == 0 else left % right
-            if expr.op == "==":
-                return 1 if left == right else 0
-            if expr.op == "!=":
-                return 1 if left != right else 0
-            if expr.op == "<":
-                return 1 if left < right else 0
-            if expr.op == "<=":
-                return 1 if left <= right else 0
-            if expr.op == ">":
-                return 1 if left > right else 0
-            if expr.op == ">=":
+            if expr.op in {"==", "!=", "<", "<=", ">", ">="}:
+                from hdl_sim.engine.signed_ops import compare_signed, expr_is_signed, operand_width
+
+                lwidth = operand_width(expr.left, self._nets)
+                rwidth = operand_width(expr.right, self._nets)
+                if expr_is_signed(expr.left, self._nets) or expr_is_signed(expr.right, self._nets):
+                    return compare_signed(left, right, lwidth, rwidth, expr.op)
+                if expr.op == "==":
+                    return 1 if left == right else 0
+                if expr.op == "!=":
+                    return 1 if left != right else 0
+                if expr.op == "<":
+                    return 1 if left < right else 0
+                if expr.op == "<=":
+                    return 1 if left <= right else 0
+                if expr.op == ">":
+                    return 1 if left > right else 0
                 return 1 if left >= right else 0
             if expr.op == "<<":
                 return left << right
             if expr.op == ">>":
-                return left >> right
+                from hdl_sim.engine.signed_ops import (
+                    expr_is_signed,
+                    operand_width,
+                    shift_right_arithmetic,
+                    shift_right_logical,
+                )
+
+                width = operand_width(expr.left, self._nets)
+                if expr_is_signed(expr.left, self._nets):
+                    return shift_right_arithmetic(left, right, width)
+                return shift_right_logical(left, right, width)
+            if expr.op == ">>>":
+                from hdl_sim.engine.signed_ops import (
+                    expr_is_signed,
+                    operand_width,
+                    shift_right_arithmetic,
+                    shift_right_logical,
+                )
+
+                width = operand_width(expr.left, self._nets)
+                if expr_is_signed(expr.left, self._nets):
+                    return shift_right_arithmetic(left, right, width)
+                return shift_right_logical(left, right, width)
             msg = f"unsupported binary operator: {expr.op}"
             raise EvaluationError(msg)
         if isinstance(expr, ConcatExpr):
@@ -197,6 +305,15 @@ class ExpressionEvaluator:
                 part_value = self.eval(part)
                 value |= part_value << shift
                 shift += self._width_of(part)
+            return value
+        if isinstance(expr, ReplicationExpr):
+            count = self.eval(expr.count)
+            inner_value = self.eval(expr.expr)
+            part_width = self._width_of(expr.expr)
+            mask = (1 << part_width) - 1 if part_width else 0
+            value = 0
+            for index in range(count):
+                value |= (inner_value & mask) << (index * part_width)
             return value
         msg = f"unsupported expression node: {type(expr).__name__}"
         raise EvaluationError(msg)
@@ -227,6 +344,10 @@ class ExpressionEvaluator:
             return net.width
         if isinstance(expr, IntLiteral) and expr.width is not None:
             return expr.width
+        if isinstance(expr, ConcatExpr):
+            return sum(self._width_of(part) for part in expr.parts)
+        if isinstance(expr, ReplicationExpr):
+            return self.eval(expr.count) * self._width_of(expr.expr)
         return 32
 
     def _reduction(self, value: int, width: int, op: str) -> int:

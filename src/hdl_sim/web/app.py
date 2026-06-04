@@ -21,7 +21,7 @@ from hdl_sim import __version__
 from hdl_sim.engine.elaborator import elaborate
 from hdl_sim.engine.simulator import Simulator
 from hdl_sim.parser.ast import Design, Module, PortDirection
-from hdl_sim.parser.loader import load_design_with_meta
+from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir
@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.1"
+UI_BUILD = "0.5.21"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -77,6 +77,10 @@ EXAMPLES_DIR = examples_dir()
 class SourceFile(BaseModel):
     path: str = Field(description="Virtual path, e.g. tb.v")
     content: str
+    include_only: bool = Field(
+        default=False,
+        description="Write to workspace for `include` but do not parse as a top-level module file",
+    )
 
 
 class ProjectCreateRequest(BaseModel):
@@ -89,6 +93,7 @@ class ProjectSaveRequest(BaseModel):
     files: list[SourceFile]
     top: str | None = None
     label: str | None = None
+    wave: dict[str, Any] | None = None
 
 
 class ElaborateRequest(BaseModel):
@@ -99,9 +104,36 @@ class ElaborateRequest(BaseModel):
 class SimulateRequest(BaseModel):
     files: list[SourceFile]
     top: str | None = None
-    until: int | None = 50
-    max_events: int | None = 500
+    until: int | None = 15000
+    max_events: int | None = 2000
     generate_vcd: bool = True
+
+
+def resolve_top_module(design: Design, top: str | None) -> str:
+    """Pick elaboration top; ignore stale UI values like ``tb`` when absent from design."""
+
+    names = {m.name for m in design.modules}
+    requested = (top or "").strip()
+    if requested and requested in names:
+        return requested
+
+    for suffix in ("_tp", "_tb", "_test", "_testbench"):
+        for module in design.modules:
+            if module.name.endswith(suffix):
+                return module.name
+
+    for candidate in ("stimulus", "tb", "testbench", "top"):
+        if candidate in names:
+            return candidate
+
+    by_instances = sorted(design.modules, key=lambda m: len(m.instances), reverse=True)
+    if by_instances and by_instances[0].instances:
+        return by_instances[0].name
+
+    try:
+        return design.top.name
+    except ValueError:
+        return design.modules[-1].name
 
 
 def _port_dir_name(direction: PortDirection) -> str:
@@ -144,17 +176,22 @@ def _module_to_dict(module: Module) -> dict[str, Any]:
 
 
 def _expr_to_str(expr: Any) -> str:
-    from hdl_sim.parser.ast import BitSelect, IdentRef, PartSelect
+    from hdl_sim.parser.ast import BitSelect, IdentRef, IntLiteral, PartSelect
 
     if isinstance(expr, IdentRef):
         return expr.name
+    if isinstance(expr, IntLiteral):
+        return str(expr.value)
     if isinstance(expr, BitSelect):
-        return f"{_expr_to_str(expr.base)}[{_expr_to_str(expr.index)}]"
+        base = expr.signal
+        if expr.word is not None:
+            base = f"{base}[{_expr_to_str(expr.word)}]"
+        return f"{base}[{_expr_to_str(expr.index)}]"
     if isinstance(expr, PartSelect):
-        return (
-            f"{_expr_to_str(expr.base)}[{_expr_to_str(expr.msb)}:"
-            f"{_expr_to_str(expr.lsb)}]"
-        )
+        base = expr.signal
+        if expr.word is not None:
+            base = f"{base}[{_expr_to_str(expr.word)}]"
+        return f"{base}[{_expr_to_str(expr.msb)}:{_expr_to_str(expr.lsb)}]"
     return str(expr)
 
 
@@ -183,6 +220,53 @@ def nets_overview(sim: Simulator) -> list[dict[str, Any]]:
     return rows
 
 
+def _signal_path(path_prefix: str, name: str) -> str:
+    return f"{path_prefix}{name}" if path_prefix else name
+
+
+def suggested_sim_until(design: Design, *, top: str | None) -> int | None:
+    """Heuristic default simulation stop time from top-level parameters."""
+
+    from hdl_sim.engine.params import ParameterEvaluator
+
+    modules = {m.name: m for m in design.modules}
+    top_name = top or design.modules[0].name
+    module = modules.get(top_name)
+    if module is None:
+        return None
+    evaluator = ParameterEvaluator()
+    try:
+        evaluator.resolve_module_params(module.parameters)
+    except Exception:
+        return None
+    step = evaluator.snapshot().get("STEP")
+    if step is not None and step > 0:
+        return step * 15
+    return None
+
+
+def simulation_time_hints(
+    design: Design,
+    *,
+    top: str | None,
+    stop_time: int,
+    until: int | None,
+) -> list[str]:
+    """User-facing hints when until is shorter than bench timing."""
+
+    suggested = suggested_sim_until(design, top=top)
+    if suggested is None or until is None:
+        return []
+    if until >= suggested:
+        return []
+    if stop_time < until:
+        return []
+    return [
+        f"Until={until} は短すぎる可能性があります（STEP ベンチなら Until≈{suggested} 以上を推奨）。"
+        " クロック・リセットが動く前に停止していると波形がフラットに見えます。",
+    ]
+
+
 def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     """Build a simple module/instance tree for the sidebar."""
 
@@ -191,7 +275,12 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     if top_name not in modules:
         return {"name": top_name, "kind": "module", "children": []}
 
-    def build(module_name: str, instance_label: str | None) -> dict[str, Any]:
+    def build(
+        module_name: str,
+        instance_label: str | None,
+        *,
+        path_prefix: str = "",
+    ) -> dict[str, Any]:
         module = modules[module_name]
         label = instance_label or module_name
         children: list[dict[str, Any]] = []
@@ -201,6 +290,7 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
                     "name": port.name,
                     "kind": "port",
                     "direction": _port_dir_name(port.direction),
+                    "signalPath": _signal_path(path_prefix, port.name),
                     "children": [],
                 }
             )
@@ -209,12 +299,18 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
                 {
                     "name": decl.name,
                     "kind": decl.kind.name.lower(),
+                    "signalPath": _signal_path(path_prefix, decl.name),
                     "children": [],
                 }
             )
         for inst in module.instances:
+            child_prefix = (
+                f"{path_prefix}{inst.instance_name}."
+                if path_prefix
+                else f"{inst.instance_name}."
+            )
             if inst.module_type in modules:
-                children.append(build(inst.module_type, inst.instance_name))
+                children.append(build(inst.module_type, inst.instance_name, path_prefix=child_prefix))
             else:
                 children.append(
                     {
@@ -239,7 +335,11 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
         path = base / item.path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(item.content, encoding="utf-8")
-        paths.append(path)
+        if not item.include_only:
+            paths.append(path)
+    if not paths:
+        msg = "no elaboration entry files (only include-only sources?)"
+        raise ValueError(msg)
     loaded = load_design_with_meta(paths)
     return loaded, base, tmp
 
@@ -255,7 +355,7 @@ def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
             path.relative_to(root)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="example not found") from exc
-        files.append({"path": rel, "content": path.read_text(encoding="utf-8")})
+        files.append({"path": rel, "content": read_verilog_text(path)})
     return files
 
 
@@ -410,6 +510,7 @@ def create_app() -> FastAPI:
                 payload,
                 top=req.top,
                 label=req.label,
+                wave=req.wave,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -453,11 +554,13 @@ def create_app() -> FastAPI:
         try:
             loaded, _base, _tmp = load_design_from_files(req.files)
             design = loaded.design
-            top = req.top or design.modules[-1].name
+            requested_top = (req.top or "").strip() or None
+            top = resolve_top_module(design, req.top)
             elaborated = elaborate(design, top=top)
-            return {
+            payload: dict[str, Any] = {
                 "ok": True,
                 "top": elaborated.top_module,
+                "signal_names": sorted(elaborated.nets.keys()),
                 "module_names": design_overview(design)["module_names"],
                 "overview": design_overview(design),
                 "hierarchy": hierarchy_tree(design, top=top),
@@ -465,7 +568,12 @@ def create_app() -> FastAPI:
                 "continuous_assigns": len(elaborated.continuous_assigns),
                 "initial_blocks": len(elaborated.initial_blocks),
                 "always_blocks": len(elaborated.always_blocks),
+                "suggested_until": suggested_sim_until(design, top=top),
             }
+            if requested_top and requested_top != top:
+                payload["top_auto"] = top
+                payload["top_requested"] = requested_top
+            return payload
         except Exception as exc:
             return {
                 "ok": False,
@@ -480,9 +588,8 @@ def create_app() -> FastAPI:
         try:
             loaded, base, _tmp = load_design_from_files(req.files)
             design = loaded.design
-            top = req.top
-            if top is None:
-                top = design.modules[-1].name
+            requested_top = (req.top or "").strip() or None
+            top = resolve_top_module(design, req.top)
 
             vcd_path = base / "wave.vcd" if req.generate_vcd else None
             sim = Simulator(
@@ -497,24 +604,45 @@ def create_app() -> FastAPI:
 
             waveform: dict[str, Any] | None = None
             vcd_text = ""
-            if vcd_path is not None and vcd_path.is_file():
-                vcd_text = vcd_path.read_text(encoding="utf-8")
+            vcd_read = vcd_path
+            if (
+                vcd_read is not None
+                and not vcd_read.is_file()
+                and result.vcd_path is not None
+                and result.vcd_path.is_file()
+            ):
+                vcd_read = result.vcd_path
+            if vcd_read is not None and vcd_read.is_file():
+                vcd_text = vcd_read.read_text(encoding="utf-8")
                 waveform = timeline_to_json(parse_vcd_timeline(vcd_text))
 
-            return {
+            payload = {
                 "ok": True,
                 "top_module": result.top_module,
+                "top": top,
                 "stop_time": result.stop_time,
                 "events_processed": result.events_processed,
                 "console": console.getvalue(),
                 "vcd": vcd_text,
                 "waveform": waveform,
                 "signals": nets_overview(sim),
+                "signal_names": sorted(sim._nets.keys()),
                 "hierarchy": hierarchy_tree(design, top=top),
                 "overview": design_overview(design),
                 "module_names": design_overview(design)["module_names"],
                 "files_loaded": [f.path for f in req.files],
+                "suggested_until": suggested_sim_until(design, top=top),
+                "hints": simulation_time_hints(
+                    design,
+                    top=top,
+                    stop_time=result.stop_time,
+                    until=req.until,
+                ),
             }
+            if requested_top and requested_top != top:
+                payload["top_auto"] = top
+                payload["top_requested"] = requested_top
+            return payload
         except Exception as exc:
             return {
                 "ok": False,

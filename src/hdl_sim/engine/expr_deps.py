@@ -24,6 +24,8 @@ from hdl_sim.parser.ast import (
     WhileStmt,
     ForStmt,
     ConcatExpr,
+    ReplicationExpr,
+    WaitStmt,
 )
 
 
@@ -35,12 +37,20 @@ def identifiers_in_expr(expr: Expr) -> set[str]:
         for part in expr.parts:
             names |= identifiers_in_expr(part)
         return names
+    if isinstance(expr, ReplicationExpr):
+        return identifiers_in_expr(expr.count) | identifiers_in_expr(expr.expr)
     if isinstance(expr, IdentRef):
         return {expr.name}
     if isinstance(expr, BitSelect):
-        return {expr.signal} | identifiers_in_expr(expr.index)
+        names = {expr.signal} | identifiers_in_expr(expr.index)
+        if expr.word is not None:
+            names |= identifiers_in_expr(expr.word)
+        return names
     if isinstance(expr, PartSelect):
-        return {expr.signal} | identifiers_in_expr(expr.msb) | identifiers_in_expr(expr.lsb)
+        names = {expr.signal} | identifiers_in_expr(expr.msb) | identifiers_in_expr(expr.lsb)
+        if expr.word is not None:
+            names |= identifiers_in_expr(expr.word)
+        return names
     if isinstance(expr, UnaryExpr):
         return identifiers_in_expr(expr.operand)
     if isinstance(expr, BinaryExpr):
@@ -56,6 +66,8 @@ def identifiers_in_expr(expr: Expr) -> set[str]:
 
 def identifiers_in_lvalue(lvalue: Lvalue) -> set[str]:
     names = {lvalue.base}
+    if lvalue.word is not None:
+        names |= identifiers_in_expr(lvalue.word)
     if lvalue.bit is not None:
         names |= identifiers_in_expr(lvalue.bit)
     if lvalue.msb is not None and lvalue.lsb is not None:
@@ -72,7 +84,7 @@ def identifiers_in_stmt(stmt: Stmt) -> set[str]:
     if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
         return identifiers_in_lvalue(stmt.target) | identifiers_in_expr(stmt.expr)
     if isinstance(stmt, DelayControl):
-        return identifiers_in_stmt(stmt.body)
+        return identifiers_in_expr(stmt.delay) | identifiers_in_stmt(stmt.body)
     if isinstance(stmt, Forever):
         return identifiers_in_stmt(stmt.body)
     if isinstance(stmt, Repeat):
@@ -105,4 +117,6 @@ def identifiers_in_stmt(stmt: Stmt) -> set[str]:
         for event in stmt.events:
             result |= identifiers_in_expr(event)
         return result | identifiers_in_stmt(stmt.body)
+    if isinstance(stmt, WaitStmt):
+        return identifiers_in_expr(stmt.condition)
     return set()

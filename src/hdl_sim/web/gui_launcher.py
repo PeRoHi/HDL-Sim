@@ -16,8 +16,9 @@ from hdl_sim.web.launcher import (
     open_ui_window,
     start_server,
 )
+from hdl_sim.web.crash_log import write_crash_log
 from hdl_sim.web.native_window import pywebview_available, pywebview_help
-from hdl_sim.web.paths import ui_dir
+from hdl_sim.web.paths import install_dir, ui_dir
 from hdl_sim.web.runtime import ensure_stdio, prepare_runtime
 
 tk = messagebox = scrolledtext = ttk = None  # lazy-loaded for dev GUI only
@@ -164,8 +165,10 @@ class HDLSimGuiLauncher:
         )
         if isinstance(result, int):
             self.status.set("起動に失敗しました")
+            log_hint = install_dir() / "hdl-sim-server-error.log"
             msg = (
-                "サーバーの起動に失敗しました。ログを確認してください。"
+                "サーバーの起動に失敗しました。\n"
+                f"下のログ欄と {log_hint} を確認してください。"
                 if is_frozen()
                 else dependency_help()
             )
@@ -215,10 +218,18 @@ def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = 
 
 def main() -> int:
     prepare_runtime()
-    if is_frozen():
-        return run_frozen_desktop()
-    run_gui()
-    return 0
+    try:
+        # Installed builds show the launcher log so startup errors are visible.
+        run_gui(native_window=is_frozen())
+        return 0
+    except Exception as exc:
+        log_path = write_crash_log(exc, context="gui_launcher.main")
+        _frozen_error(
+            "HDL-Sim の起動に失敗しました。\n"
+            f"{exc}\n\n"
+            + (f"ログ: {log_path}" if log_path else "ログ: インストール先の hdl-sim-crash.log")
+        )
+        return 1
 
 
 def run_frozen_desktop(*, host: str = "127.0.0.1", port: int = 8765) -> int:
@@ -241,7 +252,13 @@ def run_frozen_desktop(*, host: str = "127.0.0.1", port: int = 8765) -> int:
             open_ui_window(result.url, server=result, native=True)
             return 0
         except Exception as exc:
-            _frozen_error(f"専用ウィンドウを開けませんでした。\n{exc}\n\nブラウザで開きます。")
+            write_crash_log(exc, context="run_frozen_desktop.native_window")
+            _frozen_error(
+                f"専用ウィンドウを開けませんでした。\n{exc}\n\n"
+                "WebView2 が未インストールの可能性があります。\n"
+                "https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n"
+                "ブラウザで開きます。"
+            )
 
     open_browser_later(result.url)
     try:

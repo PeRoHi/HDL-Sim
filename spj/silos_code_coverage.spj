@@ -1,0 +1,17 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "silos_code_coverage",
+  "top": "testbench",
+  "files": [
+    {
+      "path": "testbench.v",
+      "content": "//title Simple testbench for the Code Coverage example\n\n`timescale 1ns / 1ns\n`disable_codecoverage\nmodule testbench;\n\treg[1:0] A, B, C, D;\n\twire[1:0] Z;\n\tselect select_ABCD (A, B, C, D, Z);\n\tinitial\n\t\tbegin\n\t\t#10 A=0; B=0; C=0; D=0;\n\t\t#10 A = 2'b10;\n\t\t#10 B = 2'b11;\n\t\t#100 $finish;\n\t\tend\nendmodule\n`enable_codecoverage\n\n"
+    },
+    {
+      "path": "code_coverage.v",
+      "content": "//title Simple Design to illustrate Code Coverage\n\nmodule select (A, B, C, D, Z);\n\tinput [1:0] A, B, C, D;\n\toutput [1:0] Z;\n\treg [1:0] Z;\n\treg out, out1, out2;\n\n\tinitial #1 out = 1;\n\t\n\talways @( A or B or C or D)\n\t\tbegin\n\t\tif (A > B || C < D)\n\t\t\tZ = A;\n\t\telse if (C > D)\n\t\t\tZ = C;\n\t\telse\n\t\t\tZ = A + B;\n\t\tend\n\n\talways @out  \n\t\tbegin\n\t\t#1 out1 = ~out;\n\t\t#1 out2 = ~out1;\n\t\t#1 out = ~out2 | out1;\n\t\tend\nendmodule\n"
+    }
+  ],
+  "label": "Code coverage sample 1"
+}

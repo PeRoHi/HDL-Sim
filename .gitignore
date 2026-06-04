@@ -7,5 +7,8 @@ dist/
 *.vcd
 projects/*
 !projects/.gitkeep
+# Bundled example projects are committed; user saves also land here locally.
 spj/*
-!spj/.gitkeep
+!spj/
+!spj/README.md
+!spj/*.spj

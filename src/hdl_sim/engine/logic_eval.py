@@ -13,10 +13,14 @@ from hdl_sim.parser.ast import (
     BinaryExpr,
     BitSelect,
     ConcatExpr,
+    DeclKind,
+    ReplicationExpr,
     Expr,
     IdentRef,
     IntLiteral,
     PartSelect,
+    RealLiteral,
+    StringLiteral,
     UnaryExpr,
 )
 
@@ -35,33 +39,62 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
 
     if isinstance(expr, IntLiteral):
         return FourStateValue.from_literal(expr)
+    if isinstance(expr, RealLiteral):
+        return FourStateValue.from_int(int(expr.value), width=32)
+    if isinstance(expr, StringLiteral):
+        value = 0
+        for ch in expr.value.encode("utf-8"):
+            value = (value << 8) | ch
+        width = max(32, value.bit_length())
+        return FourStateValue(value=value, width=width)
     if isinstance(expr, IdentRef):
-        net = nets[expr.name]
-        return FourStateValue(
-            value=net.value,
-            width=net.width,
-            x_mask=getattr(net, "x_mask", 0),
-            z_mask=getattr(net, "z_mask", 0),
-        )
+        net = nets.get(expr.name)
+        if net is not None:
+            if net.kind is DeclKind.REAL:
+                return FourStateValue.from_int(int(net.real_value), width=32)
+            return FourStateValue(
+                value=net.value,
+                width=net.width,
+                x_mask=getattr(net, "x_mask", 0),
+                z_mask=getattr(net, "z_mask", 0),
+            )
+        value = eval_int(expr)
+        width = max(1, value.bit_length())
+        return FourStateValue(value=value, width=width)
     if isinstance(expr, BitSelect):
-        base = eval_logic(IdentRef(expr.signal), eval_int, nets)
-        index = eval_int(expr.index)
-        bit = (base.value >> index) & 1
-        x = (base.x_mask >> index) & 1
-        z = (base.z_mask >> index) & 1
-        return FourStateValue(value=bit, width=1, x_mask=x, z_mask=z)
-    if isinstance(expr, PartSelect):
         from hdl_sim.engine.lvalue import read_lvalue
         from hdl_sim.parser.ast import Lvalue
 
         value = read_lvalue(
-            Lvalue(base=expr.signal, msb=expr.msb, lsb=expr.lsb),
+            Lvalue(base=expr.signal, word=expr.word, bit=expr.index),
+            nets,
+            eval_int,
+        )
+        from hdl_sim.engine.signed_ops import operand_width
+
+        net = nets.get(expr.signal)
+        if expr.word is not None:
+            width = 1
+        elif net is not None:
+            width = 1
+        else:
+            width = operand_width(expr, nets, default=1)
+        return FourStateValue.from_int(value, width=width)
+    if isinstance(expr, PartSelect):
+        from hdl_sim.engine.lvalue import read_lvalue
+        from hdl_sim.engine.signed_ops import operand_width
+        from hdl_sim.parser.ast import Lvalue
+
+        value = read_lvalue(
+            Lvalue(base=expr.signal, word=expr.word, msb=expr.msb, lsb=expr.lsb),
             nets,
             eval_int,
         )
         width = abs(eval_int(expr.msb) - eval_int(expr.lsb)) + 1
         return FourStateValue.from_int(value, width=width)
     if isinstance(expr, UnaryExpr):
+        if expr.op in {"$signed", "$unsigned"}:
+            return eval_logic(expr.operand, eval_int, nets)
         operand = eval_logic(expr.operand, eval_int, nets)
         if expr.op == "~":
             return bitwise_not(operand)
@@ -126,9 +159,28 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
             return FourStateValue.from_int((lv * rv) & mask, width=width)
         if expr.op == "<<":
             return FourStateValue.from_int((lv << rv) & mask, width=width)
-        if expr.op == ">>":
-            return FourStateValue.from_int(lv >> rv, width=width)
+        if expr.op in {">>", ">>>"}:
+            from hdl_sim.engine.signed_ops import (
+                expr_is_signed,
+                operand_width,
+                shift_right_arithmetic,
+                shift_right_logical,
+            )
+
+            lwidth = operand_width(expr.left, nets)
+            if expr_is_signed(expr.left, nets):
+                result = shift_right_arithmetic(lv, rv, lwidth)
+            else:
+                result = shift_right_logical(lv, rv, lwidth)
+            return FourStateValue.from_int(result, width=lwidth)
         if expr.op in {"==", "!=", "<", "<=", ">", ">="}:
+            from hdl_sim.engine.signed_ops import compare_signed, expr_is_signed, operand_width
+
+            lwidth = operand_width(expr.left, nets)
+            rwidth = operand_width(expr.right, nets)
+            if expr_is_signed(expr.left, nets) or expr_is_signed(expr.right, nets):
+                ok = compare_signed(lv, rv, lwidth, rwidth, expr.op)
+                return FourStateValue(value=ok, width=1)
             if expr.op == "==":
                 ok = lv == rv
             elif expr.op == "!=":
@@ -144,6 +196,24 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
             return FourStateValue(value=1 if ok else 0, width=1)
         msg = f"unsupported binary operator: {expr.op}"
         raise ValueError(msg)
+    if isinstance(expr, ReplicationExpr):
+        count = eval_int(expr.count)
+        inner = eval_logic(expr.expr, eval_int, nets)
+        total_width = inner.width * count
+        value = x_mask = z_mask = 0
+        inner_mask = (1 << inner.width) - 1 if inner.width else 0
+        for index in range(count):
+            shift = index * inner.width
+            value |= (inner.value & inner_mask) << shift
+            x_mask |= (inner.x_mask & inner_mask) << shift
+            z_mask |= (inner.z_mask & inner_mask) << shift
+        mask = (1 << total_width) - 1 if total_width else 0
+        return FourStateValue(
+            value=value & mask,
+            width=total_width,
+            x_mask=x_mask & mask,
+            z_mask=z_mask & mask,
+        )
     if isinstance(expr, ConcatExpr):
         parts = [eval_logic(part, eval_int, nets) for part in expr.parts]
         total_width = sum(part.width for part in parts)

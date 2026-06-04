@@ -1,0 +1,24 @@
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting expression or "(", not keyword "or"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting ")"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting expression or "(", not keyword "or"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting ")"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting expression or "(", not keyword "or"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting ")"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting expression or "(", not keyword "or"
+warning# 1.229
+ print %h ( or ); quit
+             ^ expecting ")"

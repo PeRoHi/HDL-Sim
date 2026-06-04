@@ -215,7 +215,20 @@ def start_server(
     server = uvicorn.Server(config)
 
     def _serve() -> None:
-        server.run()
+        try:
+            server.run()
+        except Exception:
+            if is_frozen():
+                import traceback
+
+                from hdl_sim.web.paths import install_dir
+
+                log_path = install_dir() / "hdl-sim-server-error.log"
+                try:
+                    log_path.write_text(traceback.format_exc(), encoding="utf-8")
+                except OSError:
+                    pass
+            raise
 
     thread = threading.Thread(target=_serve, daemon=False, name="hdl-sim-ui")
     thread.start()

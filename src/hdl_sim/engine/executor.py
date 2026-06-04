@@ -32,12 +32,98 @@ from hdl_sim.parser.ast import (
     ForStmt,
     ForkJoin,
     TaskEnable,
+    WaitStmt,
 )
 
 
 ContinueCallback = Callable[[], None]
 NetUpdateCallback = Callable[[SimNet, SimTime], None]
 FinishCallback = Callable[[], None]
+
+
+def _expr_bit_width(evaluator, expr: Expr) -> int | None:
+    if not isinstance(expr, IdentRef):
+        return None
+    for nets in (evaluator._nets, getattr(evaluator, "_global_nets", {})):
+        net = nets.get(expr.name)
+        if net is not None:
+            return net.width
+    return None
+
+
+def _format_verilog(
+    fmt: str,
+    values: list[int],
+    *,
+    widths: list[int | None] | None = None,
+) -> tuple[str, int]:
+    import re
+
+    used = 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal used
+        spec = match.group(0)
+        if spec == "%%":
+            return "%"
+        if used >= len(values):
+            return spec
+        value = values[used]
+        width_hint = widths[used] if widths and used < len(widths) else None
+        used += 1
+        spec_match = re.match(r"%0?(\d*)([bhdBHD])", spec)
+        if not spec_match:
+            return str(value)
+        digits, code = spec_match.group(1), spec_match.group(2).lower()
+        if digits:
+            width = int(digits)
+        elif width_hint is not None:
+            width = width_hint
+        elif code == "b":
+            width = max(1, value.bit_length())
+        else:
+            width = max(1, (value.bit_length() + 3) // 4)
+        mask = (1 << width) - 1 if width < 63 else None
+        masked = (value & mask) if mask is not None else value
+        if code == "b":
+            return format(masked, f"0{width}b")
+        if code == "h":
+            hex_width = max(1, (width + 3) // 4)
+            return format(masked, f"0{hex_width}x")
+        if code == "d":
+            return str(value)
+        return str(value)
+
+    rendered = re.sub(r"%%|%0?\d*?[bhdBHD]", repl, fmt)
+    return rendered, used
+
+
+def render_display_args(args: tuple[DisplayArg, ...], evaluator) -> str:
+    parts: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg.text is not None:
+            following: list[int] = []
+            following_widths: list[int | None] = []
+            lookahead = index + 1
+            while lookahead < len(args) and args[lookahead].expr is not None:
+                expr = args[lookahead].expr
+                following.append(evaluator.eval(expr))
+                following_widths.append(_expr_bit_width(evaluator, expr))
+                lookahead += 1
+            rendered, used = _format_verilog(
+                arg.text,
+                following,
+                widths=following_widths,
+            )
+            parts.append(rendered)
+            index += 1 + used
+            continue
+        if arg.expr is not None:
+            parts.append(str(evaluator.eval(arg.expr)))
+        index += 1
+    return "".join(parts)
 
 
 @dataclass(slots=True)
@@ -100,6 +186,14 @@ class StatementRunner:
 
         if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             if isinstance(stmt, BlockingAssign):
+                from hdl_sim.parser.ast import DeclKind
+
+                target_net = self._ctx.nets.get(stmt.target.base)
+                if target_net is not None and target_net.kind is DeclKind.REAL:
+                    target_net.real_value = self._ctx.evaluator.eval_real(stmt.expr)
+                    if on_complete is not None:
+                        on_complete()
+                    return
                 from hdl_sim.engine.lvalue import write_lvalue_logic
 
                 state = self._ctx.evaluator.eval_logic(stmt.expr)
@@ -124,7 +218,8 @@ class StatementRunner:
             return
 
         if isinstance(stmt, DelayControl):
-            target_time = self._now() + stmt.delay
+            delay_val = int(self._ctx.evaluator.eval(stmt.delay))
+            target_time = self._now() + delay_val
 
             def resume() -> None:
                 self.execute(stmt.body, on_complete=on_complete)
@@ -179,13 +274,17 @@ class StatementRunner:
                 on_complete()
             return
 
+        if isinstance(stmt, WaitStmt):
+            self._execute_wait(stmt, on_complete=on_complete)
+            return
+
         if isinstance(stmt, ForkJoin):
             self._execute_fork_join(stmt, on_complete=on_complete)
             return
 
 
         if isinstance(stmt, EventControl):
-            self._execute_event_control(stmt)
+            self._execute_event_control(stmt, on_complete=on_complete)
             return
 
         msg = f"unsupported statement: {type(stmt).__name__}"
@@ -197,20 +296,27 @@ class StatementRunner:
             value = self._ctx.evaluator.eval(stmt.init.expr)
             self._state.assign_lvalue(stmt.init.target, value, blocking=True, time=self._now())
 
-        iterations = 0
-        while stmt.condition is None or self._ctx.evaluator.eval(stmt.condition):
-            iterations += 1
-            if iterations > 10_000:
+        def loop(iterations: int) -> None:
+            if stmt.condition is not None and not self._ctx.evaluator.eval(stmt.condition):
+                if on_complete is not None:
+                    on_complete()
+                return
+            if iterations >= 10_000:
                 msg = "for loop iteration limit exceeded"
                 raise RuntimeError(msg)
-            StatementRunner(self._state).execute(stmt.body)
-            if stmt.step is None:
-                break
-            value = self._ctx.evaluator.eval(stmt.step.expr)
-            self._state.assign_lvalue(stmt.step.target, value, blocking=True, time=self._now())
 
-        if on_complete is not None:
-            on_complete()
+            def after_body() -> None:
+                if stmt.step is None:
+                    if on_complete is not None:
+                        on_complete()
+                    return
+                value = self._ctx.evaluator.eval(stmt.step.expr)
+                self._state.assign_lvalue(stmt.step.target, value, blocking=True, time=self._now())
+                loop(iterations + 1)
+
+            StatementRunner(self._state).execute(stmt.body, on_complete=after_body)
+
+        loop(0)
 
     def _execute_while(self, stmt: WhileStmt, *, on_complete: ContinueCallback | None = None) -> None:
         if self._ctx.evaluator.eval(stmt.condition):
@@ -289,8 +395,8 @@ class StatementRunner:
             if self._ctx.on_dumpvars is not None:
                 self._ctx.on_dumpvars(stmt.args)
             return
-        msg = f"unsupported system task: {stmt.name}"
-        raise RuntimeError(msg)
+        # Unknown vendor/PLI system tasks (e.g. $sdf_annotate) are ignored.
+        return
 
     def _execute_statement_list(
         self,
@@ -307,7 +413,8 @@ class StatementRunner:
         stmt = statements[index]
 
         if isinstance(stmt, DelayControl):
-            target_time = self._now() + stmt.delay
+            delay_val = int(self._ctx.evaluator.eval(stmt.delay))
+            target_time = self._now() + delay_val
 
             def resume_after_delay() -> None:
                 runner = StatementRunner(self._state)
@@ -317,9 +424,16 @@ class StatementRunner:
             self._ctx.schedule(target_time, resume_after_delay)
             return
 
-        if isinstance(stmt, (BlockingAssign, NonBlockingAssign, IfStmt, WhileStmt, ForStmt, CaseStmt)):
+        if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             self.execute(stmt)
             self._execute_statement_list(statements, index + 1, on_complete=on_complete)
+            return
+
+        if isinstance(stmt, (IfStmt, WhileStmt, ForStmt, CaseStmt)):
+            def after_control() -> None:
+                self._execute_statement_list(statements, index + 1, on_complete=on_complete)
+
+            self.execute(stmt, on_complete=after_control)
             return
 
         if isinstance(stmt, Block):
@@ -339,21 +453,7 @@ class StatementRunner:
         nested_runner.execute(stmt, on_complete=after_stmt)
 
     def _execute_display(self, stmt: Display) -> None:
-        parts: list[str] = []
-        format_values: list[int] = []
-        for arg in stmt.args:
-            if arg.text is not None:
-                parts.append(arg.text)
-            elif arg.expr is not None:
-                format_values.append(self._ctx.evaluator.eval(arg.expr))
-        if parts and format_values:
-            message = parts[0] % tuple(format_values)
-        elif parts:
-            message = "".join(parts)
-        elif format_values:
-            message = " ".join(str(value) for value in format_values)
-        else:
-            message = ""
+        message = render_display_args(stmt.args, self._ctx.evaluator)
         print(message, flush=True)
         if self._ctx.on_display is not None:
             self._ctx.on_display(message, self._now())
@@ -380,18 +480,65 @@ class StatementRunner:
 
         step(count)
 
-    def _execute_event_control(self, stmt: EventControl) -> None:
-        trigger = self._await_events(stmt.events)
+    def _execute_wait(
+        self,
+        stmt: WaitStmt,
+        *,
+        on_complete: ContinueCallback | None = None,
+    ) -> None:
+        from hdl_sim.engine.expr_deps import identifiers_in_expr
 
-        def arm() -> None:
-            if trigger():
-                StatementRunner(self._state).execute(stmt.body)
-            arm()
+        fired = False
+
+        def try_continue() -> None:
+            nonlocal fired
+            if fired:
+                return
+            if self._ctx.evaluator.eval(stmt.condition):
+                fired = True
+                if on_complete is not None:
+                    on_complete()
+
+        for name in identifiers_in_expr(stmt.condition):
+            net = self._state.context.nets.get(name)
+            if net is not None:
+                net.subscribe(lambda *_args, cb=try_continue: cb())
+
+        try_continue()
+
+    def _execute_event_control(
+        self,
+        stmt: EventControl,
+        *,
+        on_complete: ContinueCallback | None = None,
+    ) -> None:
+        trigger = self._await_events(stmt.events)
+        fired = False
+
+        def try_fire() -> None:
+            nonlocal fired
+            if fired or not trigger():
+                return
+            fired = True
+            StatementRunner(self._state).execute(stmt.body, on_complete=on_complete)
 
         for net in self._nets_in_events(stmt.events):
-            net.subscribe(lambda *_args, arm_cb=arm: arm_cb())
+            net.subscribe(lambda *_args, cb=try_fire: cb())
 
-        arm()
+        # Edge-sensitive waits must not re-sample the current value (same negedge would refire).
+        if not self._events_are_edge_sensitive(stmt.events):
+            try_fire()
+
+    def _events_are_edge_sensitive(self, events: tuple[Expr, ...]) -> bool:
+        if not events:
+            return False
+
+        for event in events:
+            if isinstance(event, UnaryExpr) and event.op in {"posedge", "negedge"}:
+                if isinstance(event.operand, IdentRef):
+                    continue
+            return False
+        return True
 
     def _await_events(self, events: tuple[Expr, ...]) -> Callable[[], bool]:
         if not events:

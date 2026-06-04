@@ -2,9 +2,10 @@
 ; Build: packaging\build_installer.bat
 
 #define AppName "HDL-Sim"
-#define AppVersion "0.5.1"
+#define AppVersion "0.5.5"
 #define AppPublisher "HDL-Sim"
 #define AppExeName "HDL-Sim.exe"
+#define WebView2Bootstrapper "redist\MicrosoftEdgeWebview2Setup.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -29,19 +30,28 @@ CreateUninstallRegKey=yes
 UpdateUninstallLogAppName=yes
 CloseApplications=force
 RestartApplications=no
+#ifdef SignedRelease
+; Requires HDL_SIM_SIGN_PFX or HDL_SIM_SIGN_THUMBPRINT — see packaging/SIGNING.md
+SignTool=powershell -NoProfile -ExecutionPolicy Bypass -File "{src}inno_sign.ps1" $f
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
+Name: "installwebview2"; Description: "Microsoft WebView2 ランタイムをインストール (専用ウィンドウに必要)"; GroupDescription: "追加コンポーネント:"; Check: not IsWebView2Installed; Flags: checkedonce
 Name: "desktopicon"; Description: "デスクトップにショートカットを作成する"; GroupDescription: "ショートカットの作成:"; Flags: checkedonce
 Name: "quicklaunchicon"; Description: "クイック起動にショートカットを作成する"; GroupDescription: "ショートカットの作成:"; Flags: checkedonce; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
 Name: "launchapp"; Description: "インストール完了後に {#AppName} を起動する"; GroupDescription: "その他:"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\HDL-Sim\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "INSTALL_README.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "UNINSTALL_README.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#WebView2Bootstrapper}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: ShouldInstallWebView2
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Comment: "Verilog HDL シミュレータ IDE"
@@ -49,6 +59,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: quicklaunchicon; Comment: "Verilog HDL シミュレータ IDE"
 
 [Run]
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "WebView2 ランタイムをインストールしています..."; Check: ShouldInstallWebView2; Flags: waituntilterminated
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent; Tasks: launchapp
 
 [UninstallRun]
@@ -60,6 +71,27 @@ Type: files; Name: "{app}\data_dir.txt"
 [Code]
 var
   DataDirPage: TInputDirWizardPage;
+
+const
+  WebView2ClientGuid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function IsWebView2Installed: Boolean;
+var
+  Version: String;
+begin
+  Result :=
+    RegQueryStringValue(
+      HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WebView2ClientGuid,
+      'pv', Version) or
+    RegQueryStringValue(
+      HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WebView2ClientGuid,
+      'pv', Version);
+end;
+
+function ShouldInstallWebView2: Boolean;
+begin
+  Result := (not IsWebView2Installed) and IsTaskSelected('installwebview2');
+end;
 
 function ReadDataDirConfig(AppDir: String): String;
 var

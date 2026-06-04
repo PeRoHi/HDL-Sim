@@ -94,11 +94,13 @@ def load_project(name: str) -> dict[str, Any]:
         content = (project / rel).read_text(encoding="utf-8")
         files.append({"path": rel, "content": content})
     meta = _read_meta(project)
+    wave = meta.get("wave")
     return {
         "name": name,
         "label": meta.get("label", name),
         "top": meta.get("top"),
         "files": files,
+        "wave": wave if isinstance(wave, dict) else None,
     }
 
 
@@ -108,6 +110,7 @@ def save_project(
     *,
     top: str | None = None,
     label: str | None = None,
+    wave: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     project = _project_path(name)
     project.mkdir(parents=True, exist_ok=True)
@@ -131,6 +134,8 @@ def save_project(
         meta["top"] = top
     if label is not None:
         meta["label"] = label
+    if wave is not None:
+        meta["wave"] = wave
     meta.setdefault("label", name)
     (project / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
 

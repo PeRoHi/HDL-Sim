@@ -1,0 +1,17 @@
+sim to 0
+sim 
+scope "DFF_tp "
+debug; print %h ( 1 ); quit
+ print %h ( 1 ); quit
+scope "DFF_tp "
+debug; print %h ( 1 ); quit
+ print %h ( 1 ); quit
+scope "DFF_tp "
+debug; print %h ( 1 ); quit
+ print %h ( 1 ); quit
+scope "DFF_tp "
+debug; print %h ( 1 ); quit
+ print %h ( 1 ); quit
+scope "DFF_tp "
+debug; print %h ( 1 ); quit
+ print %h ( 1 ); quit
