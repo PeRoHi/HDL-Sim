@@ -377,14 +377,6 @@ function closeMdiWindow(id, win) {
     toggleWaveform(false);
     return;
   }
-  if (id === "output") {
-    hideMdiWindow(win);
-    return;
-  }
-  if (id.startsWith("file:")) {
-    closeFile(id.slice(5));
-    return;
-  }
   hideMdiWindow(win);
 }
 
@@ -468,7 +460,7 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
   const btnClose = document.createElement("button");
   btnClose.type = "button";
   btnClose.className = "mdi-btn close";
-  btnClose.title = "閉じる";
+  btnClose.title = "ウィンドウを閉じる（ファイルはワークスペースに残す）";
   btnClose.setAttribute("aria-label", "閉じる");
   btnClose.textContent = "×";
 

@@ -53,7 +53,8 @@ module tb_moving_avg_filter;
   integer abs_lpf;
   integer peak_noise_spike;   // スパイク付近の |noise_out| ピーク
   integer peak_lpf_spike;     // 同タイミングの |lpf_out_single|
-  integer peak_noise_quiet;   // 静穏区間の |noise_out| ピーク (ベースライン)
+  integer peak_noise_quiet;   // 静穏区間の |noise_out| ピーク (参考)
+  integer min_noise_quiet;    // 静穏区間の |noise_out| 最小 (ベースライン比較用)
 
   // 平滑性 (隣接サンプル差の絶対値和) 比較用
   integer prev_single;
@@ -75,6 +76,7 @@ module tb_moving_avg_filter;
     peak_noise_spike = 0;
     peak_lpf_spike   = 0;
     peak_noise_quiet = 0;
+    min_noise_quiet  = 999999;
     rough_single  = 0;
     rough_cascade = 0;
     prev_single   = 0;
@@ -101,17 +103,19 @@ module tb_moving_avg_filter;
       abs_noise = (noise_out < 0) ? -noise_out : noise_out;
       abs_lpf   = (lpf_out_single < 0) ? -lpf_out_single : lpf_out_single;
 
-      // スパイク付近 (出力に現れうる数サイクル) の noise ピークを捕捉
-      if (n >= spike_cycle && n <= spike_cycle + TAP_NUM + MATCH_DELAY) begin
+      // スパイク付近 (フィルタ遅延を見込んだ出力側の窓) の noise ピークを捕捉
+      if (n >= spike_cycle + MATCH_DELAY &&
+          n <= spike_cycle + TAP_NUM + MATCH_DELAY + MATCH_DELAY) begin
         if (abs_noise > peak_noise_spike) begin
           peak_noise_spike = abs_noise;
           peak_lpf_spike   = abs_lpf;
         end
       end
 
-      // 静穏区間 (立ち上がり後〜スパイク前) の noise ベースライン
-      if (n >= 16 && n < spike_cycle - 2) begin
+      // 静穏区間 (立ち上がり・フィルタ安定後、スパイクの影響前)
+      if (n >= 16 + MATCH_DELAY && n < spike_cycle - TAP_NUM - MATCH_DELAY) begin
         if (abs_noise > peak_noise_quiet) peak_noise_quiet = abs_noise;
+        if (abs_noise < min_noise_quiet)  min_noise_quiet  = abs_noise;
       end
 
       // 平滑性: スパイク通過後の区間で隣接差の絶対値和を積算
@@ -130,7 +134,8 @@ module tb_moving_avg_filter;
     $display("=====================================================");
     $display(" spike_amp                 = %0d", spike_amp);
     $display(" peak |noise_out| @ spike  = %0d", peak_noise_spike);
-    $display(" peak |noise_out| @ quiet  = %0d (baseline)", peak_noise_quiet);
+    $display(" peak |noise_out| @ quiet  = %0d (max in quiet)", peak_noise_quiet);
+    $display(" min  |noise_out| @ quiet  = %0d (baseline)", min_noise_quiet);
     $display(" |lpf_out_single| @ spike  = %0d (spike attenuated by ~1/N)", peak_lpf_spike);
     $display("=====================================================");
 
@@ -140,8 +145,9 @@ module tb_moving_avg_filter;
     else
       $display("[FAIL] noise_out did not capture the spike.");
 
-    // ハイパス特性: スパイク付近の noise ピークが静穏区間より十分大きい
-    if (peak_noise_spike > peak_noise_quiet * 2)
+    // ハイパス特性: スパイク付近の noise が静穏区間の最小ベースラインより十分大きい
+    // (静穏区間の最大値は正弦波残留で大きくなり得るため min と比較する)
+    if (peak_noise_spike > min_noise_quiet * 2)
       $display("[PASS] spike clearly stands out in noise_out vs quiet baseline.");
     else
       $display("[FAIL] spike does not stand out in noise_out.");

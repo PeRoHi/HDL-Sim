@@ -20,7 +20,7 @@ PYTHONPATH=src python3 -m pytest tests/test_signed_ashr_memory.py tests/test_res
 
 ## ローカル IDE での再確認（あなたの filter 6 ファイル）
 
-1. **バージョン** … Help → About で **0.5.19+**（古い exe は不可）
+1. **バージョン** … Help → About で **0.5.20+**（メニュー左上も Ver 0.5.20）
 2. **Top** … `*_tp` / 課題指定の TB 名（`(auto — *_tp 優先)` でも可）
 3. **Elab** … エラー無し、`top=...` が表示される
 4. **Run** … `[OK] time=...` と `[wave] N signals captured`
