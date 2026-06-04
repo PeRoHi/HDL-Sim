@@ -472,10 +472,11 @@ body.view-hide-project-bar .project-bar { display: none; }
 
 .tb-field-top input[type="text"] { width: 120px; }
 
+/* 常に2行: 1行目 Project / 2行目 SPJ */
 .project-bar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   background: #2a2d2e;
@@ -483,19 +484,12 @@ body.view-hide-project-bar .project-bar { display: none; }
 }
 
 .project-bar-group {
-  display: flex;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: 52px minmax(72px, 1fr) auto auto;
   align-items: center;
   gap: 4px;
+  width: 100%;
   min-width: 0;
-}
-
-.project-bar-workspace {
-  flex: 1 1 auto;
-}
-
-.project-bar-spj {
-  flex: 1 1 auto;
 }
 
 .project-label {
@@ -503,39 +497,25 @@ body.view-hide-project-bar .project-bar { display: none; }
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
-  flex-shrink: 0;
   white-space: nowrap;
+  justify-self: start;
 }
 
 .project-bar-group .mini-btn {
-  flex-shrink: 0;
+  white-space: nowrap;
+  justify-self: start;
 }
 
 #select-project,
 #select-spj {
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: 100%;
+  width: 100%;
+  min-width: 72px;
   height: 22px;
   font-size: 11px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 2px;
-}
-
-/* エクスプローラーが広いときは1行にまとめる */
-@media (min-width: 520px) {
-  .pane-explorer .project-bar {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .pane-explorer .project-bar-group {
-    flex: 1 1 200px;
-    max-width: calc(50% - 4px);
-  }
 }
 
 .visually-hidden {
