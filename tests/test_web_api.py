@@ -100,6 +100,40 @@ def test_list_examples_includes_projects() -> None:
     assert "@project/counter" in ids
 
 
+def test_expr_to_str_part_select() -> None:
+    from hdl_sim.parser.ast import IntLiteral, PartSelect
+    from hdl_sim.web.app import _expr_to_str
+
+    expr = PartSelect(
+        signal="timer_val",
+        msb=IntLiteral(value=3),
+        lsb=IntLiteral(value=0),
+    )
+    assert _expr_to_str(expr) == "timer_val[3:0]"
+
+
+def test_elaborate_reflex_slice_port_in_overview() -> None:
+    """Regression: design_overview must stringify timer_val[3:0] port connections."""
+    from hdl_sim.parser.parser import parse_module
+    from hdl_sim.web.app import design_overview
+
+    mod = parse_module(
+        """
+        module top;
+          wire [15:0] timer_val;
+          wire [6:0] seg;
+          seg7_decoder u_seg (timer_val[3:0], seg);
+        endmodule
+        """
+    )
+    from hdl_sim.parser.ast import Design
+
+    overview = design_overview(Design(modules=(mod,)))
+    u_seg = overview["modules"][0]["instances"][0]
+    signals = [c["signal"] for c in u_seg["connections"]]
+    assert "timer_val[3:0]" in signals
+
+
 def test_ui_info_reports_ide_layout() -> None:
     app = create_app()
     handler = next(

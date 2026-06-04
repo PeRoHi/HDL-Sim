@@ -175,17 +175,22 @@ def _module_to_dict(module: Module) -> dict[str, Any]:
 
 
 def _expr_to_str(expr: Any) -> str:
-    from hdl_sim.parser.ast import BitSelect, IdentRef, PartSelect
+    from hdl_sim.parser.ast import BitSelect, IdentRef, IntLiteral, PartSelect
 
     if isinstance(expr, IdentRef):
         return expr.name
+    if isinstance(expr, IntLiteral):
+        return str(expr.value)
     if isinstance(expr, BitSelect):
-        return f"{_expr_to_str(expr.base)}[{_expr_to_str(expr.index)}]"
+        base = expr.signal
+        if expr.word is not None:
+            base = f"{base}[{_expr_to_str(expr.word)}]"
+        return f"{base}[{_expr_to_str(expr.index)}]"
     if isinstance(expr, PartSelect):
-        return (
-            f"{_expr_to_str(expr.base)}[{_expr_to_str(expr.msb)}:"
-            f"{_expr_to_str(expr.lsb)}]"
-        )
+        base = expr.signal
+        if expr.word is not None:
+            base = f"{base}[{_expr_to_str(expr.word)}]"
+        return f"{base}[{_expr_to_str(expr.msb)}:{_expr_to_str(expr.lsb)}]"
     return str(expr)
 
 
