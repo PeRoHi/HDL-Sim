@@ -4,6 +4,12 @@
 
 import { createWorkspaceTree, scanModulesInWorkspace } from "./workspace-tree.js";
 import { createWaveSignalPanel } from "./wave-signal-panel.js";
+import {
+  mergeWavePrefsWithSignals,
+  loadWavePrefsForKey,
+  saveWavePrefsForKey,
+  wavePrefsFromProjectPayload,
+} from "./wave-prefs.js";
 
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
 \`timescale 1ns/1ps
@@ -59,6 +65,9 @@ let lastSignalNames = null;
 let waveformSelection = [];
 /** @type {string[]} 波形ビューでの表示順 */
 let waveformDisplayOrder = [];
+/** @type {import("./wave-prefs.js").WavePrefs | null} ワークスペース読み込み時に復元する波形設定 */
+let workspaceWavePrefs = null;
+let wavePrefsPersistTimer = null;
 let selectedSignal = null;
 /** @type {ReturnType<typeof createWaveSignalPanel> | null} */
 let waveSignalPanel = null;
@@ -556,7 +565,90 @@ function tileFileWindows() {
   }
 }
 
-function loadWorkspaceFiles(fileEntries, top) {
+function workspaceFilePaths() {
+  return [...fileStore.keys()].sort();
+}
+
+function sameFilePathSet(a, b) {
+  if (!a?.length && !b?.length) return true;
+  if (!a?.length || !b?.length || a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((p, i) => p === right[i]);
+}
+
+function getWavePrefsKey() {
+  if (currentProject) return `project:${currentProject}`;
+  const spj = $("select-spj")?.value;
+  if (spj) return `spj:${spj}`;
+  const paths = workspaceFilePaths();
+  if (!paths.length) return "";
+  return `ws:${paths.join("\0")}`;
+}
+
+function getCurrentWavePrefs() {
+  return {
+    selection: waveformSelection.slice(),
+    order: waveformDisplayOrder.slice(),
+    filePaths: workspaceFilePaths(),
+  };
+}
+
+function shouldReuseWavePrefs(saved) {
+  if (!saved) return false;
+  if (!saved.filePaths?.length) return true;
+  return sameFilePathSet(saved.filePaths, workspaceFilePaths());
+}
+
+function stashWorkspaceWavePrefs(waveFromPayload) {
+  const key = getWavePrefsKey();
+  const fromLs = key ? loadWavePrefsForKey(key) : null;
+  const fromPayload = wavePrefsFromProjectPayload(waveFromPayload);
+  let prefs = fromLs;
+  if (fromPayload && shouldReuseWavePrefs(fromPayload)) {
+    prefs = fromLs || fromPayload;
+  } else if (fromLs && shouldReuseWavePrefs(fromLs)) {
+    prefs = fromLs;
+  } else if (fromPayload) {
+    prefs = fromPayload;
+  }
+  workspaceWavePrefs = prefs;
+}
+
+function applyWavePrefsForSignals(available) {
+  const key = getWavePrefsKey();
+  let saved = workspaceWavePrefs;
+  if (!saved && key) saved = loadWavePrefsForKey(key);
+  if (saved && !shouldReuseWavePrefs(saved)) {
+    saved = { selection: saved.selection, order: saved.order };
+  }
+  const merged = mergeWavePrefsWithSignals(available, saved);
+  waveformSelection = merged.selection;
+  waveformDisplayOrder = merged.order;
+  workspaceWavePrefs = {
+    selection: merged.selection.slice(),
+    order: merged.order.slice(),
+    filePaths: workspaceFilePaths(),
+  };
+}
+
+function persistWavePrefsNow() {
+  const key = getWavePrefsKey();
+  if (!key) return;
+  const prefs = getCurrentWavePrefs();
+  workspaceWavePrefs = prefs;
+  saveWavePrefsForKey(key, prefs);
+}
+
+function schedulePersistWavePrefs() {
+  if (wavePrefsPersistTimer) clearTimeout(wavePrefsPersistTimer);
+  wavePrefsPersistTimer = setTimeout(() => {
+    wavePrefsPersistTimer = null;
+    persistWavePrefsNow();
+  }, 250);
+}
+
+function loadWorkspaceFiles(fileEntries, top, wavePrefs) {
   if (!fileEntries?.length) {
     appendConsole("[load] 読み込むファイルがありません", "warn");
     setStatus("No files loaded", "warn");
@@ -580,6 +672,7 @@ function loadWorkspaceFiles(fileEntries, top) {
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
+  stashWorkspaceWavePrefs(wavePrefs);
   renderEditorTabs();
   workspaceTree?.render();
   refreshTopModulePicker(top || undefined);
@@ -624,7 +717,7 @@ async function openProject(name) {
     }
     currentProject = data.name;
     $("select-example").value = "";
-    loadWorkspaceFiles(data.files, data.top || "");
+    loadWorkspaceFiles(data.files, data.top || "", data.wave);
     $("select-project").value = data.name;
     appendConsole(`[project] opened: ${data.name} (${data.files.length} files)`, "info");
     setStatus(`Project: ${data.name}`, "ok");
@@ -673,9 +766,15 @@ async function saveCurrentProject(showPrompt = true) {
 
   try {
     const payload = getPayload();
+    persistWavePrefsNow();
     const data = await api(
       `/api/projects/${encodeURIComponent(name)}`,
-      { files: payload.files, top: payload.top, label: name },
+      {
+        files: payload.files,
+        top: payload.top,
+        label: name,
+        wave: getCurrentWavePrefs(),
+      },
       undefined,
       "PUT"
     );
@@ -697,6 +796,7 @@ function currentProjectFileName() {
 
 function buildSpjPayload() {
   const payload = getPayload();
+  persistWavePrefsNow();
   return {
     format: "hdl-sim-project",
     version: 1,
@@ -705,6 +805,7 @@ function buildSpjPayload() {
     until: payload.until,
     max_events: payload.max_events,
     files: payload.files,
+    wave: getCurrentWavePrefs(),
   };
 }
 
@@ -717,7 +818,7 @@ function applySpjData(data, filename) {
   $("select-example").value = "";
   if (data.until != null) $("input-until").value = data.until;
   if (data.max_events != null) $("input-max-events").value = data.max_events;
-  loadWorkspaceFiles(data.files, data.top || "");
+  loadWorkspaceFiles(data.files, data.top || "", data.wave);
 }
 
 async function loadSpjFileList(selectName) {
@@ -974,7 +1075,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.20\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.21\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1525,6 +1626,7 @@ function toggleWaveformSignal(path) {
   if (!waveformVisible) toggleWaveform(true);
   switchExplorerTab("wave");
   refreshWaveformView();
+  schedulePersistWavePrefs();
 }
 
 function syncHierarchyWaveMarks() {
@@ -1734,6 +1836,7 @@ function createWaveformWindow() {
       waveformSelection = names;
       waveformDisplayOrder = names.slice();
       refreshWaveformView();
+      schedulePersistWavePrefs();
       switchExplorerTab("wave");
     });
     body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
@@ -1969,8 +2072,13 @@ async function runSimulate() {
     lastSignalNames = new Set(data.signal_names || data.signals?.map((s) => s.name) || []);
     lastWaveformFull = data.waveform;
     const waveNames = data.waveform?.signals?.map((s) => s.name) || [];
-    waveformSelection = waveNames.slice();
-    waveformDisplayOrder = waveNames.slice();
+    if (waveNames.length) {
+      applyWavePrefsForSignals(waveNames);
+      persistWavePrefsNow();
+    } else {
+      waveformSelection = [];
+      waveformDisplayOrder = [];
+    }
     applySuggestedUntil(data.suggested_until);
     refreshWaveformView();
     const waveCount = data.waveform?.signals?.length || 0;
@@ -2062,6 +2170,7 @@ function initWaveSignalPanelUi() {
     onChange: () => {
       if (!waveformVisible && waveformSelection.length) toggleWaveform(true);
       refreshWaveformView();
+      schedulePersistWavePrefs();
     },
   });
   waveSignalPanel.render();

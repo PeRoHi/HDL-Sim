@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.20"
+UI_BUILD = "0.5.21"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -93,6 +93,7 @@ class ProjectSaveRequest(BaseModel):
     files: list[SourceFile]
     top: str | None = None
     label: str | None = None
+    wave: dict[str, Any] | None = None
 
 
 class ElaborateRequest(BaseModel):
@@ -509,6 +510,7 @@ def create_app() -> FastAPI:
                 payload,
                 top=req.top,
                 label=req.label,
+                wave=req.wave,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

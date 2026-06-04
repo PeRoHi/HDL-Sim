@@ -37,6 +37,23 @@ def test_create_load_save_project(isolated_projects) -> None:
     assert paths == {"counter_dut.v", "tb_counter.v"}
 
 
+def test_save_project_persists_wave_prefs(isolated_projects) -> None:
+    project_store.create_project("wave_demo", top="tb")
+    wave = {
+        "selection": ["tb.clk", "tb.rst"],
+        "order": ["tb.rst", "tb.clk"],
+        "filePaths": ["tb.v"],
+    }
+    project_store.save_project(
+        "wave_demo",
+        [{"path": "tb.v", "content": "module tb; reg clk, rst; endmodule"}],
+        top="tb",
+        wave=wave,
+    )
+    loaded = project_store.load_project("wave_demo")
+    assert loaded["wave"] == wave
+
+
 def test_project_api_roundtrip(isolated_projects) -> None:
     app = create_app()
     create = next(r for r in app.routes if getattr(r, "path", None) == "/api/projects" and "POST" in getattr(r, "methods", set())).endpoint
