@@ -1052,7 +1052,8 @@ class VerilogTransformer(Transformer):
         return ConcatExpr(parts=(expr,))
 
     def concat_list(self, *exprs: Any) -> ConcatExpr:
-        return ConcatExpr(parts=tuple(self._resolve_expr(e) for e in exprs))
+        flat = self._child_args(exprs)
+        return ConcatExpr(parts=tuple(self._resolve_expr(e) for e in flat))
 
     @v_args(inline=True)
     def replication(self, count: Expr, inner: Expr) -> ReplicationExpr:

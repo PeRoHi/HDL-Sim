@@ -474,8 +474,7 @@ body.view-hide-project-bar .project-bar { display: none; }
 
 .project-bar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
@@ -483,23 +482,60 @@ body.view-hide-project-bar .project-bar { display: none; }
   flex-shrink: 0;
 }
 
+.project-bar-group {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-bar-workspace {
+  flex: 1 1 auto;
+}
+
+.project-bar-spj {
+  flex: 1 1 auto;
+}
+
 .project-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.project-bar-group .mini-btn {
+  flex-shrink: 0;
 }
 
 #select-project,
 #select-spj {
-  flex: 1;
-  min-width: 80px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
   height: 22px;
   font-size: 11px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 2px;
+}
+
+/* エクスプローラーが広いときは1行にまとめる */
+@media (min-width: 520px) {
+  .pane-explorer .project-bar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .pane-explorer .project-bar-group {
+    flex: 1 1 200px;
+    max-width: calc(50% - 4px);
+  }
 }
 
 .visually-hidden {

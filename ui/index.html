@@ -86,18 +86,22 @@
         <!-- Left: Explorer -->
         <aside id="pane-explorer" class="pane pane-explorer" aria-label="エクスプローラー">
           <div class="project-bar">
-            <label class="project-label" for="select-project">Project</label>
-            <select id="select-project" title="プロジェクト切替">
-              <option value="">— workspace —</option>
-            </select>
-            <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
-            <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
-            <label class="project-label" for="select-spj">SPJ</label>
-            <select id="select-spj" title="HDL-Sim/spj 内のプロジェクト">
-              <option value="">— .spj —</option>
-            </select>
-            <button type="button" id="btn-open-spj" class="mini-btn" title=".spj を開く (./spj/)">Open</button>
-            <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として ./spj/ に保存">Save</button>
+            <div class="project-bar-group project-bar-workspace">
+              <label class="project-label" for="select-project">Project</label>
+              <select id="select-project" title="プロジェクト切替">
+                <option value="">— workspace —</option>
+              </select>
+              <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
+              <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
+            </div>
+            <div class="project-bar-group project-bar-spj">
+              <label class="project-label" for="select-spj">SPJ</label>
+              <select id="select-spj" title="HDL-Sim/spj 内のプロジェクト">
+                <option value="">— .spj —</option>
+              </select>
+              <button type="button" id="btn-open-spj" class="mini-btn" title=".spj を開く (./spj/)">Open</button>
+              <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として ./spj/ に保存">Save</button>
+            </div>
           </div>
           <div class="pane-tabs" role="tablist">
             <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
