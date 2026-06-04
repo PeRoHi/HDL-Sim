@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.5.19" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.19" />
+  <meta name="hdl-sim-ui-build" content="0.5.20" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.20" />
 </head>
 <body>
   <!-- Silos-style menu bar -->
@@ -102,6 +102,7 @@
           <div class="pane-tabs" role="tablist">
             <button type="button" class="pane-tab active" data-pane="files" role="tab" aria-selected="true">Files</button>
             <button type="button" class="pane-tab" data-pane="hierarchy" role="tab" aria-selected="false">Hierarchy</button>
+            <button type="button" class="pane-tab" data-pane="wave" role="tab" aria-selected="false">Wave</button>
           </div>
           <div class="pane-body">
             <div id="view-files" class="pane-view active" role="tabpanel">
@@ -119,6 +120,9 @@
                 <div class="signal-section-header">Signals <span id="signal-count-badge" class="signal-count-badge"></span></div>
                 <ul id="signal-list" class="signal-list"></ul>
               </div>
+            </div>
+            <div id="view-wave" class="pane-view" role="tabpanel" hidden>
+              <div id="wave-signal-panel" class="wave-signal-panel-root"></div>
             </div>
           </div>
         </aside>
@@ -149,8 +153,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.5.19"></script>
-  <script src="/assets/js/menu-bar.js?v=0.5.19"></script>
-  <script src="/assets/js/app.js?v=0.5.19" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.5.20"></script>
+  <script src="/assets/js/menu-bar.js?v=0.5.20"></script>
+  <script src="/assets/js/app.js?v=0.5.20" type="module"></script>
 </body>
 </html>

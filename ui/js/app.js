@@ -3,6 +3,7 @@
  */
 
 import { createWorkspaceTree, scanModulesInWorkspace } from "./workspace-tree.js";
+import { createWaveSignalPanel } from "./wave-signal-panel.js";
 
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
 \`timescale 1ns/1ps
@@ -56,7 +57,11 @@ let lastTopModule = "";
 let lastSignalNames = null;
 /** @type {string[]} */
 let waveformSelection = [];
+/** @type {string[]} 波形ビューでの表示順 */
+let waveformDisplayOrder = [];
 let selectedSignal = null;
+/** @type {ReturnType<typeof createWaveSignalPanel> | null} */
+let waveSignalPanel = null;
 let waveformVisible = false;
 let waveZoom = 1;
 let abortController = null;
@@ -314,13 +319,117 @@ function bringMdiToFront(win) {
   win.classList.add("active");
 }
 
+function showMdiWindow(win) {
+  if (!win) return;
+  win.hidden = false;
+  win.style.removeProperty("display");
+  bringMdiToFront(win);
+}
+
+function hideMdiWindow(win) {
+  if (!win) return;
+  win.hidden = true;
+}
+
+function minimizeMdiWindow(win) {
+  if (!win) return;
+  win.classList.add("mdi-minimized");
+  win.dataset.mdiMaximized = "0";
+}
+
+function restoreMdiWindow(win) {
+  if (!win) return;
+  win.classList.remove("mdi-minimized");
+  if (win.dataset.mdiMaximized === "1") {
+    delete win.dataset.mdiMaximized;
+    win.style.left = win.dataset.mdiPrevLeft || win.style.left;
+    win.style.top = win.dataset.mdiPrevTop || win.style.top;
+    win.style.width = win.dataset.mdiPrevWidth || win.style.width;
+    win.style.height = win.dataset.mdiPrevHeight || win.style.height;
+  }
+  showMdiWindow(win);
+}
+
+function toggleMaximizeMdiWindow(win) {
+  if (!win) return;
+  const canvas = mdiCanvas();
+  if (win.dataset.mdiMaximized === "1") {
+    restoreMdiWindow(win);
+    return;
+  }
+  win.dataset.mdiPrevLeft = win.style.left;
+  win.dataset.mdiPrevTop = win.style.top;
+  win.dataset.mdiPrevWidth = win.style.width;
+  win.dataset.mdiPrevHeight = win.style.height;
+  win.classList.remove("mdi-minimized");
+  win.style.left = "8px";
+  win.style.top = "8px";
+  win.style.width = `${Math.max(260, canvas.clientWidth - 16)}px`;
+  win.style.height = `${Math.max(160, canvas.clientHeight - 16)}px`;
+  win.dataset.mdiMaximized = "1";
+  showMdiWindow(win);
+  layoutAllEditors();
+  if (win.dataset.mdiId === "waveform" && lastWaveform) drawWave(lastWaveform);
+}
+
+function closeMdiWindow(id, win) {
+  if (id === "waveform") {
+    toggleWaveform(false);
+    return;
+  }
+  if (id === "output") {
+    hideMdiWindow(win);
+    return;
+  }
+  if (id.startsWith("file:")) {
+    closeFile(id.slice(5));
+    return;
+  }
+  hideMdiWindow(win);
+}
+
+function attachMdiTitlebar(win, id, titlebar) {
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  titlebar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".mdi-controls")) return;
+    dragging = true;
+    bringMdiToFront(win);
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = win.offsetLeft;
+    startTop = win.offsetTop;
+    titlebar.setPointerCapture(e.pointerId);
+  });
+  titlebar.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
+    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
+  });
+  titlebar.addEventListener("pointerup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      titlebar.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  });
+  titlebar.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".mdi-controls")) return;
+    toggleMaximizeMdiWindow(win);
+  });
+}
+
 function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360, bodyClass = "", show = true } = {}) {
   const existing = mdiWindows.get(id);
   if (existing) {
-    if (show) {
-      existing.hidden = false;
-      bringMdiToFront(existing);
-    }
+    if (show) showMdiWindow(existing);
     return existing;
   }
 
@@ -341,21 +450,56 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
 
   const controls = document.createElement("div");
   controls.className = "mdi-controls";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "mdi-btn close";
-  close.title = "閉じる";
-  close.textContent = "×";
-  close.addEventListener("click", (e) => {
+
+  const btnMin = document.createElement("button");
+  btnMin.type = "button";
+  btnMin.className = "mdi-btn min";
+  btnMin.title = "最小化";
+  btnMin.setAttribute("aria-label", "最小化");
+  btnMin.textContent = "─";
+
+  const btnRestore = document.createElement("button");
+  btnRestore.type = "button";
+  btnRestore.className = "mdi-btn restore";
+  btnRestore.title = "ウィンドウを表示 / 最大化";
+  btnRestore.setAttribute("aria-label", "ウィンドウ表示");
+  btnRestore.textContent = "□";
+
+  const btnClose = document.createElement("button");
+  btnClose.type = "button";
+  btnClose.className = "mdi-btn close";
+  btnClose.title = "閉じる";
+  btnClose.setAttribute("aria-label", "閉じる");
+  btnClose.textContent = "×";
+
+  const stopCtl = (e) => {
     e.stopPropagation();
     e.preventDefault();
-    if (id === "waveform") {
-      toggleWaveform(false);
+  };
+
+  btnMin.addEventListener("pointerdown", stopCtl);
+  btnMin.addEventListener("click", (e) => {
+    stopCtl(e);
+    minimizeMdiWindow(win);
+  });
+
+  btnRestore.addEventListener("pointerdown", stopCtl);
+  btnRestore.addEventListener("click", (e) => {
+    stopCtl(e);
+    if (win.hidden || win.classList.contains("mdi-minimized")) {
+      restoreMdiWindow(win);
       return;
     }
-    win.hidden = true;
+    toggleMaximizeMdiWindow(win);
   });
-  controls.appendChild(close);
+
+  btnClose.addEventListener("pointerdown", stopCtl);
+  btnClose.addEventListener("click", (e) => {
+    stopCtl(e);
+    closeMdiWindow(id, win);
+  });
+
+  controls.append(btnMin, btnRestore, btnClose);
   titlebar.appendChild(controls);
 
   const body = document.createElement("div");
@@ -365,34 +509,10 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
   win.appendChild(body);
   mdiCanvas().appendChild(win);
   mdiWindows.set(id, win);
-  bringMdiToFront(win);
-
-  let dragging = false;
-  let startX = 0;
-  let startY = 0;
-  let startLeft = 0;
-  let startTop = 0;
-  titlebar.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    dragging = true;
-    bringMdiToFront(win);
-    startX = e.clientX;
-    startY = e.clientY;
-    startLeft = win.offsetLeft;
-    startTop = win.offsetTop;
-    titlebar.setPointerCapture(e.pointerId);
-  });
-  titlebar.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
-    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
-  });
-  titlebar.addEventListener("pointerup", (e) => {
-    dragging = false;
-    titlebar.releasePointerCapture(e.pointerId);
-  });
+  attachMdiTitlebar(win, id, titlebar);
   win.addEventListener("pointerdown", () => bringMdiToFront(win));
 
+  if (show) showMdiWindow(win);
   return win;
 }
 
@@ -862,7 +982,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.19\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.5.20\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -970,14 +1090,11 @@ function toggleWaveform(show) {
 
   if (waveformVisible) {
     createWaveformWindow();
-    btn.classList.add("active");
+    btn?.classList.add("active");
     if (lastWaveform) drawWave(lastWaveform);
   } else {
     const win = mdiWindows.get("waveform");
-    if (win) {
-      win.hidden = true;
-      win.style.display = "none";
-    }
+    if (win) hideMdiWindow(win);
     btn?.classList.remove("active");
   }
   layoutAllEditors();
@@ -995,6 +1112,9 @@ function switchExplorerTab(name) {
   $("view-files").hidden = name !== "files";
   $("view-hierarchy").classList.toggle("active", name === "hierarchy");
   $("view-hierarchy").hidden = name !== "hierarchy";
+  $("view-wave")?.classList.toggle("active", name === "wave");
+  if ($("view-wave")) $("view-wave").hidden = name !== "wave";
+  if (name === "wave") waveSignalPanel?.render();
 }
 
 /* ── File tree & editor tabs ── */
@@ -1177,7 +1297,7 @@ function openFile(path, options = {}) {
     height: 390,
     bodyClass: "mdi-editor",
   });
-  win.hidden = false;
+  showMdiWindow(win);
 
   let view = fileEditors.get(path);
   if (!view) {
@@ -1339,17 +1459,30 @@ function resolveWaveformSignalNames(path) {
   return [];
 }
 
+function allWaveformSignalNames() {
+  return lastWaveformFull?.signals?.map((s) => s.name) || [];
+}
+
 function buildDisplayWaveform() {
   if (!lastWaveformFull) return null;
-  const pick = waveformSelection.length
-    ? new Set(waveformSelection)
-    : null;
-  const signals = pick
-    ? lastWaveformFull.signals.filter((s) => pick.has(s.name))
-    : lastWaveformFull.signals.slice();
+  const byName = new Map(lastWaveformFull.signals.map((s) => [s.name, s]));
+  let order = waveformDisplayOrder.length
+    ? waveformDisplayOrder.filter((n) => byName.has(n))
+    : lastWaveformFull.signals.map((s) => s.name);
+  for (const s of lastWaveformFull.signals) {
+    if (!order.includes(s.name)) order.push(s.name);
+  }
+  const pick = waveformSelection.length ? new Set(waveformSelection) : null;
+  if (pick) order = order.filter((n) => pick.has(n));
+  let signals = order.map((n) => byName.get(n)).filter(Boolean);
+  if (!signals.length) {
+    signals = pick
+      ? [...pick].map((n) => byName.get(n)).filter(Boolean)
+      : lastWaveformFull.signals.slice(0, 12);
+  }
   return {
     timescale: lastWaveformFull.timescale,
-    signals: signals.length ? signals : lastWaveformFull.signals.slice(0, 12),
+    signals,
   };
 }
 
@@ -1373,13 +1506,14 @@ function refreshWaveformView() {
   updateWaveSignalCountLabel();
   if (lastWaveform) drawWave(lastWaveform);
   syncHierarchyWaveMarks();
+  waveSignalPanel?.render();
 }
 
 function toggleWaveformSignal(path) {
   const resolved = resolveWaveformSignalNames(path);
   if (!resolved.length) {
     const hint = lastSignalNames?.size
-      ? "Signals タブの名前をクリックするか、Run 後に Wave → All を試してください。"
+      ? "Wave タブで選択するか、Hierarchy の信号をクリックしてください。"
       : "先に Run してください。";
     appendConsole(`[wave] 波形に "${path}" がありません。${hint}`, "warn");
     return;
@@ -1391,7 +1525,13 @@ function toggleWaveformSignal(path) {
     else set.add(name);
   }
   waveformSelection = [...set];
+  const order = waveformDisplayOrder.length ? [...waveformDisplayOrder] : allWaveformSignalNames();
+  for (const name of resolved) {
+    if (!order.includes(name)) order.push(name);
+  }
+  waveformDisplayOrder = order;
   if (!waveformVisible) toggleWaveform(true);
+  switchExplorerTab("wave");
   refreshWaveformView();
 }
 
@@ -1439,7 +1579,7 @@ function renderTreeNode(node, parentEl, depth = 0) {
   if (signalPath) {
     const waveMark = document.createElement("span");
     waveMark.className = "wave-mark";
-    waveMark.title = "クリックで波形に追加/削除";
+    waveMark.title = "クリックで Wave タブに追加/削除";
     waveMark.textContent = "〜";
     row.appendChild(waveMark);
   }
@@ -1484,8 +1624,8 @@ function renderHierarchy(tree) {
   const hint = document.createElement("div");
   hint.className = "empty-hint hierarchy-hint";
   const waveHint = lastSignalNames?.size
-    ? `Run 済み — クリックで波形に追加（VCD ${lastSignalNames.size} 信号）`
-    : "信号をクリックで波形に追加（Run 後に VCD が有効）";
+    ? `Run 済み — クリックで Wave に追加（詳細は Wave タブ）`
+    : "信号クリックで Wave タブへ（Run 後）";
   hint.textContent = waveHint;
   root.appendChild(hint);
   renderTreeNode(tree, root);
@@ -1525,6 +1665,8 @@ function renderSignalList(signals) {
   signals.forEach((sig) => {
     const li = document.createElement("li");
     li.dataset.name = sig.name;
+    const onWave = waveformSelection.includes(sig.name);
+    if (onWave) li.classList.add("on-wave");
     const name = document.createElement("span");
     name.textContent = sig.name;
     const val = document.createElement("span");
@@ -1532,12 +1674,12 @@ function renderSignalList(signals) {
     val.textContent = sig.value;
     li.appendChild(name);
     li.appendChild(val);
+    li.title = "クリックで Wave タブに追加/削除";
     li.addEventListener("click", () => {
       list.querySelectorAll("li").forEach((n) => n.classList.remove("active"));
       li.classList.add("active");
       selectedSignal = sig.name;
-      highlightSignal(sig.name);
-      if (!waveformVisible) toggleWaveform(true);
+      toggleWaveformSignal(sig.name);
     });
     list.appendChild(li);
   });
@@ -1565,8 +1707,7 @@ function createOutputWindow() {
     area.spellcheck = false;
     body.appendChild(area);
   }
-  win.hidden = false;
-  bringMdiToFront(win);
+  showMdiWindow(win);
   return win;
 }
 
@@ -1597,8 +1738,11 @@ function createWaveformWindow() {
     body.querySelector("#btn-wave-fit")?.addEventListener("click", fitWaveform);
     body.querySelector("#btn-wave-all")?.addEventListener("click", () => {
       if (!lastWaveformFull) return;
-      waveformSelection = lastWaveformFull.signals.map((s) => s.name);
+      const names = lastWaveformFull.signals.map((s) => s.name);
+      waveformSelection = names;
+      waveformDisplayOrder = names.slice();
       refreshWaveformView();
+      switchExplorerTab("wave");
     });
     body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
     body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
@@ -1614,11 +1758,7 @@ function createWaveformWindow() {
       observer.observe(body);
     }
   }
-  if (waveformVisible) {
-    win.hidden = false;
-    win.style.display = "";
-    bringMdiToFront(win);
-  }
+  if (waveformVisible) showMdiWindow(win);
   return win;
 }
 
@@ -1836,12 +1976,14 @@ async function runSimulate() {
     lastTopModule = data.top_module || "";
     lastSignalNames = new Set(data.signal_names || data.signals?.map((s) => s.name) || []);
     lastWaveformFull = data.waveform;
-    waveformSelection = data.waveform?.signals?.map((s) => s.name) || [];
+    const waveNames = data.waveform?.signals?.map((s) => s.name) || [];
+    waveformSelection = waveNames.slice();
+    waveformDisplayOrder = waveNames.slice();
     applySuggestedUntil(data.suggested_until);
     refreshWaveformView();
     const waveCount = data.waveform?.signals?.length || 0;
     if (waveCount > 0) {
-      appendConsole(`[wave] ${waveCount} signals captured — Hierarchy または Signals から選択`, "info");
+      appendConsole(`[wave] ${waveCount} signals — Wave タブで選択・並べ替え`, "info");
     } else {
       appendConsole("[wave] 波形データが空です。Run が成功していても VCD に信号がありません。", "warn");
     }
@@ -1912,7 +2054,29 @@ function initMonaco() {
   });
 }
 
+function initWaveSignalPanelUi() {
+  const root = $("wave-signal-panel");
+  if (!root) return;
+  waveSignalPanel = createWaveSignalPanel(root, {
+    getSignalNames: () => allWaveformSignalNames(),
+    getSelection: () => waveformSelection.slice(),
+    setSelection: (names) => {
+      waveformSelection = names;
+    },
+    getOrder: () => waveformDisplayOrder.slice(),
+    setOrder: (names) => {
+      waveformDisplayOrder = names;
+    },
+    onChange: () => {
+      if (!waveformVisible && waveformSelection.length) toggleWaveform(true);
+      refreshWaveformView();
+    },
+  });
+  waveSignalPanel.render();
+}
+
 function bindUi() {
+  initWaveSignalPanelUi();
   $("btn-run").addEventListener("click", runSimulate);
   $("btn-stop").addEventListener("click", stopSimulation);
   $("btn-step").addEventListener("click", runStep);

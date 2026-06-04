@@ -732,6 +732,109 @@ body.view-hide-project-bar .project-bar { display: none; }
 
 .signal-list .val { color: var(--success); }
 
+.signal-list li.on-wave,
+.signal-list li.on-wave .val {
+  color: var(--accent);
+}
+
+/* ── Wave signal picker tab ── */
+.wave-signal-panel-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wave-panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.wave-panel-filter {
+  flex: 1;
+  min-width: 120px;
+  padding: 3px 6px;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 2px;
+}
+
+.wave-panel-hint {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.wave-signal-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  overflow: auto;
+  flex: 1;
+  font-size: 11px;
+}
+
+.wave-signal-empty {
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.wave-signal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wave-signal-row:hover {
+  background: var(--bg-hover);
+}
+
+.wave-signal-row.selected {
+  background: var(--bg-active);
+  color: #fff;
+}
+
+.wave-signal-row.dragging {
+  opacity: 0.45;
+}
+
+.wave-signal-row.drag-over {
+  outline: 1px dashed var(--accent);
+}
+
+.wave-grip {
+  width: 14px;
+  color: var(--text-dim);
+  font-size: 9px;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.wave-cb {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.wave-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Editor tabs ── */
 .editor-tabs {
   display: flex;
@@ -886,9 +989,29 @@ body.view-hide-project-bar .project-bar { display: none; }
   background: #e8f4ff;
 }
 
+.mdi-btn.min {
+  font-size: 10px;
+  line-height: 10px;
+}
+
+.mdi-btn.restore {
+  font-size: 10px;
+}
+
 .mdi-btn.close:hover {
   background: #e36b5d;
   color: #fff;
+  border-color: #c44;
+}
+
+.mdi-window.mdi-minimized {
+  height: auto !important;
+  min-height: 0 !important;
+  resize: none;
+}
+
+.mdi-window.mdi-minimized .mdi-body {
+  display: none;
 }
 
 .mdi-body {
