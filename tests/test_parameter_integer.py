@@ -47,5 +47,6 @@ def test_moving_avg_kadai_parses() -> None:
     if not all(p.is_file() for p in paths):
         return
     loaded = load_design_with_meta(paths)
-    assert "moving_avg_filter" in loaded.design.modules
-    assert "tb_moving_avg_filter" in loaded.design.modules
+    module_names = [m.name for m in loaded.design.modules]
+    assert "moving_avg_filter" in module_names
+    assert "tb_moving_avg_filter" in module_names

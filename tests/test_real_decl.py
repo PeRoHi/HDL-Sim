@@ -60,9 +60,13 @@ endmodule
 """
     )
     elaborated = elaborate(design, top="tb")
-    assert len(elaborated.continuous_assigns) == 1
-    assign = elaborated.continuous_assigns[0]
+    assert len(elaborated.continuous_assigns) == 2
+    assign = next(a for a in elaborated.continuous_assigns if a.target == "c.y")
     assert "a" in assign.locals
+    # Note: Since the simulation has not run yet, the net value of "c.a"
+    # remains at its default of 0. We manually update its value to 1 here
+    # to mock the pre-simulation net state for evaluating "assign y = a;".
+    assign.locals["a"].update(1, time=0)
     evaluator = __import__(
         "hdl_sim.engine.evaluator", fromlist=["ExpressionEvaluator"]
     ).ExpressionEvaluator(assign.locals, params=assign.params)
@@ -108,3 +112,18 @@ def test_for_loop_waits_on_negedge_before_next_iteration() -> None:
     result = sim.run(until=500, max_events=500)
     assert result.stop_time >= 35
     assert sim._nets["n"].value == 4
+
+
+def test_wire_decl_assign_registers_continuous_assign() -> None:
+    """Verify that wire declarations with assignments (e.g. wire a = 1'b1)
+    are correctly registered as ContinuousAssign statements after parsing.
+    """
+    mod = parse_module(
+        """
+module m;
+  wire a = 1'b1;
+endmodule
+"""
+    )
+    assert len(mod.continuous_assigns) == 1
+    assert mod.continuous_assigns[0].target == "a"

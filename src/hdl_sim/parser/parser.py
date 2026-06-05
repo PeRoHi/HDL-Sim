@@ -276,10 +276,8 @@ class VerilogTransformer(Transformer):
                     ports.append(candidate)
                 elif isinstance(candidate, ParameterDecl):
                     parameters.append(candidate)
-                elif isinstance(candidate, (Declaration, tuple)):
-                    self._append_declaration(declarations, candidate)
-                elif isinstance(candidate, ContinuousAssign):
-                    continuous_assigns.append(candidate)
+                elif isinstance(candidate, (Declaration, tuple, ContinuousAssign)):
+                    self._distribute_decl_or_assign(declarations, continuous_assigns, candidate)
                 elif isinstance(candidate, InitialBlock):
                     initial_blocks.append(candidate)
                 elif isinstance(candidate, AlwaysBlock):
@@ -502,13 +500,25 @@ class VerilogTransformer(Transformer):
     def positional_port_connection(self, expr: Expr) -> PortConnection:
         return PortConnection(port="", expr=expr)
 
-    def _append_declaration(self, bucket: list[Declaration], item: Any) -> None:
-        if isinstance(item, Declaration):
-            bucket.append(item)
-        elif isinstance(item, tuple):
-            for sub in item:
-                if isinstance(sub, Declaration):
-                    bucket.append(sub)
+    def _distribute_decl_or_assign(
+        self,
+        declarations: list[Declaration],
+        continuous_assigns: list[ContinuousAssign] | None,
+        item: Any,
+    ) -> None:
+        for candidate in _flatten(item if isinstance(item, list) else [item]):
+            if isinstance(candidate, Declaration):
+                declarations.append(candidate)
+            elif isinstance(candidate, tuple):
+                for sub in candidate:
+                    if isinstance(sub, Declaration):
+                        declarations.append(sub)
+                    elif isinstance(sub, ContinuousAssign):
+                        if continuous_assigns is not None:
+                            continuous_assigns.append(sub)
+            elif isinstance(candidate, ContinuousAssign):
+                if continuous_assigns is not None:
+                    continuous_assigns.append(candidate)
 
     @v_args(inline=True)
     def ident_list(self, first: Token, *rest: Token) -> list[str]:
@@ -943,8 +953,8 @@ class VerilogTransformer(Transformer):
         for item in flat[1:]:
             if isinstance(item, TaskPort):
                 ports.append(item)
-            elif isinstance(item, (Declaration, tuple)):
-                self._append_declaration(declarations, item)
+            elif isinstance(item, (Declaration, tuple, ContinuousAssign)):
+                self._distribute_decl_or_assign(declarations, None, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):
@@ -1009,8 +1019,8 @@ class VerilogTransformer(Transformer):
         for item in flat[index:]:
             if isinstance(item, FunctionInput):
                 inputs.append(item)
-            elif isinstance(item, (Declaration, tuple)):
-                self._append_declaration(declarations, item)
+            elif isinstance(item, (Declaration, tuple, ContinuousAssign)):
+                self._distribute_decl_or_assign(declarations, None, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):
