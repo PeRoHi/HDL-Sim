@@ -267,9 +267,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind (default: 8765)")
     parser.add_argument("--no-open", action="store_true", help="Do not open the browser automatically")
     parser.add_argument(
+        "--no-window",
+        action="store_true",
+        help="Do not open in a dedicated desktop window (open in browser instead)",
+    )
+    parser.add_argument(
         "--window",
         action="store_true",
-        help="Open in a dedicated desktop window (requires pywebview)",
+        help="Open in a dedicated desktop window (default, requires pywebview)",
     )
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for development")
     parser.add_argument("--gui", action="store_true", help="Open the small GUI launcher (no terminal needed)")
@@ -281,7 +286,7 @@ def run(
     port: int = DEFAULT_PORT,
     *,
     open_browser: bool = True,
-    native_window: bool = False,
+    native_window: bool = True,
     reload: bool = False,
     gui: bool = False,
 ) -> int:
@@ -308,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         port=args.port,
         open_browser=not args.no_open,
-        native_window=args.window,
+        native_window=not args.no_window,
         reload=args.reload,
         gui=args.gui,
     )

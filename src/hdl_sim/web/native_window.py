@@ -27,6 +27,60 @@ def pywebview_help() -> str:
     )
 
 
+class NativeApi:
+    def pick_files(self) -> list[dict]:
+        import webview
+        from pathlib import Path
+        from hdl_sim.web.paths import project_root
+        
+        if not webview.windows:
+            return []
+            
+        window = webview.windows[0]
+        result = window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=True,
+            directory=str(project_root()),
+            file_types=('Verilog Files (*.v;*.sv;*.vh;*.svh)', 'All Files (*.*)')
+        )
+        if not result:
+            return []
+            
+        files = []
+        for p in result:
+            path = Path(p)
+            try:
+                files.append({"name": path.name, "content": path.read_text(encoding="utf-8")})
+            except Exception:
+                pass
+        return files
+
+    def pick_spj_file(self) -> dict | None:
+        import webview
+        from pathlib import Path
+        from hdl_sim.web.paths import user_data_dir
+        
+        if not webview.windows:
+            return None
+            
+        window = webview.windows[0]
+        spj_dir = user_data_dir() / "spj"
+        result = window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            directory=str(spj_dir if spj_dir.exists() else user_data_dir()),
+            file_types=('SPJ Files (*.spj)', 'All Files (*.*)')
+        )
+        if not result:
+            return None
+            
+        path = Path(result[0])
+        try:
+            return {"name": path.name, "content": path.read_text(encoding="utf-8")}
+        except Exception:
+            return None
+
+
 def open_native_window(
     url: str,
     *,
@@ -46,6 +100,7 @@ def open_native_window(
         width=width,
         height=height,
         min_size=min_size,
+        js_api=NativeApi(),
     )
 
     def _on_closing() -> bool:

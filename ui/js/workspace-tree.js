@@ -224,13 +224,43 @@ export function createWorkspaceTree(hooks) {
     });
 
     node.files.sort().forEach((path) => {
+      const isHidden = typeof hooks.isFileHidden === "function" && hooks.isFileHidden(path);
       const row = document.createElement("div");
-      row.className = "tree-node tree-file" + (path === hooks.getActiveFile() ? " selected" : "");
+      row.className = "tree-node tree-file"
+        + (path === hooks.getActiveFile() ? " selected" : "")
+        + (isHidden ? " file-hidden" : "");
       row.style.paddingLeft = `${depth * 12 + 4}px`;
       row.draggable = true;
       row.dataset.path = path;
       const name = path.includes("/") ? path.split("/").pop() : path;
-      row.innerHTML = `<span class="twist empty"></span><span class="icon">📄</span><span class="label">${name}</span>`;
+
+      const twistSpan = document.createElement("span");
+      twistSpan.className = "twist empty";
+      row.appendChild(twistSpan);
+
+      const iconSpan = document.createElement("span");
+      iconSpan.className = "icon";
+      iconSpan.textContent = "📄";
+      row.appendChild(iconSpan);
+
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "label";
+      labelSpan.textContent = name;
+      row.appendChild(labelSpan);
+
+      // Visibility toggle icon
+      if (typeof hooks.onToggleVisibility === "function") {
+        const visBtn = document.createElement("span");
+        visBtn.className = "file-vis-toggle";
+        visBtn.textContent = isHidden ? "🙈" : "👁";
+        visBtn.title = isHidden ? "ウィンドウを表示" : "ウィンドウを非表示";
+        visBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          hooks.onToggleVisibility(path);
+        });
+        row.appendChild(visBtn);
+      }
+
       row.title = path;
       row.addEventListener("click", () => {
         contextFolder = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";

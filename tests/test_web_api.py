@@ -141,8 +141,8 @@ def test_ui_info_reports_ide_layout() -> None:
     ).endpoint
     data = handler()
     assert data["ide_layout"] is True
-    assert data["version"] == "0.5.21"
-    assert data["version_label"] == "Ver 0.5.21"
+    assert data["version"] == "0.6.0"
+    assert data["version_label"] == "Ver 0.6.0"
     assert "release_url" in data
     assert "spj_dir" in data
 
@@ -157,7 +157,7 @@ def test_update_check_endpoint(monkeypatch) -> None:
         "hdl_sim.web.app.check_for_updates",
         lambda *_a, **_k: {
             "ok": True,
-            "current_version": "0.5.21",
+            "current_version": "0.6.0",
             "latest_version": "0.6.0",
             "update_available": True,
             "release_url": "https://example.com/release",

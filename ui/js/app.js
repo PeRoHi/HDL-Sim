@@ -72,6 +72,8 @@ let selectedSignal = null;
 /** @type {ReturnType<typeof createWaveSignalPanel> | null} */
 let waveSignalPanel = null;
 let waveformVisible = false;
+/** @type {Set<string>} Tracks file paths whose MDI windows are hidden */
+const hiddenFiles = new Set();
 let waveZoom = 1;
 let abortController = null;
 
@@ -387,6 +389,29 @@ function closeMdiWindow(id, win) {
     return;
   }
   hideMdiWindow(win);
+  // If this is a file window, mark it hidden in the tree
+  if (id.startsWith("file:")) {
+    const path = id.slice(5);
+    if (hiddenFiles.has(path)) return; // already hidden
+    hiddenFiles.add(path);
+    workspaceTree?.render();
+  }
+}
+
+function toggleFileVisibility(path) {
+  const id = fileWindowId(path);
+  const win = mdiWindows.get(id);
+  if (hiddenFiles.has(path)) {
+    // Show the window
+    hiddenFiles.delete(path);
+    if (win) showMdiWindow(win);
+    else openFile(path);
+  } else {
+    // Hide the window
+    hiddenFiles.add(path);
+    if (win) hideMdiWindow(win);
+  }
+  workspaceTree?.render();
 }
 
 function attachMdiTitlebar(win, id, titlebar) {
@@ -666,6 +691,7 @@ function loadWorkspaceFiles(fileEntries, top, wavePrefs) {
     }
   }
   fileStore.clear();
+  hiddenFiles.clear();
 
   fileEntries.forEach(({ path, content, include_only }) => {
     fileStore.set(path, { content, model: null, includeOnly: Boolean(include_only) });
@@ -681,112 +707,28 @@ function loadWorkspaceFiles(fileEntries, top, wavePrefs) {
   if (window.monaco) tileFileWindows();
 }
 
-async function loadProjects() {
-  const sel = $("select-project");
-  if (!sel) return;
-  try {
-    const projects = await api("/api/projects");
-    const selected = currentProject;
-    sel.innerHTML = '<option value="">— workspace —</option>';
-    projects.forEach((p) => {
-      const opt = document.createElement("option");
-      opt.value = p.name;
-      opt.textContent = `${p.label || p.name} (${p.file_count})`;
-      sel.appendChild(opt);
-    });
-    if (selected && projects.some((p) => p.name === selected)) {
-      sel.value = selected;
-    }
-  } catch {
-    setStatus("Projects failed", "err");
-  }
-}
+// Removed duplicated openProjectFilePicker
 
-async function openProject(name) {
-  if (!name) {
-    currentProject = "";
-    return;
-  }
-  setStatus("Loading project…", "busy");
-  try {
-    const data = await api(`/api/projects/${encodeURIComponent(name)}`);
-    if (!data.files?.length) {
-      appendConsole(`[project] ${data.name}: ファイルがありません`, "warn");
-      setStatus("Empty project", "warn");
-      return;
-    }
-    currentProject = data.name;
-    $("select-example").value = "";
-    loadWorkspaceFiles(data.files, data.top || "", data.wave);
-    $("select-project").value = data.name;
-    appendConsole(`[project] opened: ${data.name} (${data.files.length} files)`, "info");
-    setStatus(`Project: ${data.name}`, "ok");
-    runElaborate();
-  } catch (e) {
-    appendConsole(String(e), "err");
-    setStatus("Project load failed", "err");
-  }
-}
-
-async function createProject() {
-  const name = prompt("プロジェクト名 (英数字, _ -):", currentProject || "my_design");
+async function createNewSpj() {
+  const suggested = currentProjectFileName();
+  const name = prompt("New Project (.spj):", suggested);
   if (!name?.trim()) return;
-  try {
-    saveActiveEditor();
-    const top = getSelectedTop() || null;
-    await api("/api/projects", { name: name.trim(), top });
-    currentProject = name.trim();
-    await loadProjects();
-    $("select-project").value = currentProject;
-    await saveCurrentProject(false);
-    appendConsole(`[project] created: ${currentProject}`, "ok");
-    setStatus(`Created: ${currentProject}`, "ok");
-  } catch (e) {
-    appendConsole(String(e), "err");
-  }
-}
-
-async function saveCurrentProject(showPrompt = true) {
-  let name = currentProject || $("select-project")?.value;
-  if (!name && showPrompt) {
-    name = prompt("保存先プロジェクト名:", "my_design");
-    if (!name?.trim()) return;
-    name = name.trim();
-    try {
-      await api("/api/projects", { name, top: getSelectedTop() || null });
-      currentProject = name;
-      await loadProjects();
-      $("select-project").value = name;
-    } catch (e) {
-      appendConsole(String(e), "err");
-      return;
-    }
-  }
-  if (!name) return;
-
-  try {
-    const payload = getPayload();
-    persistWavePrefsNow();
-    const data = await api(
-      `/api/projects/${encodeURIComponent(name)}`,
-      {
-        files: payload.files,
-        top: payload.top,
-        label: name,
-        wave: getCurrentWavePrefs(),
-      },
-      undefined,
-      "PUT"
-    );
-    currentProject = data.name;
-    await loadProjects();
-    $("select-project").value = data.name;
-    appendConsole(`[project] saved: ${data.name} (${data.files.length} files)`, "ok");
-    setStatus(`Saved: ${data.name}`, "ok");
-  } catch (e) {
-    appendConsole(String(e), "err");
-    setStatus("Save failed", "err");
-  }
+  
+  // Clear workspace
+  fileStore.clear();
+  fileEditors.forEach(v => v.editor?.dispose());
+  fileEditors.clear();
+  mdiWindows.forEach(w => w.remove());
+  mdiWindows.clear();
+  editor = null;
+  activeFile = "";
+  if (waveformVisible) toggleWaveform(false);
+  
+  const filename = normalizeSpjFilename(name);
+  currentProject = filename.replace(/\.spj$/i, "");
+  
+  // Save empty project
+  await saveProjectFile();
 }
 
 function currentProjectFileName() {
@@ -814,7 +756,9 @@ function applySpjData(data, filename) {
     throw new Error("HDL-Sim project fileではありません");
   }
   currentProject = data.name || String(filename || "").replace(/\.spj$/i, "");
-  $("select-project").value = "";
+  $("select-spj").value = "";
+  const labelEl = $("current-project-label");
+  if (labelEl) labelEl.textContent = currentProject || "—";
   $("select-example").value = "";
   if (data.until != null) $("input-until").value = data.until;
   if (data.max_events != null) $("input-max-events").value = data.max_events;
@@ -829,13 +773,14 @@ async function loadSpjFileList(selectName) {
     spjDirPath = info.path || spjDirPath;
     const keep = selectName || sel.value;
     sel.innerHTML = '<option value="">— .spj —</option>';
-    for (const file of info.files || []) {
+    const files = info.files || [];
+    for (const file of files) {
       const opt = document.createElement("option");
       opt.value = file.name;
       opt.textContent = file.label || file.name;
       sel.appendChild(opt);
     }
-    if (keep && [...sel.options].some((o) => o.value === keep)) {
+    if (keep && files.some((f) => f.name === keep)) {
       sel.value = keep;
     }
   } catch (e) {
@@ -855,6 +800,9 @@ async function saveProjectFile() {
     );
     await loadSpjFileList(saved.filename);
     rememberRecentSpj(saved.filename);
+    $("select-spj").value = "";
+    const labelEl = $("current-project-label");
+    if (labelEl) labelEl.textContent = currentProject || saved.name || "—";
     appendConsole(`[spj] saved: ${saved.path}`, "ok");
     setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
@@ -965,8 +913,10 @@ function toggleViewMenu(id) {
 
 function menuProjectClose() {
   currentProject = "";
-  $("select-project").value = "";
+  // removed select-project reset
   $("select-spj").value = "";
+  const labelEl = $("current-project-label");
+  if (labelEl) labelEl.textContent = "—";
   appendConsole("[project] closed", "info");
   setStatus("Project closed", "ok");
 }
@@ -1075,7 +1025,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.5.21\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 0.6.0\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1114,7 +1064,6 @@ async function openSelectedSpjFile(name) {
   }
   const data = await api(`/api/spj/${encodeURIComponent(filename)}`);
   applySpjData(data, filename);
-  $("select-spj").value = filename;
   rememberRecentSpj(filename);
   appendConsole(`[spj] opened: ${filename} (${data.files.length} files)`, "ok");
   setStatus(`Opened: ${filename}`, "ok");
@@ -1122,26 +1071,35 @@ async function openSelectedSpjFile(name) {
 }
 
 async function openProjectFilePicker() {
-  try {
-    await loadSpjFileList();
-    const sel = $("select-spj");
-    if (sel?.value) {
-      await openSelectedSpjFile(sel.value);
-      return;
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.pick_spj_file) {
+    try {
+      const res = await window.pywebview.api.pick_spj_file();
+      if (res && res.content) {
+        const data = JSON.parse(res.content);
+        applySpjData(data, res.name);
+      }
+    } catch (e) {
+      appendConsole(String(e), "err");
     }
-    const info = await api("/api/spj/info");
-    if (!info.files?.length) {
-      appendConsole(`[spj] ${spjDirPath} に .spj がありません`, "warn");
-      return;
-    }
-    if (info.files.length === 1) {
-      await openSelectedSpjFile(info.files[0].name);
-      return;
-    }
-    appendConsole(`[spj] 一覧から .spj を選んで Open .spj を押してください`, "info");
-  } catch (e) {
-    appendConsole(String(e), "err");
-    setStatus("SPJ open failed", "err");
+  } else {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".spj";
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          applySpjData(data, file.name);
+        } catch (err) {
+          appendConsole(String(err), "err");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   }
 }
 
@@ -1243,6 +1201,8 @@ function initWorkspaceTreeView() {
     fileStore,
     getRootElement: () => $("file-tree"),
     getActiveFile: () => activeFile,
+    isFileHidden: (path) => hiddenFiles.has(path),
+    onToggleVisibility: (path) => toggleFileVisibility(path),
     onOpenFile: (path) => openFile(path),
     onDeleteFile: (path) => deleteFile(path),
     onNewFile: (folder) => addFileInFolder(folder),
@@ -1380,6 +1340,7 @@ function openFile(path, options = {}) {
   if (!fileStore.has(path)) return;
   saveActiveEditor();
   activeFile = path;
+  hiddenFiles.delete(path);
   const entry = fileStore.get(path);
   const id = fileWindowId(path);
   const index = [...fileStore.keys()].indexOf(path);
@@ -1411,6 +1372,7 @@ function openFile(path, options = {}) {
       insertSpaces: true,
       folding: true,
       glyphMargin: true,
+      mouseWheelZoom: true,
     });
     ed.onDidFocusEditorText(() => {
       activeFile = path;
@@ -1493,8 +1455,29 @@ async function importLocalFiles(fileList) {
   setStatus(`${loaded.length} file(s) opened`, "ok");
 }
 
-function openFilePicker() {
-  $("file-import-input")?.click();
+async function openFilePicker() {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.pick_files) {
+    try {
+      const files = await window.pywebview.api.pick_files();
+      if (files && files.length > 0) {
+        let loadedCount = 0;
+        const names = [];
+        for (const f of files) {
+          fileStore.set(f.name, { content: f.content, model: null, includeOnly: false });
+          loadedCount++;
+          names.push(f.name);
+        }
+        refreshTopModulePicker();
+        appendConsole(`[open] ${names.join(", ")}`, "info");
+        setStatus(`${loadedCount} file(s) opened`, "ok");
+        workspaceTree?.render();
+      }
+    } catch (err) {
+      appendConsole(`[error] Failed to open files: ${err}`, "error");
+    }
+  } else {
+    $("file-import-input")?.click();
+  }
 }
 
 function deleteFile(path, { confirmDelete = true } = {}) {
@@ -1974,7 +1957,7 @@ async function openExample(id) {
       : [{ path: id.includes("/") ? id.split("/").pop() : id, content: data.content }];
 
     currentProject = "";
-    $("select-project").value = "";
+    // removed select-project reset
     loadWorkspaceFiles(files, data.top || "");
     const label = data.label || id;
     setStatus(`Loaded: ${label} (${files.length} files)`, "ok");
@@ -2149,7 +2132,7 @@ function initMonaco() {
     refreshTopModulePicker();
     renderHierarchy(null);
     loadExamples();
-    loadProjects();
+    loadSpjFileList();
     verifyUiBuild();
   });
 }
@@ -2197,9 +2180,7 @@ function bindUi() {
     e.target.value = "";
   });
   $("select-example").addEventListener("change", (e) => openExample(e.target.value));
-  $("select-project")?.addEventListener("change", (e) => openProject(e.target.value));
-  $("btn-new-project")?.addEventListener("click", () => createProject());
-  $("btn-save-project")?.addEventListener("click", () => saveCurrentProject());
+  $("btn-new-spj")?.addEventListener("click", () => createNewSpj());
   $("btn-open-spj")?.addEventListener("click", openProjectFilePicker);
   $("btn-save-spj")?.addEventListener("click", saveProjectFile);
   $("select-spj")?.addEventListener("change", (e) => {
@@ -2252,10 +2233,13 @@ function initMenuBar() {
       "edit.find-next": () => triggerEditor("editor.action.nextMatchFindAction"),
       "edit.replace": () => triggerEditor("editor.action.startFindReplaceAction"),
       "edit.goto-line": () => triggerEditor("editor.action.gotoLine"),
+      "view.zoom-in": () => triggerEditor("editor.action.fontZoomIn"),
+      "view.zoom-out": () => triggerEditor("editor.action.fontZoomOut"),
+      "view.zoom-reset": () => triggerEditor("editor.action.fontZoomReset"),
       "view.main-toolbar": () => toggleViewMenu("view.main-toolbar"),
       "view.output-panel": () => toggleViewMenu("view.output-panel"),
       "view.project-bar": () => toggleViewMenu("view.project-bar"),
-      "project.new": () => createProject(),
+      "project.new": () => createNewSpj(),
       "project.open": () => openProjectFilePicker(),
       "project.files": () => menuProjectFiles(),
       "project.save-as": () => saveProjectFileAs(),
@@ -2318,7 +2302,29 @@ function handleMenuShortcut(e) {
     runElaborate().then(() => runSimulate());
     return true;
   }
+  if (e.key === "Delete") {
+    if (inField) return false;
+    e.preventDefault();
+    deleteFile();
+    return true;
+  }
   if (!(e.ctrlKey || e.metaKey)) return false;
+
+  if (e.key === "=" || e.key === "+") {
+    e.preventDefault();
+    triggerEditor("editor.action.fontZoomIn");
+    return true;
+  }
+  if (e.key === "-") {
+    e.preventDefault();
+    triggerEditor("editor.action.fontZoomOut");
+    return true;
+  }
+  if (e.key === "0") {
+    e.preventDefault();
+    triggerEditor("editor.action.fontZoomReset");
+    return true;
+  }
 
   const key = e.key.toLowerCase();
   if (
@@ -2329,10 +2335,11 @@ function handleMenuShortcut(e) {
   }
   if (inField) return false;
   const map = {
-    n: () => createProject(),
+    n: () => createNewSpj(),
     o: () => openProjectFilePicker(),
     s: () => saveProjectFile(),
     z: () => triggerEditor("undo"),
+    y: () => triggerEditor("redo"),
     x: () => triggerEditor("editor.action.clipboardCutAction"),
     c: () => triggerEditor("editor.action.clipboardCopyAction"),
     v: () => triggerEditor("editor.action.clipboardPasteAction"),

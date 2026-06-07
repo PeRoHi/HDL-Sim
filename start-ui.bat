@@ -22,7 +22,7 @@ exit /b 1
 :launch
 echo [HDL-Sim] 起動中...
 set "PYTHONPATH=%~dp0src"
-"%PY%" "%~dp0start_ui.py" --gui %*
+"%PY%" "%~dp0start_ui.py" --gui --window %*
 set "RC=!errorlevel!"
 if not "!RC!"=="0" (
   echo.

@@ -37,7 +37,7 @@ def _load_tk():
 
 
 class HDLSimGuiLauncher:
-    def __init__(self, *, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+    def __init__(self, *, host: str = "127.0.0.1", port: int = 8765, native_window: bool = True) -> None:
         _load_tk()
         self.host = host
         self.port = port
@@ -211,7 +211,7 @@ class HDLSimGuiLauncher:
         self.root.mainloop()
 
 
-def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = True) -> None:
     _load_tk()
     HDLSimGuiLauncher(host=host, port=port, native_window=native_window).run()
 
@@ -219,8 +219,7 @@ def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = 
 def main() -> int:
     prepare_runtime()
     try:
-        # Installed builds show the launcher log so startup errors are visible.
-        run_gui(native_window=is_frozen())
+        run_gui(native_window=True)
         return 0
     except Exception as exc:
         log_path = write_crash_log(exc, context="gui_launcher.main")

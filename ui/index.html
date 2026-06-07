@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HDL-Sim IDE</title>
-  <meta name="hdl-sim-ui-build" content="0.5.21" />
-  <link rel="stylesheet" href="/assets/css/app.css?v=0.5.21" />
+  <meta name="hdl-sim-ui-build" content="0.6.0" />
+  <link rel="stylesheet" href="/assets/css/app.css?v=0.6.0" />
 </head>
 <body>
   <!-- Silos-style menu bar -->
   <nav id="menubar" class="menubar" aria-label="メインメニュー">
     <div class="menubar-brand" title="HDL-Sim UI バージョン">
-      <span id="app-version" class="brand-ver">Ver 0.5.21</span>
+      <span id="app-version" class="brand-ver">Ver 0.6.0</span>
       <span class="brand-name">HDL-Sim</span>
     </div>
     <button type="button" class="menubar-btn" data-menu="file">File</button>
@@ -86,21 +86,19 @@
         <!-- Left: Explorer -->
         <aside id="pane-explorer" class="pane pane-explorer" aria-label="エクスプローラー">
           <div class="project-bar">
-            <div class="project-bar-group project-bar-workspace">
-              <label class="project-label" for="select-project">Project</label>
-              <select id="select-project" title="プロジェクト切替">
-                <option value="">— workspace —</option>
-              </select>
-              <button type="button" id="btn-new-project" class="mini-btn" title="新規プロジェクト">New</button>
-              <button type="button" id="btn-save-project" class="mini-btn" title="プロジェクトに保存">Save</button>
-            </div>
             <div class="project-bar-group project-bar-spj">
-              <label class="project-label" for="select-spj">SPJ</label>
-              <select id="select-spj" title="HDL-Sim/spj 内のプロジェクト">
-                <option value="">— .spj —</option>
-              </select>
-              <button type="button" id="btn-open-spj" class="mini-btn" title=".spj を開く (./spj/)">Open</button>
-              <button type="button" id="btn-save-spj" class="mini-btn" title=".spj として ./spj/ に保存">Save</button>
+              <div class="project-bar-row">
+                <label class="project-label" for="select-spj">PROJECT</label>
+                <select id="select-spj" title="HDL-Sim/spj 内のプロジェクト">
+                  <option value="">— .spj —</option>
+                </select>
+              </div>
+              <div class="project-bar-row">
+                <div id="current-project-label" class="current-project-label" title="未選択">—</div>
+                <button type="button" id="btn-new-spj" class="mini-btn" title="新しいプロジェクトを作成">New</button>
+                <button type="button" id="btn-open-spj" class="mini-btn" title=".spj ファイルを開く">Open</button>
+                <button type="button" id="btn-save-spj" class="mini-btn" title=".spj を保存">Save</button>
+              </div>
             </div>
           </div>
           <div class="pane-tabs" role="tablist">
@@ -157,8 +155,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
-  <script src="/assets/js/vcd-viewer.js?v=0.5.21"></script>
-  <script src="/assets/js/menu-bar.js?v=0.5.21"></script>
-  <script src="/assets/js/app.js?v=0.5.21" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=0.6.0"></script>
+  <script src="/assets/js/menu-bar.js?v=0.6.0"></script>
+  <script src="/assets/js/app.js?v=0.6.0" type="module"></script>
 </body>
 </html>
