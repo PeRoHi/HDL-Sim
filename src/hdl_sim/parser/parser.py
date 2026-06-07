@@ -595,6 +595,8 @@ class VerilogTransformer(Transformer):
 
     def _multi_decl(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ...]:
         is_signed, range_node, payload = self._parse_decl_head(children)
+        if kind is DeclKind.INTEGER:
+            is_signed = True
         if payload is None:
             return ()
         if isinstance(payload, list) and payload and isinstance(payload[0], IdentDecl):

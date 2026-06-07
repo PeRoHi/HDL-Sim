@@ -242,13 +242,15 @@ class ExpressionEvaluator:
                 return left & right
             if expr.op == "^":
                 return left ^ right
-            if expr.op == "+":
-                return left + right
-            if expr.op == "-":
-                return left - right
-            if expr.op == "*":
+            if expr.op in {"+", "-", "*"}:
+                left, right = self._prepare_signed_arith_operands(expr.left, expr.right, left, right)
+                if expr.op == "+":
+                    return left + right
+                if expr.op == "-":
+                    return left - right
                 return left * right
             if expr.op == "/":
+                left, right = self._prepare_signed_arith_operands(expr.left, expr.right, left, right)
                 return 0 if right == 0 else left // right
             if expr.op == "%":
                 return 0 if right == 0 else left % right
@@ -328,6 +330,17 @@ class ExpressionEvaluator:
         if isinstance(expr, UnaryExpr):
             return self._expr_has_unknown(expr.operand)
         return False
+
+    def _prepare_signed_arith_operands(
+        self,
+        left_expr: Expr,
+        right_expr: Expr,
+        left: int,
+        right: int,
+    ) -> tuple[int, int]:
+        from hdl_sim.engine.signed_ops import prepare_signed_arith_operands
+
+        return prepare_signed_arith_operands(left_expr, right_expr, left, right, self._nets)
 
     def _operand_net(self, expr: Expr) -> SimNet | None:
         if isinstance(expr, IdentRef):
