@@ -101,6 +101,31 @@ def expr_is_signed(expr: Expr, nets: dict[str, SimNet]) -> bool:
     return False
 
 
+def prepare_signed_arith_operands(
+    left_expr: Expr,
+    right_expr: Expr,
+    left: int,
+    right: int,
+    nets: dict[str, SimNet],
+) -> tuple[int, int]:
+    from hdl_sim.parser.ast import DeclKind, IdentRef
+
+    lwidth = operand_width(left_expr, nets)
+    rwidth = operand_width(right_expr, nets)
+    width = max(lwidth, rwidth)
+    for expr in (left_expr, right_expr):
+        if isinstance(expr, IdentRef):
+            net = nets.get(expr.name)
+            if net is not None and net.kind is DeclKind.INTEGER:
+                width = max(width, net.width)
+    if expr_is_signed(left_expr, nets) or expr_is_signed(right_expr, nets):
+        if expr_is_signed(left_expr, nets):
+            left = sign_extend(left, lwidth, width)
+        if expr_is_signed(right_expr, nets):
+            right = sign_extend(right, rwidth, width)
+    return left, right
+
+
 def operand_width(expr: Expr, nets: dict[str, SimNet], default: int = 32) -> int:
     if isinstance(expr, IdentRef):
         net = nets.get(expr.name)

@@ -151,12 +151,19 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
         lv, rv = to_int(left), to_int(right)
         width = max(left.width, right.width)
         mask = (1 << width) - 1
-        if expr.op == "+":
-            return FourStateValue.from_int((lv + rv) & mask, width=width)
-        if expr.op == "-":
-            return FourStateValue.from_int((lv - rv) & mask, width=width)
-        if expr.op == "*":
-            return FourStateValue.from_int((lv * rv) & mask, width=width)
+        if expr.op in {"+", "-", "*", "/"}:
+            from hdl_sim.engine.signed_ops import prepare_signed_arith_operands
+
+            lv, rv = prepare_signed_arith_operands(expr.left, expr.right, lv, rv, nets)
+            if expr.op == "+":
+                result = lv + rv
+            elif expr.op == "-":
+                result = lv - rv
+            elif expr.op == "*":
+                result = lv * rv
+            else:
+                result = 0 if rv == 0 else int(lv / rv)
+            return FourStateValue.from_int(result & mask, width=width)
         if expr.op == "<<":
             return FourStateValue.from_int((lv << rv) & mask, width=width)
         if expr.op in {">>", ">>>"}:
