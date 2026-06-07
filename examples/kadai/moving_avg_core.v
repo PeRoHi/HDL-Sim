@@ -35,9 +35,10 @@ module moving_avg_core #(
       end
     end else begin
       // ランニングサム更新: 新サンプルを加算し、最古サンプルを減算
-      acc <= acc + data_in - buffer[TAP_NUM-1];
-
-      // シフトレジスタ更新 (buffer[0] が最新、buffer[TAP_NUM-1] が最古)
+      // Sign-extend 12-bit to 14-bit explicitly to avoid ANY Verilog signedness quirks
+      acc <= $signed(acc) + 
+             $signed({ {SHIFT{data_in[DATA_WIDTH-1]}}, data_in }) - 
+             $signed({ {SHIFT{buffer[TAP_NUM-1][DATA_WIDTH-1]}}, buffer[TAP_NUM-1] });
       for (i = TAP_NUM-1; i > 0; i = i - 1) begin
         buffer[i] <= buffer[i-1];
       end

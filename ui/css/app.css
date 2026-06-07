@@ -55,7 +55,7 @@ body {
   align-items: stretch;
   height: var(--menubar-h);
   min-height: var(--menubar-h);
-  padding: 0 2px;
+  padding: 0 2px 0 0;
   background: linear-gradient(#f6f4ec, #e3e0d4);
   border-bottom: 1px solid #8a867a;
   flex-shrink: 0;
@@ -82,6 +82,7 @@ body {
   min-width: 76px;
   padding: 1px 12px 2px;
   margin-right: 2px;
+  margin-bottom: -1px;
   background: linear-gradient(165deg, #1e6fd9 0%, #124a8c 55%, #0c3566 100%);
   color: #fff;
   border-right: 1px solid #0a3060;
@@ -89,6 +90,7 @@ body {
   line-height: 1.15;
   user-select: none;
   flex-shrink: 0;
+  z-index: 1;
 }
 
 .brand-ver {

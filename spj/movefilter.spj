@@ -22,5 +22,60 @@
       "path": "tb_moving_avg_filter.v",
       "content": "`timescale 1ns/1ps\r\n//\r\n// tb_moving_avg_filter\r\n//   正弦波 + 単発スパイクノイズを入力し、各出力を検証する。\r\n//   - VCD を出力して GTKWave で波形確認できる\r\n//   - 立ち上がり区間を除外して、定量チェック (LPF 減衰 / ノイズ抽出) を行う\r\n//\r\nmodule tb_moving_avg_filter;\r\n\r\n  localparam integer DATA_WIDTH = 12;\r\n  localparam integer TAP_NUM    = 4;\r\n  localparam integer NUM_SAMPLE = 128;\r\n\r\n  // 出力レイテンシ (data_in 基準): group delay(N/2) + pipeline(1)\r\n  localparam integer MATCH_DELAY = TAP_NUM/2 + 1;\r\n\r\n  reg                         clk;\r\n  reg                         rst_n;\r\n  reg  signed [DATA_WIDTH-1:0] data_in;\r\n  wire signed [DATA_WIDTH-1:0] lpf_out_single;\r\n  wire signed [DATA_WIDTH-1:0] delay_matched_out;\r\n  wire signed [DATA_WIDTH-1:0] noise_out;\r\n  wire signed [DATA_WIDTH-1:0] lpf_out_cascade;\r\n\r\n  moving_avg_filter #(\r\n    .DATA_WIDTH (DATA_WIDTH),\r\n    .TAP_NUM    (TAP_NUM)\r\n  ) dut (\r\n    .clk               (clk),\r\n    .rst_n             (rst_n),\r\n    .data_in           (data_in),\r\n    .lpf_out_single    (lpf_out_single),\r\n    .delay_matched_out (delay_matched_out),\r\n    .noise_out         (noise_out),\r\n    .lpf_out_cascade   (lpf_out_cascade)\r\n  );\r\n\r\n  // 100MHz クロック\r\n  initial clk = 1'b0;\r\n  always #5 clk = ~clk;\r\n\r\n  // 入力信号生成用\r\n  real    pi;\r\n  real    sine_r;\r\n  integer sine_i;\r\n  integer spike;\r\n  integer n;\r\n  integer spike_cycle;\r\n  integer spike_amp;\r\n\r\n  // 計測用\r\n  integer abs_noise;\r\n  integer abs_lpf;\r\n  integer peak_noise_spike;   // スパイク付近の |noise_out| ピーク\r\n  integer peak_lpf_spike;     // 同タイミングの |lpf_out_single|\r\n  integer peak_noise_quiet;   // 静穏区間の |noise_out| ピーク (ベースライン)\r\n\r\n  // 平滑性 (隣接サンプル差の絶対値和) 比較用\r\n  integer prev_single;\r\n  integer prev_cascade;\r\n  integer rough_single;\r\n  integer rough_cascade;\r\n  integer diff_s;\r\n  integer diff_c;\r\n\r\n  initial begin\r\n    $dumpfile(\"wave.vcd\");\r\n    $dumpvars(0, tb_moving_avg_filter);\r\n  end\r\n\r\n  initial begin\r\n    pi          = 3.14159265358979;\r\n    spike_cycle = 64;     // スパイクを入れるサンプル位置\r\n    spike_amp   = 600;    // スパイク振幅\r\n    peak_noise_spike = 0;\r\n    peak_lpf_spike   = 0;\r\n    peak_noise_quiet = 0;\r\n    rough_single  = 0;\r\n    rough_cascade = 0;\r\n    prev_single   = 0;\r\n    prev_cascade  = 0;\r\n\r\n    data_in = 0;\r\n    rst_n   = 1'b0;\r\n    @(negedge clk);\r\n    @(negedge clk);\r\n    rst_n = 1'b1;\r\n\r\n    for (n = 0; n < NUM_SAMPLE; n = n + 1) begin\r\n      // 低周波正弦波 (周期 32 サンプル, 振幅 400)\r\n      sine_r = 400.0 * $sin(2.0 * pi * n / 32.0);\r\n      sine_i = $rtoi(sine_r);\r\n\r\n      // 単発スパイクノイズ\r\n      if (n == spike_cycle) spike = spike_amp;\r\n      else                  spike = 0;\r\n\r\n      data_in = sine_i + spike;\r\n      @(negedge clk);\r\n\r\n      abs_noise = (noise_out < 0) ? -noise_out : noise_out;\r\n      abs_lpf   = (lpf_out_single < 0) ? -lpf_out_single : lpf_out_single;\r\n\r\n      // スパイク付近 (出力に現れうる数サイクル) の noise ピークを捕捉\r\n      if (n >= spike_cycle && n <= spike_cycle + TAP_NUM + MATCH_DELAY) begin\r\n        if (abs_noise > peak_noise_spike) begin\r\n          peak_noise_spike = abs_noise;\r\n          peak_lpf_spike   = abs_lpf;\r\n        end\r\n      end\r\n\r\n      // 静穏区間 (立ち上がり後〜スパイク前) の noise ベースライン\r\n      if (n >= 16 && n < spike_cycle - 2) begin\r\n        if (abs_noise > peak_noise_quiet) peak_noise_quiet = abs_noise;\r\n      end\r\n\r\n      // 平滑性: スパイク通過後の区間で隣接差の絶対値和を積算\r\n      //   三角フィルタ (cascade) の方が滑らか = 差分和が小さいはず\r\n      if (n >= spike_cycle + 8) begin\r\n        diff_s = lpf_out_single - prev_single;\r\n        diff_c = lpf_out_cascade - prev_cascade;\r\n        rough_single  = rough_single  + ((diff_s < 0) ? -diff_s : diff_s);\r\n        rough_cascade = rough_cascade + ((diff_c < 0) ? -diff_c : diff_c);\r\n      end\r\n      prev_single  = lpf_out_single;\r\n      prev_cascade = lpf_out_cascade;\r\n    end\r\n\r\n    // ---- 定量チェック ----\r\n    $display(\"=====================================================\");\r\n    $display(\" spike_amp                 = %0d\", spike_amp);\r\n    $display(\" peak |noise_out| @ spike  = %0d\", peak_noise_spike);\r\n    $display(\" peak |noise_out| @ quiet  = %0d (baseline)\", peak_noise_quiet);\r\n    $display(\" |lpf_out_single| @ spike  = %0d (spike attenuated by ~1/N)\", peak_lpf_spike);\r\n    $display(\"=====================================================\");\r\n\r\n    // ノイズ抽出: スパイク付近の noise ピークがスパイクの 50%% 以上\r\n    if (peak_noise_spike >= spike_amp/2)\r\n      $display(\"[PASS] noise_out captured the spike (>= 50%% of spike_amp).\");\r\n    else\r\n      $display(\"[FAIL] noise_out did not capture the spike.\");\r\n\r\n    // ハイパス特性: スパイク付近の noise ピークが静穏区間より十分大きい\r\n    if (peak_noise_spike > peak_noise_quiet * 2)\r\n      $display(\"[PASS] spike clearly stands out in noise_out vs quiet baseline.\");\r\n    else\r\n      $display(\"[FAIL] spike does not stand out in noise_out.\");\r\n\r\n    // 平滑性: カスケード出力の方が滑らか (隣接差分和が小さい)\r\n    $display(\"-----------------------------------------------------\");\r\n    $display(\" roughness lpf_out_single  = %0d\", rough_single);\r\n    $display(\" roughness lpf_out_cascade = %0d\", rough_cascade);\r\n    if (rough_cascade <= rough_single)\r\n      $display(\"[PASS] lpf_out_cascade is smoother than lpf_out_single.\");\r\n    else\r\n      $display(\"[FAIL] cascade output is not smoother.\");\r\n\r\n    $display(\"Simulation done. Open wave.vcd with GTKWave to inspect waveforms.\");\r\n    $finish;\r\n  end\r\n\r\nendmodule\r\n"
     }
-  ]
+  ],
+  "wave": {
+    "selection": [
+      "clk",
+      "data_in",
+      "delay_matched_out",
+      "lpf_out_single",
+      "noise_out",
+      "lpf_out_cascade"
+    ],
+    "order": [
+      "clk",
+      "data_in",
+      "delay_matched_out",
+      "noise_out",
+      "lpf_out_single",
+      "lpf_out_cascade",
+      "dut.u_delay.data_out",
+      "dut.u_delay.i",
+      "dut.u_delay.sreg",
+      "dut.u_ma_stage1.acc",
+      "dut.u_ma_stage1.buffer",
+      "dut.u_ma_stage1.data_out",
+      "dut.u_ma_stage1.i",
+      "dut.u_ma_stage2.acc",
+      "dut.u_ma_stage2.buffer",
+      "dut.u_ma_stage2.data_out",
+      "dut.u_ma_stage2.i",
+      "dut.noise_out",
+      "abs_lpf",
+      "abs_noise",
+      "diff_c",
+      "diff_s",
+      "n",
+      "peak_lpf_spike",
+      "peak_noise_quiet",
+      "peak_noise_spike",
+      "pi",
+      "prev_cascade",
+      "prev_single",
+      "rough_cascade",
+      "rough_single",
+      "rst_n",
+      "sine_i",
+      "sine_r",
+      "spike",
+      "spike_amp",
+      "spike_cycle"
+    ],
+    "filePaths": [
+      "delay_line.v",
+      "moving_avg_core.v",
+      "moving_avg_filter.v",
+      "tb_moving_avg_filter.v"
+    ]
+  }
 }

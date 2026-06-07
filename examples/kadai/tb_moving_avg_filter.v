@@ -100,8 +100,10 @@ module tb_moving_avg_filter;
       data_in = sine_i + spike;
       @(negedge clk);
 
-      abs_noise = (noise_out < 0) ? -noise_out : noise_out;
-      abs_lpf   = (lpf_out_single < 0) ? -lpf_out_single : lpf_out_single;
+      abs_noise = noise_out;
+      if (abs_noise < 0) abs_noise = -abs_noise;
+      abs_lpf = lpf_out_single;
+      if (abs_lpf < 0) abs_lpf = -abs_lpf;
 
       // スパイク付近 (フィルタ遅延を見込んだ出力側の窓) の noise ピークを捕捉
       if (n >= spike_cycle + MATCH_DELAY &&
@@ -123,8 +125,10 @@ module tb_moving_avg_filter;
       if (n >= spike_cycle + 8) begin
         diff_s = lpf_out_single - prev_single;
         diff_c = lpf_out_cascade - prev_cascade;
-        rough_single  = rough_single  + ((diff_s < 0) ? -diff_s : diff_s);
-        rough_cascade = rough_cascade + ((diff_c < 0) ? -diff_c : diff_c);
+        if (diff_s < 0) rough_single = rough_single - diff_s;
+        else            rough_single = rough_single + diff_s;
+        if (diff_c < 0) rough_cascade = rough_cascade - diff_c;
+        else            rough_cascade = rough_cascade + diff_c;
       end
       prev_single  = lpf_out_single;
       prev_cascade = lpf_out_cascade;
