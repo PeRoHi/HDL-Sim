@@ -7,12 +7,12 @@ $PYTHON_ZIP = "python-$PYTHON_VER-embed-amd64.zip"
 $PYTHON_URL = "https://www.python.org/ftp/python/$PYTHON_VER/$PYTHON_ZIP"
 
 # バージョン取得
-$VER = "1.0.0"
+$VER = "1.0.1"
 try {
     $VER = py -3.12 -c "import sys; sys.path.insert(0,'src'); from hdl_sim import __version__; print(__version__)"
 } catch {}
 
-$DIST_DIR = "dist\HDL-Sim-Portable"
+$DIST_DIR = "dist\HDL-Sim-Portable-v105"
 $ZIP_OUT = "dist\HDL-Sim-$VER-portable-x64.zip"
 
 Write-Host "[HDL-Sim] Starting robust portable build..." -ForegroundColor Cyan

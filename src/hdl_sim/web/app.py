@@ -58,6 +58,14 @@ EXAMPLE_TOPS: dict[str, str] = {
     "hierarchy.v": "tb",
 }
 
+_shared_waveform_state: dict[str, Any] = {}
+
+class WaveformSyncRequest(BaseModel):
+    waveform: dict[str, Any]
+    filteredWaveform: dict[str, Any] | None = None
+    selection: list[str] = Field(default_factory=list)
+    order: list[str] = Field(default_factory=list)
+
 
 class NoCacheStaticFiles(StaticFiles):
     """Serve UI assets without aggressive browser caching (dev-friendly)."""
@@ -396,6 +404,30 @@ def create_app() -> FastAPI:
 
     last_ping_time = time.time()
     HEARTBEAT_TIMEOUT = 180.0
+
+    @app.post("/api/waveform_sync")
+    async def sync_waveform_state(req: WaveformSyncRequest):
+        global _shared_waveform_state
+        _shared_waveform_state = req.model_dump()
+        return {"status": "ok"}
+
+    @app.get("/api/waveform_sync")
+    async def get_waveform_state():
+        return _shared_waveform_state
+
+    @app.post("/api/open_waveform_window")
+    async def api_open_waveform_window():
+        import sys
+        is_native = "webview" in sys.modules
+        if is_native:
+            try:
+                import webview
+                if webview.windows and hasattr(webview.windows[0].js_api, "open_waveform_window"):
+                    webview.windows[0].js_api.open_waveform_window("/assets/waveform.html")
+                    return {"opened_native": True}
+            except Exception:
+                pass
+        return {"opened_native": False}
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

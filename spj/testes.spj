@@ -1,0 +1,46 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "testes",
+  "top": "lfsr8",
+  "until": 15000,
+  "max_events": 2000,
+  "files": [
+    {
+      "path": "lfsr8.v",
+      "content": "module lfsr8(CLK, RST, RAND_OUT);\n    input CLK;\n    input RST;\n    output [7:0] RAND_OUT;\n    reg [7:0] RAND_OUT;\n\n    always @(posedge CLK or posedge RST) begin\n        if (RST) RAND_OUT <= 8'b10101010;\n        else RAND_OUT <= {RAND_OUT[6:0], RAND_OUT[7] ^ RAND_OUT[5] ^ RAND_OUT[4] ^ RAND_OUT[3]};\n    end\nendmodule\n"
+    },
+    {
+      "path": "main_controller.v",
+      "content": "module main_controller(CLK, RST, START_BTN, STOP_BTN, RAND_VAL, TIMER_VAL, LED_TARGET, LED_FOUL, TIMER_EN, TIMER_RST);\n    input CLK, RST, START_BTN, STOP_BTN;\n    input [7:0] RAND_VAL;\n    input [15:0] TIMER_VAL;\n    output LED_TARGET, LED_FOUL, TIMER_EN, TIMER_RST;\n    reg LED_TARGET, LED_FOUL, TIMER_EN, TIMER_RST;\n    \n    reg [1:0] cur, nxt;\n    reg [7:0] wait_time;\n\n    parameter IDLE = 2'b00, WAIT_STATE = 2'b01, MEASURE = 2'b10, RESULT = 2'b11;\n\n    // 状態遷移 (P.116)\n    always @(posedge CLK or posedge RST) begin\n        if (RST) cur <= IDLE;\n        else cur <= nxt;\n    end\n\n    // 次状態決定 (P.117)\n    always @(cur or START_BTN or STOP_BTN or TIMER_VAL or wait_time) begin\n        nxt = cur;\n        case (cur)\n            IDLE: if (START_BTN) nxt = WAIT_STATE;\n            WAIT_STATE: begin\n                if (STOP_BTN) nxt = RESULT; \n                else if (TIMER_VAL[7:0] >= wait_time) nxt = MEASURE;\n            end\n            MEASURE: if (STOP_BTN) nxt = RESULT;\n            RESULT: if (START_BTN) nxt = IDLE;\n        endcase\n    end\n\n   // 出力制御 (P.118)\n    always @(posedge CLK) begin\n        LED_TARGET <= 1'b0; \n        TIMER_EN <= 1'b0; \n        TIMER_RST <= 1'b0;\n\n        case (cur)\n            IDLE: begin \n                TIMER_RST <= 1'b1; \n                wait_time <= RAND_VAL; \n                LED_FOUL <= 1'b0; // IDLEに戻った時にFOULを消灯\n            end\n            WAIT_STATE: begin\n                TIMER_EN <= 1'b1;\n                if (STOP_BTN) LED_FOUL <= 1'b1; // フライング時に点灯\n                if (TIMER_VAL[7:0] >= wait_time) begin\n                    TIMER_RST <= 1'b1; // 測定直前にタイマーを0リセット\n                end\n            end\n            MEASURE: begin \n                LED_TARGET <= 1'b1; \n                TIMER_EN <= 1'b1; \n            end\n            RESULT: begin \n                if (LED_FOUL) LED_FOUL <= 1'b1; // フライング状態を結果画面でも維持\n            end\n        endcase\n    end\nendmodule\n"
+    },
+    {
+      "path": "reflex_game_tp.v",
+      "content": "`timescale 1ns/1ns\nmodule reflex_game_tp;\n    reg CLK, RST, START_BTN, STOP_BTN;\n    wire LED_TARGET, LED_FOUL;\n    wire [6:0] SEG_OUT;\n\n    // 設計した回路を呼び出す\n    reflex_game dut (CLK, RST, START_BTN, STOP_BTN, LED_TARGET, LED_FOUL, SEG_OUT);\n\n    // クロックの作成 (テキストP.63参照)\n    always #5 CLK = ~CLK;\n\n    initial begin\n        CLK = 0; RST = 1; START_BTN = 0; STOP_BTN = 0;\n        #20 RST = 0;\n        #20 START_BTN = 1; // ここでスタートボタンを押す\n        #10 START_BTN = 0;\n        #500 STOP_BTN = 1; \n        #20 STOP_BTN = 0;\n        #3000 $finish;\n    end\nendmodule"
+    },
+    {
+      "path": "reflex_game.v",
+      "content": "module reflex_game(CLK, RST, START_BTN, STOP_BTN, LED_TARGET, LED_FOUL, SEG_OUT);\n    input CLK;\n    input RST;\n    input START_BTN;\n    input STOP_BTN;\n    output LED_TARGET;\n    output LED_FOUL;\n    output [6:0] SEG_OUT;\n\n    // 内部配線\n    wire [7:0] random_val;\n    wire [15:0] timer_val;\n    wire timer_en, timer_rst;\n\n    // (1) LFSR呼び出し\n    lfsr8 u_lfsr (CLK, RST, random_val);\n\n    // (2) タイマー呼び出し\n    timer16 u_timer (CLK, timer_rst, timer_en, timer_val);\n\n    // (3) デコーダ呼び出し\n    seg7_decoder u_seg (timer_val[3:0], SEG_OUT);\n\n    // (4) メインコントローラ呼び出し\n    main_controller u_ctrl (CLK, RST, START_BTN, STOP_BTN, random_val, timer_val, LED_TARGET, LED_FOUL, timer_en, timer_rst);\n\nendmodule\n"
+    },
+    {
+      "path": "seg7_decoder.v",
+      "content": "module seg7_decoder(DIN, SEG);\n    input [3:0] DIN;\n    output [6:0] SEG;\n    reg [6:0] SEG;\n\n    always @(DIN) begin\n        case (DIN)\n            4'h0: SEG = 7'b0111111;\n            4'h1: SEG = 7'b0000110;\n            4'h2: SEG = 7'b1011011;\n            4'h3: SEG = 7'b1001111;\n            4'h4: SEG = 7'b1100110;\n            4'h5: SEG = 7'b1101101;\n            4'h6: SEG = 7'b1111101;\n            4'h7: SEG = 7'b0100111;\n            4'h8: SEG = 7'b1111111;\n            4'h9: SEG = 7'b1101111;\n            default: SEG = 7'b0000000;\n        endcase\n    end\nendmodule\n"
+    },
+    {
+      "path": "timer16.v",
+      "content": "module timer16(CLK, RST, EN, COUNT);\n    input CLK;\n    input RST;\n    input EN;\n    output [15:0] COUNT;\n    reg [15:0] COUNT;\n\n    always @(posedge CLK) begin\n        if (RST) COUNT <= 16'd0;\n        else if (EN) COUNT <= COUNT + 16'd1;\n    end\nendmodule\n"
+    }
+  ],
+  "wave": {
+    "selection": [],
+    "order": [],
+    "filePaths": [
+      "lfsr8.v",
+      "main_controller.v",
+      "reflex_game.v",
+      "reflex_game_tp.v",
+      "seg7_decoder.v",
+      "timer16.v"
+    ]
+  }
+}
