@@ -10,9 +10,9 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel, Field
@@ -389,9 +389,34 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    import os
+    import sys
+    import time
+    import asyncio
+
+    last_ping_time = time.time()
+    HEARTBEAT_TIMEOUT = 180.0
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/ping")
+    def ping() -> dict[str, str]:
+        nonlocal last_ping_time
+        last_ping_time = time.time()
+        return {"status": "ok"}
+
+    @app.on_event("startup")
+    async def startup_event() -> None:
+        async def heartbeat_watcher() -> None:
+            nonlocal last_ping_time
+            while True:
+                await asyncio.sleep(5)
+                if time.time() - last_ping_time > HEARTBEAT_TIMEOUT:
+                    print(f"No ping received for {HEARTBEAT_TIMEOUT} seconds. Shutting down.", file=sys.stderr)
+                    os._exit(0)
+        asyncio.create_task(heartbeat_watcher())
 
     @app.get("/api/ui-info")
     def ui_info() -> dict[str, Any]:

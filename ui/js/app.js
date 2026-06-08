@@ -1025,7 +1025,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.6.0\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 1.0.0\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -2484,3 +2484,8 @@ initSplits();
 bindUi();
 initMdiPan();
 initMonaco();
+
+// Heartbeat to keep backend alive
+setInterval(() => {
+  fetch("/api/ping").catch(() => {});
+}, 10000);

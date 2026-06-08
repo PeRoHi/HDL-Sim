@@ -12,8 +12,12 @@ def pywebview_available() -> bool:
     try:
         import webview  # noqa: F401
 
+        import sys
+        if sys.platform == "win32":
+            import clr  # noqa: F401
+
         return True
-    except ImportError:
+    except Exception:
         return False
 
 
@@ -109,4 +113,9 @@ def open_native_window(
         return True
 
     window.events.closing += _on_closing
-    webview.start(debug=False)
+    try:
+        webview.start(debug=False)
+    except Exception as e:
+        import sys
+        print(f"Warning: webview.start failed: {e}", file=sys.stderr)
+        raise
