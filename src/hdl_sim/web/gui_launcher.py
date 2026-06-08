@@ -199,8 +199,12 @@ class HDLSimGuiLauncher:
         self.root.withdraw()
         try:
             open_ui_window(self.server.url, server=self.server, native=True, on_log=self.append_log)
-        finally:
             self.on_close()
+        except Exception as e:
+            self.append_log(f"専用ウィンドウ起動失敗: {e}")
+            self.root.deiconify()
+            messagebox.showwarning("起動エラー", f"専用ウィンドウの起動に失敗しました。\n\n{e}\n\n代わりにブラウザを開きます。")
+            open_browser_later(self.server.url)
 
     def on_close(self) -> None:
         if self.server is not None:

@@ -1212,8 +1212,355 @@ body.view-hide-project-bar .project-bar { display: none; }
 .console-output .line-ok { color: var(--success); }
 .console-output .line-warn { color: var(--warn); }
 
+/* ── Tutorial Modal ── */
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.tutorial-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.tutorial-modal {
+  background: #23272e;
+  border: 1px solid #3c3c3c;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255,255,255,0.04);
+  width: 560px;
+  max-width: 92vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(12px) scale(0.97);
+  transition: transform 0.25s ease;
+}
+
+.tutorial-overlay.visible .tutorial-modal {
+  transform: translateY(0) scale(1);
+}
+
+.tutorial-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #3c3c3c;
+  background: linear-gradient(180deg, #2a2e36 0%, #23272e 100%);
+  flex-shrink: 0;
+}
+
+.tutorial-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.tutorial-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: #e8eaed;
+  flex: 1;
+  font-family: var(--font-ui);
+}
+
+.tutorial-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #858585;
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tutorial-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+}
+
+.tutorial-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #cccccc;
+}
+
+.tutorial-body p {
+  margin: 0 0 12px;
+}
+
+.tutorial-body ul {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.tutorial-body li {
+  margin-bottom: 6px;
+}
+
+.tutorial-body code {
+  background: #3c3c3c;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #9cdcfe;
+}
+
+.tutorial-body strong {
+  color: #e8eaed;
+}
+
+.tutorial-note {
+  background: rgba(0, 122, 204, 0.10);
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  color: #b0c4d8;
+  margin-top: 12px;
+}
+
+/* Numbered steps within tutorial */
+.tutorial-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.tutorial-step-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.tutorial-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.tutorial-step-item > div {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Contact card */
+.tutorial-contact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  margin: 14px 0 6px;
+  background: #2d3139;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+}
+
+.tutorial-contact-label {
+  font-size: 13px;
+  color: #b0b0b0;
+  white-space: nowrap;
+}
+
+.tutorial-contact-email {
+  color: #4fc1ff;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.tutorial-contact-email:hover {
+  text-decoration: underline;
+  color: #7fd4ff;
+}
+
+/* Shortcut table */
+.tutorial-shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+  font-size: 12px;
+}
+
+.tutorial-shortcuts th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 2px solid #3c3c3c;
+  color: #b0b0b0;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tutorial-shortcuts td {
+  padding: 5px 10px;
+  border-bottom: 1px solid #2e3138;
+  color: #ccc;
+}
+
+.tutorial-shortcuts tr:hover td {
+  background: rgba(255,255,255,0.03);
+}
+
+.tutorial-shortcuts kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  background: #3c3c3c;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #e8eaed;
+  box-shadow: 0 1px 0 #222;
+  line-height: 1.4;
+}
+
+/* Footer */
+.tutorial-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px 14px;
+  border-top: 1px solid #3c3c3c;
+  background: #1e2228;
+  flex-shrink: 0;
+}
+
+.tutorial-progress {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tutorial-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.tutorial-dot:hover {
+  background: #888;
+  transform: scale(1.25);
+}
+
+.tutorial-dot.active {
+  background: var(--accent);
+  transform: scale(1.15);
+}
+
+.tutorial-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tutorial-nav-main {
+  display: flex;
+  gap: 6px;
+}
+
+.tutorial-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.tutorial-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tutorial-btn-skip {
+  background: transparent;
+  color: #858585;
+}
+
+.tutorial-btn-skip:hover {
+  color: #bbb;
+}
+
+.tutorial-btn-prev {
+  background: #3c3c3c;
+  color: #ccc;
+}
+
+.tutorial-btn-prev:hover:not(:disabled) {
+  background: #4a4a4a;
+  color: #fff;
+}
+
+.tutorial-btn-next {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.tutorial-btn-next:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.tutorial-btn-finish {
+  background: #2ea043;
+}
+
+.tutorial-btn-finish:hover:not(:disabled) {
+  background: #3fb950;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .tb-label { display: none; }
   .tb-btn { padding: 0 6px; }
+
+  .tutorial-modal {
+    width: 95vw;
+    max-height: 90vh;
+  }
+
+  .tutorial-body {
+    padding: 14px 16px;
+  }
 }

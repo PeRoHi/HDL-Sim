@@ -12,8 +12,12 @@ def pywebview_available() -> bool:
     try:
         import webview  # noqa: F401
 
+        import sys
+        if sys.platform == "win32":
+            import clr  # noqa: F401
+
         return True
-    except ImportError:
+    except Exception:
         return False
 
 
@@ -50,9 +54,16 @@ class NativeApi:
         for p in result:
             path = Path(p)
             try:
-                files.append({"name": path.name, "content": path.read_text(encoding="utf-8")})
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                try:
+                    content = path.read_text(encoding="shift_jis")
+                except Exception:
+                    continue
             except Exception:
-                pass
+                continue
+                
+            files.append({"name": path.name, "content": content})
         return files
 
     def pick_spj_file(self) -> dict | None:
@@ -79,6 +90,36 @@ class NativeApi:
             return {"name": path.name, "content": path.read_text(encoding="utf-8")}
         except Exception:
             return None
+
+    def open_waveform_window(self, url: str) -> None:
+        import webview
+        from urllib.parse import urlparse, urlunparse
+        
+        if not webview.windows:
+            return
+            
+        # Get the base URL from the main window
+        main_url = webview.windows[0].get_current_url()
+        if not main_url:
+            return
+            
+        parsed = urlparse(main_url)
+        full_url = urlunparse((parsed.scheme, parsed.netloc, url, "", "", ""))
+        
+        # 既に波形ウィンドウがあれば前面に持ってくる (簡易的に)
+        for w in webview.windows:
+            if w.title == "Waveform - HDL-Sim":
+                w.restore()
+                return
+
+        webview.create_window(
+            "Waveform - HDL-Sim",
+            full_url,
+            width=1000,
+            height=600,
+            min_size=(600, 400),
+            js_api=self
+        )
 
 
 def open_native_window(
@@ -109,4 +150,9 @@ def open_native_window(
         return True
 
     window.events.closing += _on_closing
-    webview.start(debug=False)
+    try:
+        webview.start(debug=False, private_mode=False)
+    except Exception as e:
+        import sys
+        print(f"Warning: webview.start failed: {e}", file=sys.stderr)
+        raise

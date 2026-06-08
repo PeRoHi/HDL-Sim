@@ -243,9 +243,19 @@ def start_server(
 
     if open_browser:
         if native_window:
-            open_ui_window(url, server=running, native=True, on_log=on_log)
-            return 0 if blocking else running
-        open_browser_later(url)
+            try:
+                open_ui_window(url, server=running, native=True, on_log=on_log)
+                return 0 if blocking else running
+            except Exception as e:
+                msg = f"専用ウィンドウの起動に失敗しました ({e})。ブラウザで開きます。"
+                if on_log is not None:
+                    on_log(msg)
+                else:
+                    print(msg, file=sys.stderr)
+                native_window = False
+        
+        if not native_window:
+            open_browser_later(url)
 
     if blocking:
         print("=" * 58)

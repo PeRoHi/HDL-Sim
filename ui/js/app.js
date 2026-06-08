@@ -1025,7 +1025,7 @@ async function menuHelpAbout() {
     const info = await api("/api/ui-info");
     alert(`HDL-Sim ${info.version}\nVerilog シミュレータ + Web IDE\n${info.spj_dir || ""}`);
   } catch {
-    alert("HDL-Sim 0.6.0\nVerilog シミュレータ + Web IDE");
+    alert("HDL-Sim 1.0.2\nVerilog シミュレータ + Web IDE");
   }
 }
 
@@ -1463,10 +1463,15 @@ async function openFilePicker() {
         let loadedCount = 0;
         const names = [];
         for (const f of files) {
+          const existing = fileStore.get(f.name);
+          if (existing?.model) existing.model.dispose();
           fileStore.set(f.name, { content: f.content, model: null, includeOnly: false });
           loadedCount++;
           names.push(f.name);
         }
+        names.forEach((path, index) => openFile(path, { focus: index === names.length - 1 }));
+        switchExplorerTab("files");
+        renderEditorTabs();
         refreshTopModulePicker();
         appendConsole(`[open] ${names.join(", ")}`, "info");
         setStatus(`${loadedCount} file(s) opened`, "ok");
@@ -1806,6 +1811,7 @@ function createWaveformWindow() {
         <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
         <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
         <button type="button" id="btn-wave-all" class="mini-btn" title="Run 後の全 VCD 信号を表示">All</button>
+        <button type="button" id="btn-wave-popout" class="mini-btn" title="別ウィンドウで開く" style="margin-left:8px; font-weight:bold; color:#569cd6;">Pop-out ↗</button>
         <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
       </div>
       <div id="waveform-wrap" class="waveform-wrap">
@@ -1813,6 +1819,20 @@ function createWaveformWindow() {
       </div>
     `;
     body.querySelector("#btn-wave-fit")?.addEventListener("click", fitWaveform);
+    body.querySelector("#btn-wave-popout")?.addEventListener("click", async () => {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.open_waveform_window) {
+        window.pywebview.api.open_waveform_window("/assets/waveform.html");
+        return;
+      }
+      try {
+        const res = await api("/api/open_waveform_window", {}, null, "POST");
+        if (!res.opened_native) {
+          window.open("/assets/waveform.html", "HDLSimWaveformPopout", "width=1000,height=600");
+        }
+      } catch {
+        window.open("/assets/waveform.html", "HDLSimWaveformPopout", "width=1000,height=600");
+      }
+    });
     body.querySelector("#btn-wave-all")?.addEventListener("click", () => {
       if (!lastWaveformFull) return;
       const names = lastWaveformFull.signals.map((s) => s.name);
@@ -1851,11 +1871,22 @@ function redrawWaveformCanvas(waveform) {
   });
 }
 
+function syncWaveformToBackend() {
+  if (!lastWaveformFull) return;
+  api("/api/waveform_sync", {
+    waveform: lastWaveformFull,
+    filteredWaveform: lastWaveform,
+    selection: waveformSelection.slice(),
+    order: waveformDisplayOrder.slice(),
+  }, null, "POST").catch(() => {});
+}
+
 function drawWave(waveform) {
   if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
   if (!waveformVisible) return;
   createWaveformWindow();
   redrawWaveformCanvas(waveform);
+  syncWaveformToBackend();
 }
 
 function fitWaveform() {
@@ -2134,6 +2165,7 @@ function initMonaco() {
     loadExamples();
     loadSpjFileList();
     verifyUiBuild();
+    window.HDLSimTutorial?.showIfFirstVisit();
   });
 }
 
@@ -2256,6 +2288,7 @@ function initMenuBar() {
       "window.tile": () => windowTile(),
       "window.waveform": () => toggleWaveform(true),
       "window.open-file": (path) => windowOpenFile(path),
+      "help.tutorial": () => window.HDLSimTutorial?.show(),
       "help.guide": () => menuHelpGuide(),
       "help.about": () => menuHelpAbout(),
     },
@@ -2482,3 +2515,30 @@ initSplits();
 bindUi();
 initMdiPan();
 initMonaco();
+
+// Heartbeat to keep backend alive
+setInterval(() => {
+  fetch("/api/ping").catch(() => {});
+}, 10000);
+
+// API for standalone waveform window
+window.getLatestWaveformContext = () => {
+  return {
+    waveform: lastWaveformFull,
+    filteredWaveform: lastWaveform,
+    selection: waveformSelection.slice(),
+    order: waveformDisplayOrder.slice(),
+  };
+};
+window.setWaveformSelection = (sel) => {
+  waveformSelection = sel;
+  refreshWaveformView();
+  schedulePersistWavePrefs();
+  syncWaveformToBackend();
+};
+window.setWaveformOrder = (ord) => {
+  waveformDisplayOrder = ord;
+  refreshWaveformView();
+  schedulePersistWavePrefs();
+  syncWaveformToBackend();
+};

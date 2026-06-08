@@ -90,6 +90,8 @@
     help: {
       label: "Help",
       items: [
+        { id: "help.tutorial", label: "チュートリアルを表示" },
+        { type: "sep" },
         { id: "help.guide", label: "使い方..." },
         { type: "sep" },
         { id: "help.about", label: "About HDL-Sim..." },

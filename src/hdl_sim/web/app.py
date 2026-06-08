@@ -10,9 +10,9 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel, Field
@@ -57,6 +57,14 @@ EXAMPLE_TOPS: dict[str, str] = {
     "silos_regression.v": "silos_regression_tb",
     "hierarchy.v": "tb",
 }
+
+_shared_waveform_state: dict[str, Any] = {}
+
+class WaveformSyncRequest(BaseModel):
+    waveform: dict[str, Any]
+    filteredWaveform: dict[str, Any] | None = None
+    selection: list[str] = Field(default_factory=list)
+    order: list[str] = Field(default_factory=list)
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -389,9 +397,58 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    import os
+    import sys
+    import time
+    import asyncio
+
+    last_ping_time = time.time()
+    HEARTBEAT_TIMEOUT = 180.0
+
+    @app.post("/api/waveform_sync")
+    async def sync_waveform_state(req: WaveformSyncRequest):
+        global _shared_waveform_state
+        _shared_waveform_state = req.model_dump()
+        return {"status": "ok"}
+
+    @app.get("/api/waveform_sync")
+    async def get_waveform_state():
+        return _shared_waveform_state
+
+    @app.post("/api/open_waveform_window")
+    async def api_open_waveform_window():
+        import sys
+        is_native = "webview" in sys.modules
+        if is_native:
+            try:
+                import webview
+                if webview.windows and hasattr(webview.windows[0].js_api, "open_waveform_window"):
+                    webview.windows[0].js_api.open_waveform_window("/assets/waveform.html")
+                    return {"opened_native": True}
+            except Exception:
+                pass
+        return {"opened_native": False}
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/ping")
+    def ping() -> dict[str, str]:
+        nonlocal last_ping_time
+        last_ping_time = time.time()
+        return {"status": "ok"}
+
+    @app.on_event("startup")
+    async def startup_event() -> None:
+        async def heartbeat_watcher() -> None:
+            nonlocal last_ping_time
+            while True:
+                await asyncio.sleep(5)
+                if time.time() - last_ping_time > HEARTBEAT_TIMEOUT:
+                    print(f"No ping received for {HEARTBEAT_TIMEOUT} seconds. Shutting down.", file=sys.stderr)
+                    os._exit(0)
+        asyncio.create_task(heartbeat_watcher())
 
     @app.get("/api/ui-info")
     def ui_info() -> dict[str, Any]:
