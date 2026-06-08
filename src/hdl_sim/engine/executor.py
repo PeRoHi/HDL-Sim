@@ -71,10 +71,12 @@ def _format_verilog(
         value = values[used]
         width_hint = widths[used] if widths and used < len(widths) else None
         used += 1
-        spec_match = re.match(r"%0?(\d*)([bhdBHD])", spec)
+        spec_match = re.match(r"%0?(\d*)([bhdtBHDT])", spec)
         if not spec_match:
             return str(value)
         digits, code = spec_match.group(1), spec_match.group(2).lower()
+        if code == "t":
+            return str(value)
         if digits:
             width = int(digits)
         elif width_hint is not None:
@@ -94,7 +96,7 @@ def _format_verilog(
             return str(value)
         return str(value)
 
-    rendered = re.sub(r"%%|%0?\d*?[bhdBHD]", repl, fmt)
+    rendered = re.sub(r"%%|%0?\d*?[bhdtBHDT]", repl, fmt)
     return rendered, used
 
 

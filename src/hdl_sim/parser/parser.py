@@ -644,9 +644,16 @@ class VerilogTransformer(Transformer):
         return self._decl_assign(DeclKind.INTEGER, children)
 
     @v_args(inline=True)
+    def genvar_decl(self, name: Token) -> Declaration:
+        """Handle genvar declarations as integer-typed variables."""
+        return Declaration(kind=DeclKind.INTEGER, name=str(name))
+
+    @v_args(inline=True)
     def declaration(self, *rest: Any) -> Declaration | tuple[Declaration, ...]:
         """Legacy fallback if a single declaration slips through."""
         if len(rest) == 1 and isinstance(rest[0], tuple):
+            return rest[0]
+        if len(rest) == 1 and isinstance(rest[0], Declaration):
             return rest[0]
         if len(rest) == 3:
             decl_type, range_node, name = rest

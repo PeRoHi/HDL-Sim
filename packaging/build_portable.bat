@@ -8,7 +8,7 @@ set "PYTHON_URL=https://www.python.org/ftp/python/%PYTHON_VER%/%PYTHON_ZIP%"
 
 :: バージョン取得
 for /f "usebackq delims=" %%V in (`py -3.12 -c "import sys; sys.path.insert(0,'src'); from hdl_sim import __version__; print(__version__)"`) do set "VER=%%V"
-if "%VER%"=="" set "VER=1.0.2"
+if "%VER%"=="" set "VER=1.0.5"
 
 set "DIST_DIR=dist\HDL-Sim-Portable"
 set "ZIP_OUT=dist\HDL-Sim-%VER%-portable-x64.zip"
@@ -75,7 +75,17 @@ echo python\python.exe -m hdl_sim.web.launcher
 :: 6. Zip it
 echo ZIP アーカイブを作成しています: %ZIP_OUT%
 if exist "%ZIP_OUT%" del /f /q "%ZIP_OUT%"
+del /q "%DIST_DIR%\spj\*test*.spj" 2>nul
 powershell -Command "Compress-Archive -LiteralPath '%DIST_DIR%' -DestinationPath '%ZIP_OUT%' -Force"
+
+:: 7. Create test_spj archive
+echo testの .spj アーカイブを作成しています: dist\test_spj.zip
+set "TEST_SPJ_DIR=dist\test_spj"
+if exist "%TEST_SPJ_DIR%" rmdir /s /q "%TEST_SPJ_DIR%"
+mkdir "%TEST_SPJ_DIR%"
+copy "spj\*test*.spj" "%TEST_SPJ_DIR%\" >nul 2>&1
+if exist "dist\test_spj.zip" del /f /q "dist\test_spj.zip"
+powershell -Command "Compress-Archive -LiteralPath '%TEST_SPJ_DIR%' -DestinationPath 'dist\test_spj.zip' -Force"
 
 echo.
 echo 完成: %ZIP_OUT%

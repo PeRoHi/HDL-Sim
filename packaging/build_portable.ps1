@@ -57,8 +57,11 @@ Write-Host "[4/6] Copying sources and assets..." -ForegroundColor Yellow
 Copy-Item -Path "src" -Destination "$DIST_DIR\src" -Recurse -Force
 Copy-Item -Path "ui" -Destination "$DIST_DIR\ui" -Recurse -Force
 
+New-Item -ItemType Directory -Force -Path "$DIST_DIR\projects" | Out-Null
+New-Item -ItemType Directory -Force -Path "$DIST_DIR\verilog_sources" | Out-Null
+
 New-Item -ItemType Directory -Force -Path "$DIST_DIR\examples" | Out-Null
-$exampleFiles = @("and_gate.v", "clock.v", "counter.v", "full_tb.v", "hierarchy.v", "lfsr8.v", "param_counter.v", "silos_regression.v", "tb_multi.v", "timer16.v")
+$exampleFiles = @("and_gate.v", "counter.v", "tb_multi.v", "hierarchy.v")
 foreach ($file in $exampleFiles) {
     if (Test-Path "examples\$file") {
         Copy-Item -Path "examples\$file" -Destination "$DIST_DIR\examples\" -Force
@@ -67,7 +70,7 @@ foreach ($file in $exampleFiles) {
 
 if (Test-Path "spj") {
     New-Item -ItemType Directory -Force -Path "$DIST_DIR\spj" | Out-Null
-    $spjFiles = @("README.md", "alu-test.spj", "api_demo.spj", "silos_code_coverage.spj", "silos_code_coverage2.spj", "silos_gate.spj", "silos_vending.spj", "test-casex_router.spj", "test4add.spj", "testDFF.spj", "testTFF.spj", "testcounter.spj")
+    $spjFiles = @("README.md", "api_demo.spj", "silos_code_coverage.spj", "silos_code_coverage2.spj", "silos_gate.spj", "silos_vending.spj", "test4add.spj", "testcounter.spj", "testDFF.spj")
     foreach ($file in $spjFiles) {
         if (Test-Path "spj\$file") {
             Copy-Item -Path "spj\$file" -Destination "$DIST_DIR\spj\" -Force
@@ -138,6 +141,14 @@ if (Test-Path $ZIP_OUT) {
     Remove-Item -Force $ZIP_OUT
 }
 Compress-Archive -LiteralPath $DIST_DIR -DestinationPath $ZIP_OUT -Force
+
+Write-Host "Creating test SPJ archive: dist\test_spj.zip"
+$TEST_SPJ_DIR = "dist\test_spj"
+if (Test-Path $TEST_SPJ_DIR) { Remove-Item -Recurse -Force $TEST_SPJ_DIR }
+New-Item -ItemType Directory -Force -Path $TEST_SPJ_DIR | Out-Null
+Get-ChildItem -Path "spj" -Filter "*test*.spj" | Copy-Item -Destination $TEST_SPJ_DIR -Force
+if (Test-Path "dist\test_spj.zip") { Remove-Item -Force "dist\test_spj.zip" }
+Compress-Archive -LiteralPath $TEST_SPJ_DIR -DestinationPath "dist\test_spj.zip" -Force
 
 Write-Host ""
 Write-Host "Done: $ZIP_OUT" -ForegroundColor Green

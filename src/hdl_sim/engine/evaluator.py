@@ -173,8 +173,11 @@ class ExpressionEvaluator:
                 value = (value << 8) | ch
             return value
         if isinstance(expr, IdentRef):
-            if expr.name in ("$stime", "$time") and self._sim_time is not None:
-                return self._sim_time
+            if expr.name in ("$stime", "$time"):
+                if self._queue is not None:
+                    return self._queue.now
+                if self._sim_time is not None:
+                    return self._sim_time
             if expr.name in self._params:
                 return self._params[expr.name]
             if expr.name in self._nets:

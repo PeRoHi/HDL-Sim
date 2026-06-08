@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "test-fork_join",
+    "description": "Test case for fork/join block execution."
+  },
+  "simulation": {
+    "top_module": "tb_fork_join",
+    "timescale": "1ns",
+    "defines": {}
+  },
+  "files": [
+    "../examples/test/fork_join/tb_fork_join.v"
+  ]
+}
