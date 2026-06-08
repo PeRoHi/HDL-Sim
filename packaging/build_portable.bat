@@ -8,7 +8,7 @@ set "PYTHON_URL=https://www.python.org/ftp/python/%PYTHON_VER%/%PYTHON_ZIP%"
 
 :: バージョン取得
 for /f "usebackq delims=" %%V in (`py -3.12 -c "import sys; sys.path.insert(0,'src'); from hdl_sim import __version__; print(__version__)"`) do set "VER=%%V"
-if "%VER%"=="" set "VER=1.0.1"
+if "%VER%"=="" set "VER=1.0.2"
 
 set "DIST_DIR=dist\HDL-Sim-Portable"
 set "ZIP_OUT=dist\HDL-Sim-%VER%-portable-x64.zip"

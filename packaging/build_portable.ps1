@@ -12,7 +12,7 @@ try {
     $VER = py -3.12 -c "import sys; sys.path.insert(0,'src'); from hdl_sim import __version__; print(__version__)"
 } catch {}
 
-$DIST_DIR = "dist\HDL-Sim-Portable-v105"
+$DIST_DIR = "dist\HDL-Sim-Portable-v106"
 $ZIP_OUT = "dist\HDL-Sim-$VER-portable-x64.zip"
 
 Write-Host "[HDL-Sim] Starting robust portable build..." -ForegroundColor Cyan
@@ -53,11 +53,27 @@ Write-Host "[3/6] Installing dependencies..."
 & "$DIST_DIR\python\python.exe" -m pip install --no-warn-script-location typing_extensions
 
 # 4. Copy sources
-Write-Host "[4/6] Copying sources and assets..."
-Copy-Item -Path "src" -Destination "$DIST_DIR\src" -Recurse
-Copy-Item -Path "ui" -Destination "$DIST_DIR\ui" -Recurse
-Copy-Item -Path "examples" -Destination "$DIST_DIR\examples" -Recurse
-Copy-Item -Path "spj" -Destination "$DIST_DIR\spj" -Recurse
+Write-Host "[4/6] Copying sources and assets..." -ForegroundColor Yellow
+Copy-Item -Path "src" -Destination "$DIST_DIR\src" -Recurse -Force
+Copy-Item -Path "ui" -Destination "$DIST_DIR\ui" -Recurse -Force
+
+New-Item -ItemType Directory -Force -Path "$DIST_DIR\examples" | Out-Null
+$exampleFiles = @("and_gate.v", "clock.v", "counter.v", "full_tb.v", "hierarchy.v", "lfsr8.v", "param_counter.v", "silos_regression.v", "tb_multi.v", "timer16.v")
+foreach ($file in $exampleFiles) {
+    if (Test-Path "examples\$file") {
+        Copy-Item -Path "examples\$file" -Destination "$DIST_DIR\examples\" -Force
+    }
+}
+
+if (Test-Path "spj") {
+    New-Item -ItemType Directory -Force -Path "$DIST_DIR\spj" | Out-Null
+    $spjFiles = @("README.md", "alu-test.spj", "api_demo.spj", "silos_code_coverage.spj", "silos_code_coverage2.spj", "silos_gate.spj", "silos_vending.spj", "test-casex_router.spj", "test4add.spj", "testDFF.spj", "testTFF.spj", "testcounter.spj")
+    foreach ($file in $spjFiles) {
+        if (Test-Path "spj\$file") {
+            Copy-Item -Path "spj\$file" -Destination "$DIST_DIR\spj\" -Force
+        }
+    }
+}
 Copy-Item -Path "README.md" -Destination "$DIST_DIR\"
 
 # 5. Download WebView2 Installer
