@@ -2134,6 +2134,7 @@ function initMonaco() {
     loadExamples();
     loadSpjFileList();
     verifyUiBuild();
+    window.HDLSimTutorial?.showIfFirstVisit();
   });
 }
 
@@ -2256,6 +2257,7 @@ function initMenuBar() {
       "window.tile": () => windowTile(),
       "window.waveform": () => toggleWaveform(true),
       "window.open-file": (path) => windowOpenFile(path),
+      "help.tutorial": () => window.HDLSimTutorial?.show(),
       "help.guide": () => menuHelpGuide(),
       "help.about": () => menuHelpAbout(),
     },
