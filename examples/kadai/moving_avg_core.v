@@ -46,7 +46,7 @@ module moving_avg_core #(
     end
   end
 
-  // 算術右シフトで N (= 2^SHIFT) 除算。$signed で符号を明示する。
-  assign data_out = ($signed(acc)) >>> SHIFT;
+  // 算術右シフトで N (= 2^SHIFT) 除算し、下位を切り捨て
+  assign data_out = acc >>> SHIFT;
 
 endmodule

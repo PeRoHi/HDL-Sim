@@ -59,8 +59,8 @@ module tb_moving_avg_filter;
   // 平滑性 (隣接サンプル差の絶対値和) 比較用
   integer prev_single;
   integer prev_cascade;
-  reg [63:0] rough_single;
-  reg [63:0] rough_cascade;
+  integer rough_single;
+  integer rough_cascade;
   integer diff_s;
   integer diff_c;
 
@@ -120,21 +120,18 @@ module tb_moving_avg_filter;
         if (abs_noise < min_noise_quiet)  min_noise_quiet  = abs_noise;
       end
 
-      // 平滑性: スパイク・遷移の影響が消えた末尾区間で隣接差の絶対値和を積算
+      // 平滑性: スパイク通過後の区間で隣接差の絶対値和を積算
       //   三角フィルタ (cascade) の方が滑らか = 差分和が小さいはず
-      if (n == NUM_SAMPLE - 32) begin
-        prev_single  = $signed(lpf_out_single);
-        prev_cascade = $signed(lpf_out_cascade);
-      end else if (n > NUM_SAMPLE - 32) begin
-        diff_s = $signed(lpf_out_single) - prev_single;
-        diff_c = $signed(lpf_out_cascade) - prev_cascade;
-        if (diff_s < 0) rough_single = rough_single + (-diff_s);
+      if (n >= spike_cycle + 8) begin
+        diff_s = lpf_out_single - prev_single;
+        diff_c = lpf_out_cascade - prev_cascade;
+        if (diff_s < 0) rough_single = rough_single - diff_s;
         else            rough_single = rough_single + diff_s;
-        if (diff_c < 0) rough_cascade = rough_cascade + (-diff_c);
+        if (diff_c < 0) rough_cascade = rough_cascade - diff_c;
         else            rough_cascade = rough_cascade + diff_c;
-        prev_single  = $signed(lpf_out_single);
-        prev_cascade = $signed(lpf_out_cascade);
       end
+      prev_single  = lpf_out_single;
+      prev_cascade = lpf_out_cascade;
     end
 
     // ---- 定量チェック ----
