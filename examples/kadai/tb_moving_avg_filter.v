@@ -45,8 +45,12 @@ module tb_moving_avg_filter;
   integer sine_i;
   integer spike;
   integer n;
-  integer spike_cycle;
-  integer spike_amp;
+  integer spike_cycle1;
+  integer spike_cycle2;
+  integer spike_cycle3;
+  integer spike_amp1;
+  integer spike_amp2;
+  integer spike_amp3;
 
   // 計測用
   integer abs_noise;
@@ -71,8 +75,12 @@ module tb_moving_avg_filter;
 
   initial begin
     pi          = 3.14159265358979;
-    spike_cycle = 64;     // スパイクを入れるサンプル位置
-    spike_amp   = 1500;   // 12bit signed 飽和を避ける (±2047 以内)
+    spike_cycle1 = 64;     // スパイクを入れるサンプル位置
+    spike_amp1   = 1500;   // 12bit signed 飽和を避ける (±2047 以内)
+    spike_cycle2 = 34;     // スパイクを入れるサンプル位置
+    spike_amp2   = 500;   // 12bit signed 飽和を避ける (±2047 以内)
+    spike_cycle3 = 64;     // スパイクを入れるサンプル位置
+    spike_amp3   = -500;   // 12bit signed 飽和を避ける (±2047 以内)
     peak_noise_spike = 0;
     peak_lpf_spike   = 0;
     peak_noise_quiet = 0;
