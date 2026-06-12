@@ -6,11 +6,13 @@
   "files": [
     {
       "path": "counter_reset_tp.v",
-      "content": "// リセット付き4ビットカウンタのテストモジュール\n\n`timescale 1ps/1ps\t// 単位時間を1psに設定\n\nmodule counter_reset_tp;\nreg\t\t\t\tclk, reset;\t// テスト入力をreg宣言\nwire\t[3:0]\tout;\t\t// 出力をwire宣言\n\nparameter STEP = 1000;\t// STEP = 1nsec に設定\n\ncounter_reset counter_reset( clk, reset, out );\t// テスト対象呼び出し\n\nalways # (STEP/2)\tclk = ~clk;\t\t// クロック作成\n\n// テスト入力\ninitial begin\n\t\t\t\tclk = 0;\treset = 0;\t// 時間 = 0  nsec\n\t# (STEP)\treset = 1;\t\t\t\t// 時間 = 1  nsec\n\t# (STEP)\treset = 0;\t\t\t\t// 時間 = 2  nsec\n\t# (STEP*20)\treset = 1;\t\t\t\t// 時間 = 22 nsec\n\t# (STEP)\treset = 0;\t\t\t\t// 時間 = 23 nsec\n\t# (STEP*10)\t$finish;\t\t\t\t// 時間 = 33 nsec\n\nend\n\n// 表示\ninitial $monitor( $stime, \" clk=%b reset=%b out=%h\", clk, reset, out );\n\nendmodule\n"
+      "content": "// リセット付き4ビットカウンタのテストモジュール\n\n`timescale 1ps/1ps\t// 単位時間を1psに設定\n\nmodule counter_reset_tp;\nreg\t\t\t\tclk, reset;\t// テスト入力をreg宣言\nwire\t[3:0]\tout;\t\t// 出力をwire宣言\n\nparameter STEP = 1000;\t// STEP = 1nsec に設定\n\ncounter_reset counter_reset( clk, reset, out );\t// テスト対象呼び出し\n\nalways # (STEP/2)\tclk = ~clk;\t\t// クロック作成\n\n// テスト入力\ninitial begin\n\t\t\t\tclk = 0;\treset = 0;\t// 時間 = 0  nsec\n\t# (STEP)\treset = 1;\t\t\t\t// 時間 = 1  nsec\n\t# (STEP)\treset = 0;\t\t\t\t// 時間 = 2  nsec\n\t# (STEP*20)\treset = 1;\t\t\t\t// 時間 = 22 nsec\n\t# (STEP)\treset = 0;\t\t\t\t// 時間 = 23 nsec\n\t# (STEP*10)\t$finish;\t\t\t\t// 時間 = 33 nsec\n\nend\n\n// 表示\ninitial $monitor( $stime, \" clk=%b reset=%b out=%h\", clk, reset, out );\n\nendmodule\n",
+      "source_path": "examples://examples/counter_reset_tp.v"
     },
     {
       "path": "couter_reset.v",
-      "content": "// リセット付き4ビットカウンタ\nmodule counter_reset ( clk, reset, out );\ninput\t\tclk,reset;\noutput\t[3:0] out;\nreg\t\t[3:0] out;\n\nalways@(posedge clk) begin\n\tif(reset)\n\t out <= 0;\n\telse\n\t out <= out+1;\nend\nendmodule\n"
+      "content": "// リセット付き4ビットカウンタ\nmodule counter_reset ( clk, reset, out );\ninput\t\tclk,reset;\noutput\t[3:0] out;\nreg\t\t[3:0] out;\n\nalways@(posedge clk) begin\n\tif(reset)\n\t out <= 0;\n\telse\n\t out <= out+1;\nend\nendmodule\n",
+      "source_path": "examples://examples/couter_reset.v"
     }
   ],
   "label": "Counter with reset"

@@ -94,7 +94,16 @@ def build_project(
         content = read_verilog(path)
         if rel in patchers:
             content = patchers[rel](content)
-        entry: dict[str, str | bool] = {"path": path.name, "content": content}
+        examples_root = ROOT / "examples"
+        try:
+            source_ref = f"examples://{path.resolve().relative_to(examples_root.resolve()).as_posix()}"
+        except ValueError:
+            source_ref = str(path.resolve())
+        entry: dict[str, str | bool] = {
+            "path": path.name,
+            "content": content,
+            "source_path": source_ref,
+        }
         if (
             rel in include_only
             or path.name in include_only

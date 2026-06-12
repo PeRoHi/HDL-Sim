@@ -807,6 +807,32 @@ function reportSourceWriteback(saved) {
   }
 }
 
+/** ブラウザで開いたローカル .v (File System Access API) を保存時に書き戻す */
+async function writeBackLocalHandles() {
+  for (const [path, entry] of fileStore) {
+    const handle = entry.sourceHandle;
+    if (!handle) continue;
+    if (entry.sourceSyncedContent === entry.content) continue;
+    try {
+      let perm = await handle.queryPermission?.({ mode: "readwrite" });
+      if (perm !== "granted") {
+        perm = await handle.requestPermission?.({ mode: "readwrite" });
+      }
+      if (perm !== "granted") {
+        appendConsole(`[spj] ${path}: 書き込み許可が得られず参照元を更新できません`, "warn");
+        continue;
+      }
+      const writable = await handle.createWritable();
+      await writable.write(entry.content);
+      await writable.close();
+      entry.sourceSyncedContent = entry.content;
+      appendConsole(`[spj] ローカルの参照元 .v を更新: ${path}`, "ok");
+    } catch (err) {
+      appendConsole(`[spj] ${path}: 参照元の更新に失敗 (${err})`, "warn");
+    }
+  }
+}
+
 async function saveProjectFile() {
   try {
     const data = buildSpjPayload();
@@ -824,6 +850,7 @@ async function saveProjectFile() {
     if (labelEl) labelEl.textContent = currentProject || saved.name || "—";
     appendConsole(`[spj] saved: ${saved.path}`, "ok");
     reportSourceWriteback(saved);
+    await writeBackLocalHandles();
     setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
     appendConsole(String(e), "err");
@@ -855,6 +882,7 @@ async function saveProjectFileAs() {
     rememberRecentSpj(saved.filename);
     appendConsole(`[spj] saved as: ${saved.path}`, "ok");
     reportSourceWriteback(saved);
+    await writeBackLocalHandles();
     setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
     appendConsole(String(e), "err");
@@ -1436,7 +1464,13 @@ function putFileContent(path, content) {
   if (existing?.model) {
     existing.model.dispose();
   }
-  fileStore.set(path, { content, model: null });
+  fileStore.set(path, {
+    content,
+    model: null,
+    sourcePath: existing?.sourcePath || null,
+    sourceHandle: existing?.sourceHandle || null,
+    sourceSyncedContent: existing?.sourceSyncedContent,
+  });
 }
 
 function readFileAsText(file) {
@@ -1486,7 +1520,12 @@ async function openFilePicker() {
         for (const f of files) {
           const existing = fileStore.get(f.name);
           if (existing?.model) existing.model.dispose();
-          fileStore.set(f.name, { content: f.content, model: null, includeOnly: false });
+          fileStore.set(f.name, {
+            content: f.content,
+            model: null,
+            includeOnly: false,
+            sourcePath: f.source_path || null,
+          });
           loadedCount++;
           names.push(f.name);
         }
@@ -1500,6 +1539,44 @@ async function openFilePicker() {
       }
     } catch (err) {
       appendConsole(`[error] Failed to open files: ${err}`, "error");
+    }
+  } else if (window.showOpenFilePicker) {
+    // ブラウザ: File System Access API でハンドルを保持し、保存時に書き戻す
+    try {
+      const handles = await window.showOpenFilePicker({
+        multiple: true,
+        types: [
+          {
+            description: "Verilog",
+            accept: { "text/plain": [".v", ".sv", ".vh", ".svh"] },
+          },
+        ],
+      });
+      const names = [];
+      for (const handle of handles) {
+        const file = await handle.getFile();
+        const content = await file.text();
+        putFileContent(file.name, content);
+        const entry = fileStore.get(file.name);
+        if (entry) {
+          entry.sourceHandle = handle;
+          entry.sourceSyncedContent = content;
+        }
+        names.push(file.name);
+      }
+      if (names.length) {
+        names.forEach((path, index) => openFile(path, { focus: index === names.length - 1 }));
+        switchExplorerTab("files");
+        renderEditorTabs();
+        refreshTopModulePicker();
+        workspaceTree?.render();
+        appendConsole(`[open] ${names.join(", ")} (保存時に参照元へ書き戻し)`, "info");
+        setStatus(`${names.length} file(s) opened`, "ok");
+      }
+    } catch (err) {
+      if (err?.name !== "AbortError") {
+        appendConsole(`[error] Failed to open files: ${err}`, "error");
+      }
     }
   } else {
     $("file-import-input")?.click();

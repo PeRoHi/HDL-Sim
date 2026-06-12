@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "1.0.7"
+UI_BUILD = "1.0.8"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -352,6 +352,75 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
     return loaded, base, tmp
 
 
+def _examples_by_basename() -> dict[str, list[Path]]:
+    table: dict[str, list[Path]] = {}
+    if EXAMPLES_DIR.is_dir():
+        for path in EXAMPLES_DIR.rglob("*.v"):
+            table.setdefault(path.name, []).append(path)
+    return table
+
+
+def _normalize_spj_data(data: dict[str, Any]) -> dict[str, Any]:
+    """旧形式 (.v をパス参照する .spj) をインライン形式へ変換し、
+    source_path が欠けているファイルは examples から一意に補完する。"""
+
+    from hdl_sim.web import spj_store as _spj
+
+    files = data.get("files")
+
+    # 旧 SILOS 風: files がパス文字列のリスト → 実ファイルを読み込む
+    if isinstance(files, list) and files and all(isinstance(f, str) for f in files):
+        base = _spj.spj_dir().resolve()
+        resolved_files: list[dict[str, Any]] = []
+        for rel in files:
+            target = (base / rel).resolve()
+            if not target.is_file():
+                raise ValueError(f".spj が参照するファイルが見つかりません: {rel}")
+            resolved_files.append(
+                {
+                    "path": target.name,
+                    "content": read_verilog_text(target),
+                    "source_path": str(target),
+                }
+            )
+        project = data.get("project") or {}
+        sim = data.get("simulation") or {}
+        return {
+            "format": "hdl-sim-project",
+            "version": 1,
+            "name": project.get("name") or data.get("name") or "project",
+            "top": sim.get("top_module") or data.get("top"),
+            "files": resolved_files,
+        }
+
+    # インライン形式: source_path 欠落分をファイル名で examples から補完
+    if isinstance(files, list):
+        table = _examples_by_basename()
+        for item in files:
+            if not isinstance(item, dict) or item.get("source_path"):
+                continue
+            name = str(item.get("path", "")).split("/")[-1]
+            matches = table.get(name, [])
+            if len(matches) == 1:
+                rel = matches[0].resolve().relative_to(EXAMPLES_DIR.resolve()).as_posix()
+                item["source_path"] = f"examples://{rel}"
+    return data
+
+
+def _resolve_source_path(raw: str) -> Path | None:
+    """`examples://rel/path.v` または絶対パスを実ファイルパスへ解決する。"""
+
+    if raw.startswith("examples://"):
+        rel = raw[len("examples://"):]
+        path = (EXAMPLES_DIR / rel).resolve()
+        try:
+            path.relative_to(EXAMPLES_DIR.resolve())
+        except ValueError:
+            return None
+        return path
+    return Path(raw)
+
+
 def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
     root = EXAMPLES_DIR.resolve()
     files: list[dict[str, str]] = []
@@ -367,7 +436,8 @@ def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
             {
                 "path": rel,
                 "content": read_verilog_text(path),
-                "source_path": str(path),
+                # examples:// 形式はマシン間で .spj を移動しても解決できる
+                "source_path": f"examples://{rel}",
             }
         )
     return files
@@ -592,7 +662,8 @@ def create_app() -> FastAPI:
     def api_load_spj(filename: str) -> dict[str, Any]:
         try:
             loaded = spj_store.load_spj_file(filename)
-            return {"filename": loaded["filename"], **loaded["data"]}
+            data = _normalize_spj_data(loaded["data"])
+            return {"filename": loaded["filename"], **data}
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="spj file not found") from exc
         except (ValueError, json.JSONDecodeError) as exc:
@@ -618,8 +689,8 @@ def create_app() -> FastAPI:
             if not source_path or content is None:
                 continue
             try:
-                target = Path(source_path)
-                if not target.is_file():
+                target = _resolve_source_path(source_path)
+                if target is None or not target.is_file():
                     source_errors.append(f"{item.get('path')}: 参照先が存在しません ({source_path})")
                     continue
                 if read_verilog_text(target) != content:

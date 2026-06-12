@@ -63,7 +63,13 @@ class NativeApi:
             except Exception:
                 continue
                 
-            files.append({"name": path.name, "content": content})
+            files.append(
+                {
+                    "name": path.name,
+                    "content": content,
+                    "source_path": str(path.resolve()),
+                }
+            )
         return files
 
     def pick_spj_file(self) -> dict | None:
