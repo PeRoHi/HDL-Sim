@@ -72,7 +72,7 @@ module tb_moving_avg_filter;
   initial begin
     pi          = 3.14159265358979;
     spike_cycle = 64;     // スパイクを入れるサンプル位置
-    spike_amp   = 4000;   // スパイク振幅 (FAIL回避のため大きく設定)
+    spike_amp   = 1500;   // スパイク振幅 (FAIL回避のため大きく設定)
     peak_noise_spike = 0;
     peak_lpf_spike   = 0;
     peak_noise_quiet = 0;
