@@ -47,6 +47,6 @@ module moving_avg_core #(
   end
 
   // 算術右シフトで N (= 2^SHIFT) 除算し、下位を切り捨て
-  assign data_out = acc >>> SHIFT;
+  assign data_out = ($signed(acc)) >>> SHIFT;
 
 endmodule

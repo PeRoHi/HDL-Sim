@@ -74,7 +74,11 @@ def eval_logic(expr: Expr, eval_int, nets: dict) -> FourStateValue:
 
         net = nets.get(expr.signal)
         if expr.word is not None:
+            # mem[word][bit] — bit select within one memory word
             width = 1
+        elif net is not None and net.is_memory:
+            # mem[index] — unpacked memory word (full word width)
+            width = net.width
         elif net is not None:
             width = 1
         else:

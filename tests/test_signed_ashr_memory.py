@@ -146,6 +146,53 @@ def test_unsigned_cast_logical_shift() -> None:
     assert sim._nets["b"].value == 0x3E
 
 
+def test_memory_word_indexed_by_expression() -> None:
+    """mem[i-1] must read a full word, not a single bit (eval_logic width bug)."""
+    source = """
+    module m;
+      reg [7:0] mem [0:3];
+      integer i;
+      reg [7:0] x;
+      initial begin
+        mem[0] = 8'h11;
+        mem[1] = 8'h22;
+        mem[2] = 8'h33;
+        mem[3] = 8'h44;
+        i = 3;
+        x = mem[i - 1];
+      end
+    endmodule
+    """
+    sim = Simulator.from_source(source)
+    sim.run(until=0, max_events=30)
+    assert sim._nets["x"].value == 0x33
+
+
+def test_memory_shift_in_for_loop() -> None:
+    source = """
+    module m;
+      reg [7:0] mem [0:3];
+      integer i;
+      initial begin
+        mem[0] = 8'h01;
+        mem[1] = 8'h02;
+        mem[2] = 8'h03;
+        mem[3] = 8'h04;
+        for (i = 3; i > 0; i = i - 1)
+          mem[i] <= mem[i - 1];
+        mem[0] <= 8'h09;
+      end
+    endmodule
+    """
+    sim = Simulator.from_source(source)
+    sim.run(until=0, max_events=30)
+    mem = sim._nets["mem"]
+    assert mem.read_word(0) == 0x09
+    assert mem.read_word(1) == 0x01
+    assert mem.read_word(2) == 0x02
+    assert mem.read_word(3) == 0x03
+
+
 def test_signed_shift_in_initial() -> None:
     source = """
     module m;
