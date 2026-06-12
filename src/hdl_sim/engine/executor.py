@@ -199,6 +199,7 @@ class StatementRunner:
                 from hdl_sim.engine.lvalue import write_lvalue_logic
 
                 state = self._ctx.evaluator.eval_logic(stmt.expr)
+                state = self._extend_assign_state(stmt, state)
                 write_lvalue_logic(
                     stmt.target,
                     state,
@@ -209,6 +210,7 @@ class StatementRunner:
                 )
             else:
                 state = self._ctx.evaluator.eval_logic(stmt.expr)
+                state = self._extend_assign_state(stmt, state)
                 self._ctx.nba.schedule_lvalue_logic(
                     stmt.target,
                     state,
@@ -293,9 +295,33 @@ class StatementRunner:
         raise RuntimeError(msg)
 
 
+    def _extend_assign_state(self, stmt, state):
+        """フルネット代入で RHS が signed のとき、ターゲット幅まで符号拡張する。"""
+
+        target = stmt.target
+        if target.bit is not None or target.msb is not None:
+            return state
+        net = self._ctx.nets.get(target.base)
+        if net is None:
+            return state
+        from hdl_sim.engine.signed_ops import extend_state_for_assign
+
+        return extend_state_for_assign(state, stmt.expr, self._ctx.nets, net.width)
+
+    def _extend_assign_int(self, target, expr, value: int) -> int:
+        if target.bit is not None or target.msb is not None:
+            return value
+        net = self._ctx.nets.get(target.base)
+        if net is None:
+            return value
+        from hdl_sim.engine.signed_ops import extend_int_for_assign
+
+        return extend_int_for_assign(value, expr, self._ctx.nets, net.width)
+
     def _execute_for(self, stmt: ForStmt, *, on_complete: ContinueCallback | None = None) -> None:
         if stmt.init is not None:
             value = self._ctx.evaluator.eval(stmt.init.expr)
+            value = self._extend_assign_int(stmt.init.target, stmt.init.expr, value)
             self._state.assign_lvalue(stmt.init.target, value, blocking=True, time=self._now())
 
         def loop(iterations: int) -> None:
@@ -313,6 +339,7 @@ class StatementRunner:
                         on_complete()
                     return
                 value = self._ctx.evaluator.eval(stmt.step.expr)
+                value = self._extend_assign_int(stmt.step.target, stmt.step.expr, value)
                 self._state.assign_lvalue(stmt.step.target, value, blocking=True, time=self._now())
                 loop(iterations + 1)
 

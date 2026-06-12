@@ -9,7 +9,7 @@
         { id: "file.new", label: "New", shortcut: "Ctrl+N" },
         { id: "file.open", label: "Open...", shortcut: "Ctrl+O" },
         { id: "file.save", label: "Save", shortcut: "Ctrl+S" },
-        { id: "file.save-as", label: "Save As..." },
+        { id: "file.save-as", label: "Save As...", shortcut: "Ctrl+Shift+S" },
         { type: "sep" },
         { type: "recent", recentKey: "fileRecent" },
         { type: "sep" },

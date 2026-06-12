@@ -2387,11 +2387,17 @@ function handleMenuShortcut(e) {
   ) {
     return false;
   }
+  // Ctrl+S はエディタ内（Monaco の textarea）でも常にプロジェクト保存にする
+  if (key === "s") {
+    e.preventDefault();
+    if (e.shiftKey) saveProjectFileAs();
+    else saveProjectFile();
+    return true;
+  }
   if (inField) return false;
   const map = {
     n: () => createNewSpj(),
     o: () => openProjectFilePicker(),
-    s: () => saveProjectFile(),
     z: () => triggerEditor("undo"),
     y: () => triggerEditor("redo"),
     x: () => triggerEditor("editor.action.clipboardCutAction"),

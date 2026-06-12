@@ -101,6 +101,45 @@ def expr_is_signed(expr: Expr, nets: dict[str, SimNet]) -> bool:
     return False
 
 
+def extend_state_for_assign(state, expr: Expr, nets: dict[str, SimNet], target_width: int):
+    """Sign-extend an evaluated rvalue to the assignment target width.
+
+    `$signed(x)` や signed 宣言された信号を、より広い変数へ代入するとき
+    MSB で上位ビットを埋める（Verilog の符号拡張）。unsigned はゼロ拡張のまま。
+    """
+
+    from hdl_sim.engine.four_state import FourStateValue
+
+    if target_width <= state.width or not expr_is_signed(expr, nets):
+        return state
+    msb = 1 << (state.width - 1)
+    high_fill = mask_width(target_width) ^ mask_width(state.width)
+    value = state.value
+    x_mask = state.x_mask
+    z_mask = state.z_mask
+    if x_mask & msb:
+        x_mask |= high_fill
+    elif z_mask & msb:
+        z_mask |= high_fill
+    elif value & msb:
+        value |= high_fill
+    return FourStateValue(value=value, width=target_width, x_mask=x_mask, z_mask=z_mask)
+
+
+def extend_int_for_assign(
+    value: int,
+    expr: Expr,
+    nets: dict[str, SimNet],
+    target_width: int,
+) -> int:
+    """Integer-path variant of :func:`extend_state_for_assign`."""
+
+    width = operand_width(expr, nets)
+    if target_width <= width or not expr_is_signed(expr, nets):
+        return value
+    return sign_extend(value, width, target_width)
+
+
 def prepare_signed_arith_operands(
     left_expr: Expr,
     right_expr: Expr,

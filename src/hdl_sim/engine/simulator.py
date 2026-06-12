@@ -138,9 +138,11 @@ class Simulator:
                 scoped_evaluator: ExpressionEvaluator = evaluator,
             ) -> bool:
                 from hdl_sim.engine.net_state import apply_four_state
+                from hdl_sim.engine.signed_ops import extend_state_for_assign
 
                 state = scoped_evaluator.eval_logic(scoped.expr)
                 net = self._nets[scoped.target]
+                state = extend_state_for_assign(state, scoped.expr, scoped.locals, net.width)
                 return apply_four_state(net, state, time=time, on_update=self._record_net)
 
             self._delta.add_continuous(recompute)
