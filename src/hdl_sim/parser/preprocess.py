@@ -21,8 +21,14 @@ class PreprocessResult:
     defines: dict[str, str] | None = None
 
 
+def _blank_keep_newlines(match: re.Match[str]) -> str:
+    """Replace matched text with newlines only, preserving line numbers."""
+
+    return "\n" * match.group(0).count("\n")
+
+
 def strip_comments(source: str) -> str:
-    without_block = _COMMENT_BLOCK.sub("", source)
+    without_block = _COMMENT_BLOCK.sub(_blank_keep_newlines, source)
     return _COMMENT_LINE.sub("", without_block)
 
 
@@ -47,14 +53,15 @@ def preprocess(source: str, *, extra_defines: dict[str, str] | None = None) -> P
         defines.pop(match.group(1), None)
 
     cleaned = strip_comments(source)
-    cleaned = _TIMESCALE.sub("", cleaned)
-    cleaned = _DEFINE.sub("", cleaned)
-    cleaned = _UNDEF.sub("", cleaned)
-    cleaned = _IFDEF_BLOCK.sub("", cleaned)
+    cleaned = _TIMESCALE.sub(_blank_keep_newlines, cleaned)
+    cleaned = _DEFINE.sub(_blank_keep_newlines, cleaned)
+    cleaned = _UNDEF.sub(_blank_keep_newlines, cleaned)
+    cleaned = _IFDEF_BLOCK.sub(_blank_keep_newlines, cleaned)
     cleaned = _DIRECTIVE_LINE.sub("", cleaned)
     cleaned = apply_defines(cleaned, defines)
 
-    return PreprocessResult(source=cleaned.strip(), timescale=timescale, defines=defines)
+    # 末尾のみ strip し、行番号がエラー表示でずれないよう先頭の改行は残す
+    return PreprocessResult(source=cleaned.rstrip(), timescale=timescale, defines=defines)
 
 
 

@@ -183,6 +183,15 @@ def _elaborate_module(
         always_blocks.append((block, dict(local), dict(module_params)))
 
     for instance in module.instances:
+        if instance.module_type not in modules:
+            known = ", ".join(sorted(modules)) or "(なし)"
+            msg = (
+                f"モジュール '{instance.module_type}' が見つかりません"
+                f"（モジュール '{module.name}' 内のインスタンス '{instance.instance_name}' が参照）。\n"
+                f"読み込まれているモジュール: {known}\n"
+                "ヒント: 定義ファイルがワークスペースに追加されているか、モジュール名の綴りを確認してください。"
+            )
+            raise ValueError(msg)
         child = modules[instance.module_type]
         child_prefix = _scoped_name(prefix, instance.instance_name)
         bindings = _resolve_instance_ports(
@@ -235,21 +244,39 @@ def _resolve_instance_ports(
             port_names[index] if index < len(port_names) else ""
         )
         if not port_name:
-            msg = f"positional port connection out of range for {instance.module_type}"
+            msg = (
+                f"ポート接続が多すぎます: モジュール '{instance.module_type}' のポートは "
+                f"{len(port_names)} 個 ({', '.join(port_names)}) ですが、"
+                f"インスタンス '{instance.instance_name}' は {len(instance.connections)} 個接続しています。"
+            )
+            raise ValueError(msg)
+        if connection.port and connection.port not in port_dirs:
+            msg = (
+                f"モジュール '{instance.module_type}' にポート '{connection.port}' はありません"
+                f"（インスタンス '{instance.instance_name}'）。"
+                f" 定義されているポート: {', '.join(port_names)}"
+            )
             raise ValueError(msg)
         direction = port_dirs.get(port_name, PortDirection.INPUT)
-        bindings[port_name] = _resolve_connection_expr(
-            connection,
-            parent_local,
-            parent_prefix,
-            global_nets,
-            child_prefix=child_prefix,
-            port_name=port_name,
-            port_direction=direction,
-            param_evaluator=param_evaluator,
-            continuous=continuous,
-            module_params=module_params,
-        )
+        try:
+            bindings[port_name] = _resolve_connection_expr(
+                connection,
+                parent_local,
+                parent_prefix,
+                global_nets,
+                child_prefix=child_prefix,
+                port_name=port_name,
+                port_direction=direction,
+                param_evaluator=param_evaluator,
+                continuous=continuous,
+                module_params=module_params,
+            )
+        except ValueError as exc:
+            msg = (
+                f"インスタンス '{instance.instance_name}' (モジュール {instance.module_type}) の"
+                f"ポート '{port_name}' の接続でエラー: {exc}"
+            )
+            raise ValueError(msg) from exc
     return bindings
 
 
@@ -264,7 +291,10 @@ def _lookup_parent_net(
     full_name = _scoped_name(parent_prefix, name)
     if full_name in global_nets:
         return global_nets[full_name]
-    msg = f"unknown connection signal: {name}"
+    msg = (
+        f"信号 '{name}' が見つかりません。"
+        "wire/reg の宣言漏れ、または信号名の綴りを確認してください。"
+    )
     raise ValueError(msg)
 
 

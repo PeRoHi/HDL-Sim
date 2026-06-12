@@ -29,7 +29,7 @@ from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "1.0.0"
+UI_BUILD = "1.0.6"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -363,7 +363,13 @@ def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
             path.relative_to(root)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="example not found") from exc
-        files.append({"path": rel, "content": read_verilog_text(path)})
+        files.append(
+            {
+                "path": rel,
+                "content": read_verilog_text(path),
+                "source_path": str(path),
+            }
+        )
     return files
 
 
@@ -600,9 +606,58 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="files required")
         try:
             saved = spj_store.save_spj_file(filename, payload)
-            return {"ok": True, **saved}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # 参照元 .v ファイルがある場合は、編集内容をその実ファイルにも書き戻す
+        updated_sources: list[str] = []
+        source_errors: list[str] = []
+        for item in payload.get("files", []):
+            source_path = item.get("source_path")
+            content = item.get("content")
+            if not source_path or content is None:
+                continue
+            try:
+                target = Path(source_path)
+                if not target.is_file():
+                    source_errors.append(f"{item.get('path')}: 参照先が存在しません ({source_path})")
+                    continue
+                if read_verilog_text(target) != content:
+                    target.write_text(content, encoding="utf-8")
+                    updated_sources.append(str(target))
+            except OSError as exc:
+                source_errors.append(f"{item.get('path')}: 書き込み失敗 ({exc})")
+        return {
+            "ok": True,
+            **saved,
+            "updated_sources": updated_sources,
+            "source_errors": source_errors,
+        }
+
+    def _error_payload(exc: Exception) -> dict[str, Any]:
+        """設計側の誤りは原因メッセージのみ、内部エラーはトレース付きで返す。"""
+
+        from hdl_sim.engine.evaluator import EvaluationError
+        from hdl_sim.parser.loader import VerilogSyntaxError
+
+        user_error = isinstance(
+            exc, (VerilogSyntaxError, ValueError, FileNotFoundError, EvaluationError, KeyError)
+        )
+        payload: dict[str, Any] = {
+            "ok": False,
+            "error": str(exc) if not isinstance(exc, KeyError) else f"不明な参照: {exc}",
+        }
+        if isinstance(exc, VerilogSyntaxError):
+            payload["error_kind"] = "syntax"
+            payload["error_file"] = exc.file
+            payload["error_line"] = exc.line
+            payload["error_column"] = exc.column
+        elif user_error:
+            payload["error_kind"] = "design"
+        else:
+            payload["error_kind"] = "internal"
+            payload["trace"] = traceback.format_exc()
+        return payload
 
     @app.post("/api/elaborate")
     def api_elaborate(req: ElaborateRequest) -> dict[str, Any]:
@@ -632,11 +687,7 @@ def create_app() -> FastAPI:
                 payload["top_requested"] = requested_top
             return payload
         except Exception as exc:
-            return {
-                "ok": False,
-                "error": str(exc),
-                "trace": traceback.format_exc(),
-            }
+            return _error_payload(exc)
 
     @app.post("/api/simulate")
     def api_simulate(req: SimulateRequest) -> dict[str, Any]:
@@ -701,12 +752,7 @@ def create_app() -> FastAPI:
                 payload["top_requested"] = requested_top
             return payload
         except Exception as exc:
-            return {
-                "ok": False,
-                "error": str(exc),
-                "trace": traceback.format_exc(),
-                "console": "",
-            }
+            return {**_error_payload(exc), "console": ""}
 
     if UI_DIR.is_dir():
         app.mount("/assets", NoCacheStaticFiles(directory=UI_DIR), name="assets")

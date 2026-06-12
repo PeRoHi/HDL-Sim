@@ -190,7 +190,10 @@ class ExpressionEvaluator:
                 if net.kind is DeclKind.REAL:
                     return int(net.real_value)
                 return net.value
-            msg = f"unknown identifier: {expr.name}"
+            msg = (
+                f"信号 '{expr.name}' が宣言されていません。"
+                "wire/reg/integer の宣言、または信号名の綴りを確認してください。"
+            )
             raise EvaluationError(msg)
         if isinstance(expr, BitSelect):
             return read_lvalue(

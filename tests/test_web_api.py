@@ -140,9 +140,11 @@ def test_ui_info_reports_ide_layout() -> None:
         r for r in app.routes if getattr(r, "path", None) == "/api/ui-info"
     ).endpoint
     data = handler()
+    from hdl_sim import __version__
+
     assert data["ide_layout"] is True
-    assert data["version"] == "1.0.0"
-    assert data["version_label"] == "Ver 1.0.0"
+    assert data["version"] == __version__
+    assert data["version_label"] == f"Ver {__version__}"
     assert "release_url" in data
     assert "spj_dir" in data
 

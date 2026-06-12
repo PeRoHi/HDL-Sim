@@ -693,8 +693,13 @@ function loadWorkspaceFiles(fileEntries, top, wavePrefs) {
   fileStore.clear();
   hiddenFiles.clear();
 
-  fileEntries.forEach(({ path, content, include_only }) => {
-    fileStore.set(path, { content, model: null, includeOnly: Boolean(include_only) });
+  fileEntries.forEach(({ path, content, include_only, source_path }) => {
+    fileStore.set(path, {
+      content,
+      model: null,
+      includeOnly: Boolean(include_only),
+      sourcePath: source_path || null,
+    });
   });
 
   activeFile = fileEntries[0]?.path || "design.v";
@@ -739,6 +744,11 @@ function currentProjectFileName() {
 function buildSpjPayload() {
   const payload = getPayload();
   persistWavePrefsNow();
+  // 参照元のある .v は source_path を含め、保存時に実ファイルへ書き戻せるようにする
+  for (const item of payload.files) {
+    const entry = fileStore.get(item.path);
+    if (entry?.sourcePath) item.source_path = entry.sourcePath;
+  }
   return {
     format: "hdl-sim-project",
     version: 1,
@@ -788,6 +798,15 @@ async function loadSpjFileList(selectName) {
   }
 }
 
+function reportSourceWriteback(saved) {
+  for (const path of saved.updated_sources || []) {
+    appendConsole(`[spj] 参照先の .v を更新: ${path}`, "ok");
+  }
+  for (const err of saved.source_errors || []) {
+    appendConsole(`[spj] 参照先の更新に失敗: ${err}`, "warn");
+  }
+}
+
 async function saveProjectFile() {
   try {
     const data = buildSpjPayload();
@@ -804,6 +823,7 @@ async function saveProjectFile() {
     const labelEl = $("current-project-label");
     if (labelEl) labelEl.textContent = currentProject || saved.name || "—";
     appendConsole(`[spj] saved: ${saved.path}`, "ok");
+    reportSourceWriteback(saved);
     setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
     appendConsole(String(e), "err");
@@ -834,6 +854,7 @@ async function saveProjectFileAs() {
     await loadSpjFileList(saved.filename);
     rememberRecentSpj(saved.filename);
     appendConsole(`[spj] saved as: ${saved.path}`, "ok");
+    reportSourceWriteback(saved);
     setStatus(`Saved: ${saved.filename}`, "ok");
   } catch (e) {
     appendConsole(String(e), "err");
