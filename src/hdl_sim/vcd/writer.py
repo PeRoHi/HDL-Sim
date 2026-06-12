@@ -8,6 +8,7 @@ from pathlib import Path
 
 from hdl_sim.core.events import SimTime
 from hdl_sim.engine.nets import SimNet
+from hdl_sim.parser.ast import DeclKind
 
 
 @dataclass(slots=True)
@@ -130,5 +131,14 @@ def _emit_scope(
             continue
         net = nets[net_name]
         code = codes[net_name]
-        lines.append(f"$var wire {net.width} {code} {net_name.split('.')[-1]} $end")
+        if net.kind is DeclKind.REAL:
+            vcd_kind = "real"
+            width = 64
+        elif net.kind is DeclKind.INTEGER:
+            vcd_kind = "integer"
+            width = net.width
+        else:
+            vcd_kind = "wire"
+            width = net.width
+        lines.append(f"$var {vcd_kind} {width} {code} {net_name.split('.')[-1]} $end")
     lines.append("$upscope $end")

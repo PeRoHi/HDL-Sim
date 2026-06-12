@@ -897,9 +897,39 @@ body.view-hide-project-bar .project-bar { display: none; }
 }
 
 .wave-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wave-analog-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-input, #3c3c3c);
+  color: var(--text-dim);
+  font: 11px/1 sans-serif;
+  cursor: pointer;
+}
+
+.wave-analog-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.wave-analog-btn.active {
+  border-color: #4ec9b0;
+  color: #4ec9b0;
+  background: rgba(78, 201, 176, 0.12);
+}
+
+.wave-analog-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* ── Editor tabs ── */

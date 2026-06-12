@@ -9,6 +9,7 @@ let waveSignalPanel = null;
 let currentWaveform = null;
 let selection = [];
 let displayOrder = [];
+let analogSignals = [];
 let resizeObserver = null;
 
 function renderWave() {
@@ -27,6 +28,7 @@ function renderWave() {
     wrap: $("waveform-wrap"),
     zoom: waveZoom,
     tickStep: waveTickStep,
+    analogSignals,
     autoScroll: $("chk-auto-scroll")?.checked !== false,
   });
 }
@@ -85,6 +87,17 @@ function initSignalPanel() {
         window.opener.setWaveformOrder(names);
       }
     },
+    getSignalMeta: (name) => {
+      const sig = currentWaveform?.signals?.find((s) => s.name === name);
+      return sig ? { kind: sig.kind, width: sig.width } : { kind: "wire", width: 1 };
+    },
+    getAnalogSignals: () => analogSignals.slice(),
+    setAnalogSignals: (names) => {
+      analogSignals = names;
+      if (window.opener?.setWaveformAnalogSignals) {
+        window.opener.setWaveformAnalogSignals(names);
+      }
+    },
     onChange: () => {
       renderWave();
     },
@@ -109,6 +122,7 @@ async function syncFromBackend() {
       currentWaveform = ctx.filteredWaveform || ctx.waveform;
       selection = ctx.selection || [];
       displayOrder = ctx.order || [];
+      analogSignals = ctx.analogSignals || [];
       lastUpdateKey = currentKey;
       
       $("status").textContent = `Linked to Main UI (${currentWaveform.signals.length} signals)`;

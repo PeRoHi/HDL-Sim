@@ -193,6 +193,7 @@ class StatementRunner:
                 target_net = self._ctx.nets.get(stmt.target.base)
                 if target_net is not None and target_net.kind is DeclKind.REAL:
                     target_net.real_value = self._ctx.evaluator.eval_real(stmt.expr)
+                    self._ctx.on_net_update(target_net, self._now())
                     if on_complete is not None:
                         on_complete()
                     return

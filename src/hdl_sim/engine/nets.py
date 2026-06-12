@@ -155,6 +155,8 @@ class SimNet:
         return (self.read_word(word_index) >> bit_index) & 1
 
     def vcd_value(self) -> str:
+        if self.kind is DeclKind.REAL:
+            return f"r{self.real_value:g}"
         if self.width == 1:
             if self.x_mask & 1:
                 return "x"

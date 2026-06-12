@@ -49,6 +49,24 @@ b000%
     assert names == {"ck", "uut.cnt"}
 
 
+def test_parse_real_values() -> None:
+    sample = """$timescale 1ns $end
+$scope module tb $end
+$var real 64 ! x $end
+$upscope $end
+$enddefinitions $end
+#0
+r0!
+#10
+r3.14159!
+#20
+r-2.5!
+"""
+    tl = parse_vcd_timeline(sample)
+    assert tl.signals[0].kind == "real"
+    assert tl.changes["!"] == [(0, "0"), (10, "3.14159"), (20, "-2.5")]
+
+
 def test_parse_bus_values_without_space() -> None:
     sample = """$timescale 1ns $end
 $scope module tb $end

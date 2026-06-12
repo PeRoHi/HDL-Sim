@@ -67,6 +67,8 @@ let lastSignalNames = null;
 let waveformSelection = [];
 /** @type {string[]} 波形ビューでの表示順 */
 let waveformDisplayOrder = [];
+/** @type {string[]} アナログ表示する多ビット信号（real は常にアナログ） */
+let waveformAnalogSignals = [];
 /** @type {import("./wave-prefs.js").WavePrefs | null} ワークスペース読み込み時に復元する波形設定 */
 let workspaceWavePrefs = null;
 let wavePrefsPersistTimer = null;
@@ -620,6 +622,7 @@ function getCurrentWavePrefs() {
     selection: waveformSelection.slice(),
     order: waveformDisplayOrder.slice(),
     filePaths: workspaceFilePaths(),
+    analogSignals: waveformAnalogSignals.slice(),
   };
 }
 
@@ -654,10 +657,12 @@ function applyWavePrefsForSignals(available) {
   const merged = mergeWavePrefsWithSignals(available, saved);
   waveformSelection = merged.selection;
   waveformDisplayOrder = merged.order;
+  waveformAnalogSignals = merged.analogSignals || [];
   workspaceWavePrefs = {
     selection: merged.selection.slice(),
     order: merged.order.slice(),
     filePaths: workspaceFilePaths(),
+    analogSignals: waveformAnalogSignals.slice(),
   };
 }
 
@@ -2009,6 +2014,7 @@ function redrawWaveformCanvas(waveform) {
     wrap: $("waveform-wrap"),
     zoom: waveZoom,
     tickStep: waveTickStep,
+    analogSignals: waveformAnalogSignals,
     autoScroll: $("chk-auto-scroll")?.checked !== false,
   });
 }
@@ -2020,6 +2026,7 @@ function syncWaveformToBackend() {
     filteredWaveform: lastWaveform,
     selection: waveformSelection.slice(),
     order: waveformDisplayOrder.slice(),
+    analogSignals: waveformAnalogSignals.slice(),
   }, null, "POST").catch(() => {});
 }
 
@@ -2234,6 +2241,7 @@ async function runSimulate() {
     } else {
       waveformSelection = [];
       waveformDisplayOrder = [];
+      waveformAnalogSignals = [];
     }
     applySuggestedUntil(data.suggested_until);
     refreshWaveformView();
@@ -2323,6 +2331,14 @@ function initWaveSignalPanelUi() {
     getOrder: () => waveformDisplayOrder.slice(),
     setOrder: (names) => {
       waveformDisplayOrder = names;
+    },
+    getSignalMeta: (name) => {
+      const sig = lastWaveformFull?.signals?.find((s) => s.name === name);
+      return sig ? { kind: sig.kind, width: sig.width } : { kind: "wire", width: 1 };
+    },
+    getAnalogSignals: () => waveformAnalogSignals.slice(),
+    setAnalogSignals: (names) => {
+      waveformAnalogSignals = names;
     },
     onChange: () => {
       if (!waveformVisible && waveformSelection.length) toggleWaveform(true);
@@ -2676,6 +2692,7 @@ window.getLatestWaveformContext = () => {
     filteredWaveform: lastWaveform,
     selection: waveformSelection.slice(),
     order: waveformDisplayOrder.slice(),
+    analogSignals: waveformAnalogSignals.slice(),
   };
 };
 window.setWaveformSelection = (sel) => {
@@ -2686,6 +2703,12 @@ window.setWaveformSelection = (sel) => {
 };
 window.setWaveformOrder = (ord) => {
   waveformDisplayOrder = ord;
+  refreshWaveformView();
+  schedulePersistWavePrefs();
+  syncWaveformToBackend();
+};
+window.setWaveformAnalogSignals = (names) => {
+  waveformAnalogSignals = names;
   refreshWaveformView();
   schedulePersistWavePrefs();
   syncWaveformToBackend();

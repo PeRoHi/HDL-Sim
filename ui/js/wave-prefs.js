@@ -5,7 +5,7 @@
 const WAVE_PREFS_LS_KEY = "hdl-sim-wave-prefs-v1";
 const WAVE_VIEW_LS_KEY = "hdl-sim-wave-view-v1";
 
-/** @typedef {{ selection: string[], order: string[], filePaths?: string[] }} WavePrefs */
+/** @typedef {{ selection: string[], order: string[], filePaths?: string[], analogSignals?: string[] }} WavePrefs */
 
 /**
  * @param {string[]} available
@@ -34,7 +34,10 @@ export function mergeWavePrefsWithSignals(available, saved) {
     selection = list.slice();
   }
 
-  return { selection, order };
+  const analogSignals = Array.isArray(saved?.analogSignals)
+    ? saved.analogSignals.filter((name) => avail.has(name))
+    : [];
+  return { selection, order, analogSignals };
 }
 
 export function readWavePrefsStore() {
@@ -65,6 +68,7 @@ export function loadWavePrefsForKey(key) {
     selection: Array.isArray(entry.selection) ? entry.selection.slice() : [],
     order: Array.isArray(entry.order) ? entry.order.slice() : [],
     filePaths: Array.isArray(entry.filePaths) ? entry.filePaths.slice() : undefined,
+    analogSignals: Array.isArray(entry.analogSignals) ? entry.analogSignals.slice() : [],
   };
 }
 
@@ -79,6 +83,7 @@ export function saveWavePrefsForKey(key, prefs) {
     selection: prefs.selection.slice(),
     order: prefs.order.slice(),
     filePaths: prefs.filePaths ? prefs.filePaths.slice() : undefined,
+    analogSignals: prefs.analogSignals ? prefs.analogSignals.slice() : undefined,
   };
   writeWavePrefsStore(store);
 }
@@ -117,5 +122,6 @@ export function wavePrefsFromProjectPayload(wave) {
     selection: Array.isArray(wave.selection) ? wave.selection.slice() : [],
     order: Array.isArray(wave.order) ? wave.order.slice() : [],
     filePaths: Array.isArray(wave.filePaths) ? wave.filePaths.slice() : undefined,
+    analogSignals: Array.isArray(wave.analogSignals) ? wave.analogSignals.slice() : [],
   };
 }

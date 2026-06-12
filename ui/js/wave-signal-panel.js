@@ -11,6 +11,9 @@
  *   setSelection: (names: string[]) => void,
  *   getOrder: () => string[],
  *   setOrder: (names: string[]) => void,
+ *   getSignalMeta?: (name: string) => { kind?: string, width?: number },
+ *   getAnalogSignals?: () => string[],
+ *   setAnalogSignals?: (names: string[]) => void,
  * }} hooks
  */
 export function createWaveSignalPanel(root, hooks) {
@@ -24,7 +27,7 @@ export function createWaveSignalPanel(root, hooks) {
       <button type="button" data-act="invert" class="mini-btn" title="表示を反転">反転</button>
       <input type="search" class="wave-panel-filter" placeholder="信号名で絞り込み…" autocomplete="off" />
     </div>
-    <p class="wave-panel-hint">Shift+クリックで範囲選択 · Ctrl+クリックで個別 · 左端をドラッグで並べ替え</p>
+    <p class="wave-panel-hint">Shift+クリックで範囲選択 · Ctrl+クリックで個別 · 〜でアナログ表示 · 左端をドラッグで並べ替え</p>
     <ul class="wave-signal-list" role="listbox" aria-multiselectable="true"></ul>
   `;
 
@@ -52,6 +55,16 @@ export function createWaveSignalPanel(root, hooks) {
 
   function selectionSet() {
     return new Set(hooks.getSelection());
+  }
+
+  function analogSet() {
+    return new Set(hooks.getAnalogSignals?.() || []);
+  }
+
+  function canToggleAnalog(name) {
+    const meta = hooks.getSignalMeta?.(name);
+    if (meta?.kind === "real") return false;
+    return (meta?.width ?? 1) > 1;
   }
 
   function applySelection(names) {
@@ -82,6 +95,7 @@ export function createWaveSignalPanel(root, hooks) {
   function render() {
     const names = visibleRows();
     const sel = selectionSet();
+    const analog = analogSet();
     listEl.innerHTML = "";
     if (!hooks.getSignalNames().length) {
       const li = document.createElement("li");
@@ -120,9 +134,34 @@ export function createWaveSignalPanel(root, hooks) {
       label.className = "wave-name";
       label.textContent = name;
 
+      const analogBtn = document.createElement("button");
+      analogBtn.type = "button";
+      analogBtn.className = "wave-analog-btn" + (analog.has(name) ? " active" : "");
+      analogBtn.textContent = "〜";
+      analogBtn.title = hooks.getSignalMeta?.(name)?.kind === "real"
+        ? "real 型は常にアナログ表示"
+        : "アナログ波形表示の切替";
+      analogBtn.disabled = !canToggleAnalog(name) && hooks.getSignalMeta?.(name)?.kind !== "real";
+      if (hooks.getSignalMeta?.(name)?.kind === "real") {
+        analogBtn.classList.add("active");
+        analogBtn.disabled = true;
+      }
+
       li.appendChild(grip);
       li.appendChild(cb);
       li.appendChild(label);
+      li.appendChild(analogBtn);
+
+      analogBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!hooks.setAnalogSignals || analogBtn.disabled) return;
+        const set = analogSet();
+        if (set.has(name)) set.delete(name);
+        else set.add(name);
+        hooks.setAnalogSignals([...set]);
+        hooks.onChange();
+        render();
+      });
 
       cb.addEventListener("click", (e) => e.stopPropagation());
       cb.addEventListener("change", () => {

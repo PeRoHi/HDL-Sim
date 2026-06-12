@@ -22,8 +22,9 @@ class VCDTimeline:
 
 
 _VAR_RE = re.compile(
-    r"^\$var\s+(wire|reg|integer)\s+(\d+)\s+(\S+)\s+(.+?)\s+\$end\s*$"
+    r"^\$var\s+(wire|reg|integer|real)\s+(\d+)\s+(\S+)\s+(.+?)\s+\$end\s*$"
 )
+_REAL_VAL_RE = re.compile(r"^r([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)(\S+)$")
 _TIMESCALE_RE = re.compile(r"^\$timescale\s+(\S+)\s+\$end\s*$")
 _BUS_VAL_RE = re.compile(r"^b([0-9a-zA-ZxzXZ]+)(\S+)$")
 
@@ -85,7 +86,12 @@ def parse_vcd_timeline(vcd_text: str) -> VCDTimeline:
         if line.startswith("#"):
             current_time = int(line[1:].split()[0])
             continue
-        if line[0] in "01xXzZ":
+        if line[0] == "r":
+            match = _REAL_VAL_RE.match(line)
+            if not match:
+                continue
+            value, code = match.group(1), match.group(2)
+        elif line[0] in "01xXzZ":
             value = line[0]
             code = line[1:]
         elif line[0] == "b":
