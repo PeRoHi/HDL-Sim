@@ -1151,6 +1151,40 @@ body.view-hide-project-bar .project-bar { display: none; }
   margin-right: 4px;
 }
 
+.wave-tick-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.wave-tick-label {
+  white-space: nowrap;
+}
+
+.wave-tick-input {
+  width: 4.2rem;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-input, #3c3c3c);
+  color: var(--text);
+  font: 11px monospace;
+}
+
+.wave-tick-input:focus {
+  outline: 1px solid var(--accent, #007acc);
+  border-color: var(--accent, #007acc);
+}
+
+.wave-tick-unit {
+  min-width: 1.2rem;
+  font: 10px monospace;
+  color: var(--text-dim);
+}
+
 .signal-count-badge {
   font-size: 10px;
   color: var(--text-dim);

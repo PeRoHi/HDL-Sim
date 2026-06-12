@@ -22,6 +22,11 @@
     <button type="button" id="btn-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
     <button type="button" id="btn-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
     <button type="button" id="btn-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
+    <label class="wave-tick-ctrl" title="時間目盛の間隔。空または 0 で自動">
+      <span class="wave-tick-label">目盛</span>
+      <input type="number" id="inp-wave-tick" class="wave-tick-input" min="0" step="any" placeholder="自動" />
+      <span id="wave-tick-unit" class="wave-tick-unit"></span>
+    </label>
     <button type="button" id="btn-all" class="mini-btn" title="Run 後の全 VCD 信号を表示">All Signals</button>
     <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
     <span id="status" style="margin-left: auto; color: #ccc; font-size: 12px;">Waiting for data...</span>
@@ -34,7 +39,7 @@
       </div>
     </div>
   </div>
-  <script src="/assets/js/vcd-viewer.js?v=1.0.2"></script>
-  <script src="/assets/js/standalone-waveform.js?v=1.0.2" type="module"></script>
+  <script src="/assets/js/vcd-viewer.js?v=1.0.9"></script>
+  <script src="/assets/js/standalone-waveform.js?v=1.0.9" type="module"></script>
 </body>
 </html>

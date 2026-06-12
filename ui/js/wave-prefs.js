@@ -3,6 +3,7 @@
  */
 
 const WAVE_PREFS_LS_KEY = "hdl-sim-wave-prefs-v1";
+const WAVE_VIEW_LS_KEY = "hdl-sim-wave-view-v1";
 
 /** @typedef {{ selection: string[], order: string[], filePaths?: string[] }} WavePrefs */
 
@@ -86,6 +87,30 @@ export function saveWavePrefsForKey(key, prefs) {
  * @param {object} wave from project meta or .spj
  * @returns {WavePrefs | null}
  */
+/** @typedef {{ tickStep: number }} WaveViewSettings */
+
+/** @returns {WaveViewSettings} */
+export function loadWaveViewSettings() {
+  try {
+    const raw = localStorage.getItem(WAVE_VIEW_LS_KEY);
+    if (!raw) return { tickStep: 0 };
+    const data = JSON.parse(raw);
+    const step = Number(data?.tickStep);
+    return { tickStep: Number.isFinite(step) && step > 0 ? step : 0 };
+  } catch {
+    return { tickStep: 0 };
+  }
+}
+
+/** @param {WaveViewSettings} settings */
+export function saveWaveViewSettings(settings) {
+  const step = Number(settings?.tickStep);
+  localStorage.setItem(
+    WAVE_VIEW_LS_KEY,
+    JSON.stringify({ tickStep: Number.isFinite(step) && step > 0 ? step : 0 }),
+  );
+}
+
 export function wavePrefsFromProjectPayload(wave) {
   if (!wave || typeof wave !== "object") return null;
   return {

@@ -9,6 +9,8 @@ import {
   loadWavePrefsForKey,
   saveWavePrefsForKey,
   wavePrefsFromProjectPayload,
+  loadWaveViewSettings,
+  saveWaveViewSettings,
 } from "./wave-prefs.js";
 
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
@@ -75,6 +77,8 @@ let waveformVisible = false;
 /** @type {Set<string>} Tracks file paths whose MDI windows are hidden */
 const hiddenFiles = new Set();
 let waveZoom = 1;
+/** 0 = 自動目盛。>0 なら timescale 単位の固定間隔 (例: 100 → 100ns 毎) */
+let waveTickStep = loadWaveViewSettings().tickStep;
 let abortController = null;
 
 /** @type {Split.Instance | null} */
@@ -1908,6 +1912,11 @@ function createWaveformWindow() {
         <button type="button" id="btn-wave-zoom-out" class="mini-btn" title="時間軸を縮小">−</button>
         <button type="button" id="btn-wave-zoom-in" class="mini-btn" title="時間軸を拡大">＋</button>
         <button type="button" id="btn-wave-fit" class="mini-btn" title="全体表示に戻す">Fit</button>
+        <label class="wave-tick-ctrl" title="時間目盛の間隔。空または 0 で自動">
+          <span class="wave-tick-label">目盛</span>
+          <input type="number" id="inp-wave-tick" class="wave-tick-input" min="0" step="any" placeholder="自動" />
+          <span id="wave-tick-unit" class="wave-tick-unit"></span>
+        </label>
         <button type="button" id="btn-wave-all" class="mini-btn" title="Run 後の全 VCD 信号を表示">All</button>
         <button type="button" id="btn-wave-popout" class="mini-btn" title="別ウィンドウで開く" style="margin-left:8px; font-weight:bold; color:#569cd6;">Pop-out ↗</button>
         <label class="check"><input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll</label>
@@ -1942,6 +1951,19 @@ function createWaveformWindow() {
     });
     body.querySelector("#btn-wave-zoom-in")?.addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
     body.querySelector("#btn-wave-zoom-out")?.addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
+    const tickInput = body.querySelector("#inp-wave-tick");
+    if (tickInput) {
+      if (waveTickStep > 0) tickInput.value = String(waveTickStep);
+      tickInput.addEventListener("change", () => applyWaveTickStep(tickInput.value));
+      tickInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          applyWaveTickStep(tickInput.value);
+          tickInput.blur();
+        }
+      });
+    }
+    updateWaveTickUnitLabel(lastWaveform?.timescale || lastWaveformFull?.timescale);
     body.querySelector("#chk-auto-scroll")?.addEventListener("change", () => {
       if (waveformVisible && lastWaveform) redrawWaveformCanvas(lastWaveform);
     });
@@ -1958,13 +1980,35 @@ function createWaveformWindow() {
   return win;
 }
 
+function updateWaveTickUnitLabel(timescale) {
+  const unitEl = $("wave-tick-unit");
+  if (!unitEl) return;
+  const unit = window.HDLSimWaveform?.parseTimescaleUnit?.(timescale) || "";
+  unitEl.textContent = unit ? unit : "";
+}
+
+function applyWaveTickStep(raw) {
+  const text = String(raw ?? "").trim();
+  const next = text === "" ? 0 : Number(text);
+  waveTickStep = Number.isFinite(next) && next > 0 ? next : 0;
+  saveWaveViewSettings({ tickStep: waveTickStep });
+  const tickInput = $("inp-wave-tick");
+  if (tickInput) {
+    if (waveTickStep > 0) tickInput.value = String(waveTickStep);
+    else tickInput.value = "";
+  }
+  if (waveformVisible && lastWaveform) redrawWaveformCanvas(lastWaveform);
+}
+
 function redrawWaveformCanvas(waveform) {
   if (!waveform || !window.HDLSimWaveform?.drawWaveform) return;
   const canvas = $("waveform-canvas");
   if (!canvas) return;
+  updateWaveTickUnitLabel(waveform.timescale);
   window.HDLSimWaveform.drawWaveform(canvas, waveform, {
     wrap: $("waveform-wrap"),
     zoom: waveZoom,
+    tickStep: waveTickStep,
     autoScroll: $("chk-auto-scroll")?.checked !== false,
   });
 }

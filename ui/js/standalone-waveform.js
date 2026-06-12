@@ -1,8 +1,10 @@
 import { createWaveSignalPanel } from "./wave-signal-panel.js";
+import { loadWaveViewSettings, saveWaveViewSettings } from "./wave-prefs.js";
 
 const $ = (id) => document.getElementById(id);
 
 let waveZoom = 1;
+let waveTickStep = loadWaveViewSettings().tickStep;
 let waveSignalPanel = null;
 let currentWaveform = null;
 let selection = [];
@@ -20,11 +22,33 @@ function renderWave() {
   const ctx = window.opener?.getLatestWaveformContext?.();
   const waveToDraw = ctx?.filteredWaveform || currentWaveform;
 
+  updateWaveTickUnitLabel(waveToDraw.timescale || currentWaveform?.timescale);
   window.HDLSimWaveform.drawWaveform(canvas, waveToDraw, {
     wrap: $("waveform-wrap"),
     zoom: waveZoom,
+    tickStep: waveTickStep,
     autoScroll: $("chk-auto-scroll")?.checked !== false,
   });
+}
+
+function updateWaveTickUnitLabel(timescale) {
+  const unitEl = $("wave-tick-unit");
+  if (!unitEl) return;
+  const unit = window.HDLSimWaveform?.parseTimescaleUnit?.(timescale) || "";
+  unitEl.textContent = unit ? unit : "";
+}
+
+function applyWaveTickStep(raw) {
+  const text = String(raw ?? "").trim();
+  const next = text === "" ? 0 : Number(text);
+  waveTickStep = Number.isFinite(next) && next > 0 ? next : 0;
+  saveWaveViewSettings({ tickStep: waveTickStep });
+  const tickInput = $("inp-wave-tick");
+  if (tickInput) {
+    if (waveTickStep > 0) tickInput.value = String(waveTickStep);
+    else tickInput.value = "";
+  }
+  renderWave();
 }
 
 function fitWaveform() {
@@ -111,6 +135,18 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-fit").addEventListener("click", fitWaveform);
   $("btn-zoom-in").addEventListener("click", () => setWaveZoom(waveZoom * 1.5));
   $("btn-zoom-out").addEventListener("click", () => setWaveZoom(waveZoom / 1.5));
+  const tickInput = $("inp-wave-tick");
+  if (tickInput) {
+    if (waveTickStep > 0) tickInput.value = String(waveTickStep);
+    tickInput.addEventListener("change", () => applyWaveTickStep(tickInput.value));
+    tickInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyWaveTickStep(tickInput.value);
+        tickInput.blur();
+      }
+    });
+  }
   $("btn-all").addEventListener("click", () => {
     if (!currentWaveform) return;
     const names = currentWaveform.signals.map((s) => s.name);
