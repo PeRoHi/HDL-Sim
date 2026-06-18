@@ -46,6 +46,7 @@
             <div>
               <strong>プロジェクトとファイルの保存</strong><br>
               <code>Save</code> ボタン または <code>Ctrl+S</code> でプロジェクト全体(.spj)を保存し、自動で <code>verilog_sources/</code> に.vファイルを出力します。<br>
+              <span style="color:#d32f2f; font-size:0.9em;">⚠️ 注意: 読み込み元のオリジナル .v ファイルは更新されません。</span><br>
               エディタのタイトルバー右上にあるフロッピーアイコンを押すと、現在開いている単一の.vファイルのみを上書き保存できます。
             </div>
           </div>

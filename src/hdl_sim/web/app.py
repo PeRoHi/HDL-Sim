@@ -680,26 +680,9 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        # 参照元 .v ファイルがある場合は、編集内容をその実ファイルにも書き戻す
+        # ローカル参照元への自動書き戻しは廃止（verilog_sources にのみ出力する）
         updated_sources: list[Any] = saved.get("updated_sources", [])
         source_errors: list[str] = []
-        for item in payload.get("files", []):
-            source_path = item.get("source_path")
-            content = item.get("content")
-            if not source_path or content is None:
-                continue
-            if source_path.startswith("examples://"):
-                continue
-            try:
-                target = _resolve_source_path(source_path)
-                if target is None or not target.is_file():
-                    source_errors.append(f"{item.get('path')}: 参照先が存在しません ({source_path})")
-                    continue
-                if read_verilog_text(target) != content:
-                    target.write_text(content, encoding="utf-8")
-                    updated_sources.append({"name": item.get('path'), "path": str(target)})
-            except OSError as exc:
-                source_errors.append(f"{item.get('path')}: 書き込み失敗 ({exc})")
         return {
             "ok": True,
             **saved,

@@ -515,7 +515,7 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
         setStatus(`${p} を単体保存しました`, "ok");
         appendConsole(`[save] ${res.path}`, "ok");
         if (fileData) fileData.isDirty = false;
-        refreshFileTree();
+        renderFileTree();
       } catch (err) {
         setStatus(`保存失敗: ${err.message}`, "err");
       }
