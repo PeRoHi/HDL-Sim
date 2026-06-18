@@ -508,19 +508,14 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
       const projName = currentProject || "default";
       try {
         const res = await api("/api/save_v_file", {
-          method: "POST",
-          body: {
-            project_name: projName,
-            file_name: p,
-            source: content
-          }
+          project_name: projName,
+          file_name: p,
+          source: content
         });
-        if (res.ok) {
-          setStatus(`${p} を単体保存しました`, "ok");
-          appendConsole(`[save] ${res.path}`, "ok");
-          if (fileData) fileData.isDirty = false;
-          refreshFileTree();
-        }
+        setStatus(`${p} を単体保存しました`, "ok");
+        appendConsole(`[save] ${res.path}`, "ok");
+        if (fileData) fileData.isDirty = false;
+        refreshFileTree();
       } catch (err) {
         setStatus(`保存失敗: ${err.message}`, "err");
       }
@@ -855,7 +850,8 @@ async function loadSpjFileList(selectName) {
 
 function reportSourceWriteback(saved) {
   for (const path of saved.updated_sources || []) {
-    appendConsole(`[spj] 参照先の .v を更新: ${path}`, "ok");
+    const p = typeof path === "string" ? path : path.path;
+    appendConsole(`[spj] 参照先の .v を更新: ${p}`, "ok");
   }
   for (const err of saved.source_errors || []) {
     appendConsole(`[spj] 参照先の更新に失敗: ${err}`, "warn");
