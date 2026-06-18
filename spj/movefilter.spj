@@ -28,71 +28,14 @@
     }
   ],
   "wave": {
-    "selection": [
-      "lpf_out_cascade",
-      "clk",
-      "data_in",
-      "delay_matched_out",
-      "lpf_out_single",
-      "noise_out"
-    ],
-    "order": [
-      "clk",
-      "data_in",
-      "delay_matched_out",
-      "lpf_out_single",
-      "noise_out",
-      "lpf_out_cascade",
-      "dut.u_delay.data_out",
-      "dut.u_delay.i",
-      "dut.u_delay.sreg",
-      "dut.u_ma_stage1.acc",
-      "dut.u_ma_stage1.buffer",
-      "dut.u_ma_stage1.data_out",
-      "dut.u_ma_stage1.i",
-      "dut.u_ma_stage2.acc",
-      "dut.u_ma_stage2.buffer",
-      "dut.u_ma_stage2.data_out",
-      "dut.u_ma_stage2.i",
-      "dut.noise_out",
-      "abs_amp",
-      "abs_lpf",
-      "abs_noise",
-      "diff_c",
-      "diff_s",
-      "min_noise_quiet",
-      "n",
-      "peak_lpf_spike",
-      "peak_lpf_spike_max",
-      "peak_noise_quiet",
-      "peak_noise_spike",
-      "peak_noise_spike_max",
-      "pi",
-      "prev_cascade",
-      "prev_single",
-      "rough_cascade",
-      "rough_single",
-      "rst_n",
-      "s",
-      "sine_i",
-      "sine_r",
-      "spike",
-      "spike_amp",
-      "spike_cycle",
-      "spikes_detected"
-    ],
+    "selection": [],
+    "order": [],
     "filePaths": [
       "delay_line.v",
       "moving_avg_core.v",
       "moving_avg_filter.v",
       "tb_moving_avg_filter.v"
     ],
-    "analogSignals": [
-      "data_in",
-      "delay_matched_out",
-      "lpf_out_single",
-      "noise_out",
-      "lpf_out_cascade"
-    ]
+    "analogSignals": []
   }
 }
