@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hdl-sim"
-version = "1.0.10"
+version = "1.1.0"
 description = "A lightweight event-driven Verilog HDL simulator with VCD output."
 authors = ["Cursor Agent <cursor@example.com>"]
 readme = "README.md"
