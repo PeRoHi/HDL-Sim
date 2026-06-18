@@ -12,3 +12,4 @@ spj/*
 !spj/
 !spj/README.md
 !spj/*.spj
+build/
