@@ -24,7 +24,7 @@ from hdl_sim.parser.ast import Design, Module, PortDirection
 from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
-from hdl_sim.web.paths import examples_dir, ui_dir
+from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
@@ -715,7 +715,7 @@ def create_app() -> FastAPI:
         if not project_name or not file_name or source is None:
             raise HTTPException(status_code=400, detail="project_name, file_name, and source are required")
             
-        vs_dir = user_data_dir() / "verilog_sources" / project_name
+        vs_dir = user_data_dir() / "verilog_sources" / Path(project_name).stem
         vs_dir.mkdir(parents=True, exist_ok=True)
         v_path = vs_dir / file_name
         v_path.write_text(source, encoding="utf-8")
