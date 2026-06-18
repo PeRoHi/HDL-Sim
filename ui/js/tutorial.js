@@ -44,8 +44,9 @@
           <div class="tutorial-step-item">
             <span class="tutorial-step-num">3</span>
             <div>
-              <strong>プロジェクトの保存</strong><br>
-              <code>Save</code> ボタン または <code>Ctrl+S</code> でプロジェクトを保存します。
+              <strong>プロジェクトとファイルの保存</strong><br>
+              <code>Save</code> ボタン または <code>Ctrl+S</code> でプロジェクト全体(.spj)を保存し、自動で <code>verilog_sources/</code> に.vファイルを出力します。<br>
+              エディタのタイトルバー右上にあるフロッピーアイコンを押すと、現在開いている単一の.vファイルのみを上書き保存できます。
             </div>
           </div>
         </div>

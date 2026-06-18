@@ -681,7 +681,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # 参照元 .v ファイルがある場合は、編集内容をその実ファイルにも書き戻す
-        updated_sources: list[str] = []
+        updated_sources: list[Any] = saved.get("updated_sources", [])
         source_errors: list[str] = []
         for item in payload.get("files", []):
             source_path = item.get("source_path")
@@ -704,6 +704,21 @@ def create_app() -> FastAPI:
             "updated_sources": updated_sources,
             "source_errors": source_errors,
         }
+
+    @app.post("/api/save_v_file")
+    def api_save_v_file(payload: dict[str, Any]) -> dict[str, Any]:
+        project_name = payload.get("project_name")
+        file_name = payload.get("file_name")
+        source = payload.get("source")
+        if not project_name or not file_name or source is None:
+            raise HTTPException(status_code=400, detail="project_name, file_name, and source are required")
+            
+        vs_dir = user_data_dir() / "verilog_sources" / project_name
+        vs_dir.mkdir(parents=True, exist_ok=True)
+        v_path = vs_dir / file_name
+        v_path.write_text(source, encoding="utf-8")
+        
+        return {"ok": True, "path": str(v_path.resolve())}
 
     def _error_payload(exc: Exception) -> dict[str, Any]:
         """設計側の誤りは原因メッセージのみ、内部エラーはトレース付きで返す。"""

@@ -483,6 +483,52 @@ function createMdiWindow(id, title, { x = 40, y = 40, width = 520, height = 360,
   const controls = document.createElement("div");
   controls.className = "mdi-controls";
 
+  if (id.startsWith("file:")) {
+    const btnSaveV = document.createElement("button");
+    btnSaveV.type = "button";
+    btnSaveV.className = "mdi-btn save-v";
+    btnSaveV.title = "単一ファイル (.v) のみを上書き保存";
+    btnSaveV.setAttribute("aria-label", "ファイル保存");
+    // フロッピーアイコン
+    btnSaveV.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M14 0H2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4l-4-4zM8 14A2.5 2.5 0 1 1 8 9a2.5 2.5 0 0 1 0 5zm3-10H3V1.5h8V4z"/></svg>';
+
+    const stopCtl = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    };
+
+    btnSaveV.addEventListener("pointerdown", stopCtl);
+    btnSaveV.addEventListener("click", async (e) => {
+      stopCtl(e);
+      const p = id.replace("file:", "");
+      const fileData = fileStore.get(p);
+      const content = fileData?.model ? fileData.model.getValue() : fileData?.content;
+      if (content === undefined) return;
+      
+      const projName = currentProject || "default";
+      try {
+        const res = await api("/api/save_v_file", {
+          method: "POST",
+          body: {
+            project_name: projName,
+            file_name: p,
+            source: content
+          }
+        });
+        if (res.ok) {
+          setStatus(`${p} を単体保存しました`, "ok");
+          appendConsole(`[save] ${res.path}`, "ok");
+          if (fileData) fileData.isDirty = false;
+          refreshFileTree();
+        }
+      } catch (err) {
+        setStatus(`保存失敗: ${err.message}`, "err");
+      }
+    });
+    controls.appendChild(btnSaveV);
+  }
+
+
   const btnMin = document.createElement("button");
   btnMin.type = "button";
   btnMin.className = "mdi-btn min";

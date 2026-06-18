@@ -55,4 +55,16 @@ def load_spj_file(name: str) -> dict[str, Any]:
 def save_spj_file(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     path = _resolve_spj_path(name)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return {"filename": path.name, "path": str(path.resolve())}
+    
+    vs_dir = user_data_dir() / "verilog_sources" / path.stem
+    vs_dir.mkdir(parents=True, exist_ok=True)
+    
+    updated_sources = []
+    if "files" in payload:
+        for item in payload["files"]:
+            if "path" in item and "content" in item:
+                v_path = vs_dir / item["path"]
+                v_path.write_text(item["content"], encoding="utf-8")
+                updated_sources.append({"name": item["path"], "path": str(v_path.resolve())})
+                
+    return {"filename": path.name, "path": str(path.resolve()), "updated_sources": updated_sources}

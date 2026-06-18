@@ -12,7 +12,6 @@ for /f "usebackq delims=" %%V in (`py -3.12 -c "import sys; sys.path.insert(0,'s
 set "ZIP=dist\HDL-Sim-%VER%-windows-x64.zip"
 
 :: ユーザー要望のフォルダとファイルの整理
-mkdir "dist\HDL-Sim\projects" 2>nul
 mkdir "dist\HDL-Sim\verilog_sources" 2>nul
 
 :: ユーザーが見える最上位階層に spj フォルダを作成し、吟味済みのプロジェクトを配置

@@ -10,8 +10,7 @@ fi
 VER=$(python3 -c "import sys; sys.path.insert(0,'src'); from hdl_sim import __version__; print(__version__)")
 ZIP="dist/HDL-Sim-${VER}-mac.zip"
 
-# フォルダ作成とサンプルのコピー
-mkdir -p "dist/HDL-Sim/projects"
+# ユーザー要望のフォルダとファイルの整理
 mkdir -p "dist/HDL-Sim/verilog_sources"
 mkdir -p "dist/HDL-Sim/spj"
 
