@@ -147,8 +147,8 @@ def write_lvalue_logic(
         if lvalue.bit is not None:
             bit_index = eval_fn(lvalue.bit)
             bit_value = value & 1
-            x_bit = (x_mask >> bit_index) & 1
-            z_bit = (z_mask >> bit_index) & 1
+            x_bit = x_mask & 1
+            z_bit = z_mask & 1
             next_value = (current & ~(1 << bit_index)) | (bit_value << bit_index)
             next_x = (net.memory_x_mask[word_index] & ~(1 << bit_index)) | (x_bit << bit_index)
             next_z = (net.memory_z_mask[word_index] & ~(1 << bit_index)) | (z_bit << bit_index)
@@ -176,8 +176,8 @@ def write_lvalue_logic(
                 return True
             return False
         bit_value = value & 1
-        x_bit = (x_mask >> index) & 1
-        z_bit = (z_mask >> index) & 1
+        x_bit = x_mask & 1
+        z_bit = z_mask & 1
         next_value = (net.value & ~(1 << index)) | (bit_value << index)
         next_x = (net.x_mask & ~(1 << index)) | (x_bit << index)
         next_z = (net.z_mask & ~(1 << index)) | (z_bit << index)

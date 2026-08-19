@@ -56,13 +56,60 @@ class NBARegion:
         eval_fn: EvalFn,
         locals: dict[str, SimNet] | None = None,
     ) -> None:
-        if target.bit is None and target.msb is None and target.lsb is None:
-            self.schedule_state(_global_net_name(target.base, locals), state)
+        global_name = _global_net_name(target.base, locals)
+        scratch_src = (
+            locals[target.base]
+            if locals is not None and target.base in locals
+            else self.nets[global_name]
+        )
+        if scratch_src.is_memory:
+            if target.word is not None:
+                word_index = eval_fn(target.word)
+            elif target.bit is not None:
+                word_index = eval_fn(target.bit)
+            else:
+                msg = "memory NBA requires a word index"
+                raise ValueError(msg)
+            key = f"{global_name}@{word_index}"
+            self.pending[key] = PendingState(
+                value=state.value,
+                x_mask=state.x_mask,
+                z_mask=state.z_mask,
+                net_name=global_name,
+                word_index=word_index,
+            )
             return
 
-        from hdl_sim.engine.logic_eval import to_int
+        if target.bit is None and target.msb is None and target.lsb is None:
+            self.schedule_state(global_name, state)
+            return
 
-        self.schedule_lvalue(target, to_int(state), eval_fn=eval_fn, locals=locals)
+        pending = self.pending.get(global_name)
+        scratch = {
+            target.base: SimNet(
+                name=global_name,
+                width=scratch_src.width,
+                kind=scratch_src.kind,
+                value=pending.value if pending else scratch_src.value,
+                x_mask=pending.x_mask if pending else scratch_src.x_mask,
+                z_mask=pending.z_mask if pending else scratch_src.z_mask,
+            )
+        }
+        write_lvalue_logic(
+            target,
+            state,
+            nets=scratch,
+            eval_fn=eval_fn,
+            time=0,
+            on_update=lambda *_args: None,
+        )
+        sn = scratch[target.base]
+        self.pending[global_name] = PendingState(
+            value=sn.value,
+            x_mask=sn.x_mask,
+            z_mask=sn.z_mask,
+            net_name=global_name,
+        )
 
     def schedule_lvalue(
         self,

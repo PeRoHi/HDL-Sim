@@ -90,7 +90,18 @@ class ExpressionEvaluator:
         if isinstance(expr, IntLiteral):
             return FourStateValue.from_literal(expr)
         if isinstance(expr, IdentRef):
-            return FourStateValue.from_int(self._nets[expr.name].value, width=self._nets[expr.name].width)
+            if expr.name in self._params:
+                value = self._params[expr.name]
+                return FourStateValue.from_int(value, width=32)
+            net = self._nets.get(expr.name) or self._global_nets.get(expr.name)
+            if net is None:
+                return FourStateValue.from_int(self.eval(expr))
+            return FourStateValue(
+                value=net.value,
+                width=net.width,
+                x_mask=net.x_mask,
+                z_mask=net.z_mask,
+            )
         if isinstance(expr, UnaryExpr) and expr.op == "~":
             return bitwise_not(self.eval_four_state(expr.operand))
         if isinstance(expr, BinaryExpr) and expr.op in {"&", "|", "^"}:

@@ -16,7 +16,7 @@
 
 推奨フロー:
 
-1. `cursor/dev-ui-9db8`（または main にマージ後の Release）を pull / 新 ZIP で入手
+1. `main`（または最新 Release）を pull / 新 ZIP で入手
 2. ローカル Cursor で **自分の正しい `.v` 一式**を開き、Elab → Run
 3. まだ **ツール側**で落ちる → エラー全文を issue / Cloud に渡す（下のプロンプト）
 4. **RTL 側**の typo・top 取り違え → ローカルで修正
@@ -25,10 +25,10 @@
 
 ## 環境の前提（2026-06 時点）
 
-- ブランチ例: `cursor/dev-ui-9db8`（base: `cursor/hdl-sim-ui-8fe6`）
-- バージョン: **0.5.18 以降** を想定（それ以前は `wait` / ANSI ポート / 波形 / top 自動解決が未入りの可能性）
+- ブランチ例: `main`
+- バージョン: **1.1.0 以降**
 - UI: Monaco の **verilog** は色付けのみ。本当の判定は **Elab / Run の Lark パーサ**
-- 取得: `git pull origin cursor/dev-ui-9db8` または Release ZIP 再ビルド
+- 取得: `git pull origin main` または Release ZIP 再ビルド
 
 ### 直近で入った主な修正（再現しなくなったはずのもの）
 
@@ -44,8 +44,7 @@
 
 ### まだ当たりやすい未対応
 
-- ポート接続の **ビット選択・連結**（`.d(seg[3:0])` など）
-- `assign {a,b} = fsm(...)` の **連結左辺**
+- ポート接続の **連結左辺**（`assign {a,b} = fsm(...)`）
 - Silos PLI / 混合信号 / gate primitive ライブラリ
 - 手続きキーワードの追加（`disable` 等を task と誤認する可能性）
 
@@ -53,7 +52,7 @@
 
 ## ローカル確認チェックリスト
 
-- [ ] HDL-Sim のバージョンが **0.5.18+**（Help → About または左上バッジ）
+- [ ] HDL-Sim のバージョンが **1.1.0+**（Help → About または左上バッジ）
 - [ ] 6 ファイルすべてワークスペースに入っている（`include_only` は TB から `` `include `` される側）
 - [ ] ツールバー **Top** が実在モジュール（例: `reflex_game_tp`）。古い `tb` のままなら Elab 前に変更 or 自動修正メッセージを確認
 - [ ] **Elab** 成功後に **Run**（波形は Run 後の VCD）
@@ -69,7 +68,7 @@
 # HDL-Sim ローカルデバッグ（引き継ぎ）
 
 あなたは HDL-Sim（Python + FastAPI + Monaco UI）のデバッグ担当です。
-リポジトリ: PeRoHi/HDL-Sim、作業ブランチは `cursor/dev-ui-9db8`（なければ main / 最新 Release）。
+リポジトリ: PeRoHi/HDL-Sim、作業ブランチは `main`（または最新 Release）。
 
 ## 役割の切り分け
 - **ツール側バグ**（パーサ・elab・sim・VCD・UI）→ リポジトリを直し、テストを足し、バージョンを上げる
@@ -80,7 +79,7 @@
 - docs/SUPPORTED_SUBSET.md
 - docs/LEGACY_EXAMPLES.md
 
-## 既知の修正（0.5.18 以降）
+## 既知の修正（1.1.0 以降）
 ANSI `input wire`、wait(expr)、case の `wait:` / 識別子 `wait_cnt`、module parameter in function、
 event_control `@(negedge)`、VCD 全信号出力、top 自動解決（tb が無いとき *_tp 優先）。
 

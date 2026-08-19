@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0\.."
 
 if not exist "dist\HDL-Sim\HDL-Sim.exe" (
-  echo dist\HDL-Sim\HDL-Sim.exe がありません。先に packaging\build_windows.bat を実行してください.
+  echo dist\HDL-Sim\HDL-Sim.exe is missing. Run packaging\build_windows.bat first.
   pause
   exit /b 1
 )
@@ -11,10 +11,7 @@ if not exist "dist\HDL-Sim\HDL-Sim.exe" (
 for /f "usebackq delims=" %%V in (`py -3.12 -c "import sys; sys.path.insert(0,'src'); from hdl_sim import __version__; print(__version__)"`) do set "VER=%%V"
 set "ZIP=dist\HDL-Sim-%VER%-windows-x64.zip"
 
-:: ユーザー要望のフォルダとファイルの整理
 mkdir "dist\HDL-Sim\verilog_sources" 2>nul
-
-:: ユーザーが見える最上位階層に spj フォルダを作成し、吟味済みのプロジェクトを配置
 mkdir "dist\HDL-Sim\spj" 2>nul
 copy "spj\api_demo.spj" "dist\HDL-Sim\spj\" >nul 2>&1
 copy "spj\silos_code_coverage.spj" "dist\HDL-Sim\spj\" >nul 2>&1
@@ -35,17 +32,17 @@ copy "examples\tb_multi.v" "%EX_DIR%\" >nul 2>&1
 copy "examples\hierarchy.v" "%EX_DIR%\" >nul 2>&1
 if exist "%ZIP%" del /f /q "%ZIP%"
 
-echo [HDL-Sim] ZIP を作成しています: %ZIP%
+echo [HDL-Sim] Creating ZIP: %ZIP%
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Compress-Archive -LiteralPath 'dist\HDL-Sim' -DestinationPath '%ZIP%' -Force"
 if errorlevel 1 (
-  echo ZIP の作成に失敗しました.
+  echo ZIP creation failed.
   pause
   exit /b 1
 )
 
 echo.
-echo 完成: %ZIP%
-echo ユーザーは ZIP を解凍し、フォルダ内の HDL-Sim.exe を実行します。
-echo バージョン確認: 起動ウィンドウの Ver 表示、または IDE 左上 / Help - About
+echo Done: %ZIP%
+echo Unzip and run HDL-Sim.exe inside the folder.
+echo Version: startup window, IDE badge, or Help - About
 pause

@@ -10,24 +10,24 @@ for %%P in ("py -3.12" "py -3" "python" "python3") do (
 )
 
 echo.
-echo [HDL-Sim] Python 3.12 が見つかりません。
+echo [HDL-Sim] Python 3.12 was not found.
 echo.
-echo 1. https://www.python.org/downloads/ から Python 3.12 をインストール
-echo 2. インストール時に "Add python.exe to PATH" にチェック
-echo 3. Microsoft Store 版ではなく python.org 版を推奨
+echo 1. Install Python 3.12 from https://www.python.org/downloads/
+echo 2. Enable "Add python.exe to PATH"
+echo 3. Use the python.org installer, not Microsoft Store
 echo.
 pause
 exit /b 1
 
 :launch
-echo [HDL-Sim] 起動中...
+echo [HDL-Sim] Starting...
 set "PYTHONPATH=%~dp0src"
 "%PY%" "%~dp0start_ui.py" --gui --window %*
 set "RC=!errorlevel!"
 if not "!RC!"=="0" (
   echo.
-  echo [HDL-Sim] 起動に失敗しました ^(code=!RC!^).
-  echo 初回のみ次を実行してください:
+  echo [HDL-Sim] Start failed. Exit code !RC!
+  echo First-time setup:
   echo   "%PY%" -m pip install fastapi uvicorn lark
   echo.
   pause

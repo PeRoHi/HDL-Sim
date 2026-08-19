@@ -520,6 +520,17 @@ class VerilogTransformer(Transformer):
                 if continuous_assigns is not None:
                     continuous_assigns.append(candidate)
 
+    def _collect_decl_inits(
+        self,
+        declarations: list[Declaration],
+        statements: list[Stmt],
+        item: Any,
+    ) -> None:
+        assigns: list[ContinuousAssign] = []
+        self._distribute_decl_or_assign(declarations, assigns, item)
+        for assign in assigns:
+            statements.append(BlockingAssign(target=Lvalue(base=assign.target), expr=assign.expr))
+
     @v_args(inline=True)
     def ident_list(self, first: Token, *rest: Token) -> list[str]:
         return [str(first), *(str(r) for r in rest)]
@@ -963,7 +974,7 @@ class VerilogTransformer(Transformer):
             if isinstance(item, TaskPort):
                 ports.append(item)
             elif isinstance(item, (Declaration, tuple, ContinuousAssign)):
-                self._distribute_decl_or_assign(declarations, None, item)
+                self._collect_decl_inits(declarations, statements, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):
@@ -1029,7 +1040,7 @@ class VerilogTransformer(Transformer):
             if isinstance(item, FunctionInput):
                 inputs.append(item)
             elif isinstance(item, (Declaration, tuple, ContinuousAssign)):
-                self._distribute_decl_or_assign(declarations, None, item)
+                self._collect_decl_inits(declarations, statements, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):

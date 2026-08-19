@@ -12,15 +12,25 @@ HDL-Sim がパース・シミュレーションできる文法の一覧です。
 | モジュールインスタンス | 対応 | 名前付きポート `.p(sig)` |
 | `--top` | 対応 | エントリモジュール指定 |
 | `-D` / `-I` | 対応 | パラメータ上書き・インクルードパス |
-| ANSI ポート宣言 | 未対応 | `input wire clk` など |
+| ANSI ポート宣言 | 対応 | `input wire clk` など |
+| `signed` / `$signed` / `$unsigned` | 対応 | |
+| unpacked memory `reg [7:0] mem [0:N]` | 対応 | 範囲外はエラー |
+| `wait(expr)` | 対応 | |
+| ポート接続のビット選択 `.d(x[3:0])` | 対応 | |
+| `assign {a,b} = ...` 連結左辺 | 未対応 | |
+| Silos PLI / gate primitive / `disable` | 未対応 | |
 
 ## 宣言・型
 
 | 機能 | 状態 |
 |------|------|
-| `reg` / `wire` / `integer` | 対応 |
+| `reg` / `wire` / `integer` / `real` | 対応 |
+| `signed` 宣言 | 対応 |
 | ビット・パート選択 `[msb:lsb]` | 対応 |
 | `genvar` + `generate` | 対応 |
+| 三項 `?:` | 対応 |
+| `%` 剰余 | 対応 |
+| `` `ifdef `` / `` `ifndef `` / `` `else `` / `` `endif `` | 対応 |
 
 ## プロセス
 
@@ -34,6 +44,7 @@ HDL-Sim がパース・シミュレーションできる文法の一覧です。
 | `fork` / `join` | 対応（`begin` 内の並列文） |
 | `repeat` / `while` / `for` | 対応 |
 | `if` / `case` / `casex` / `casez` | 対応 |
+| `wait(expr)` | 対応 |
 
 ## 代入・四値
 
@@ -62,7 +73,7 @@ HDL-Sim がパース・シミュレーションできる文法の一覧です。
 
 ## 式・演算
 
-算術・論理・比較・連結、単項 `~` `&`、三項は未対応（`?:` が文法にあれば要確認）。識別子・定数・ビット選択を中心に利用。
+算術・論理・比較・連結、単項 `~` `&`、三項 `?:`、剰余 `%`、算術右シフト `>>>`。識別子・定数・ビット選択を中心に利用。
 
 ## 例とテスト
 
@@ -73,10 +84,10 @@ HDL-Sim がパース・シミュレーションできる文法の一覧です。
 | `examples/param_counter.v` | パラメータ付きカウンタ |
 | `examples/tb_multi.v` + `lib/and2.v` | 複数ファイル |
 
-回帰: `tests/test_silos_regression.py`（53 件中の Silos 向け 6 件）
+回帰: `tests/test_silos_regression.py`。全体は `PYTHONPATH=src python3 -m pytest tests/ -q`
 
 ## デバッグ
 
 - VCD 出力（`-o path.vcd` または `$dumpfile`）
 - `--verbose` / `--trace`（CLI）
-- `pytest` 全体（現状 53 passed）
+- `pytest` 全体

@@ -1,4 +1,8 @@
-"""Persistent project storage for the Web UI (./projects/)."""
+"""Persistent project storage for the Web UI (./projects/).
+
+Legacy JSON project API. The UI saves `.spj` + `verilog_sources/` instead.
+Kept for compatibility tests until the `/api/projects` routes are removed.
+"""
 
 from __future__ import annotations
 

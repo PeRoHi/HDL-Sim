@@ -198,7 +198,8 @@ export function createWorkspaceTree(hooks) {
       row.className = "tree-node tree-folder" + (contextFolder === folderPath ? " selected" : "");
       row.style.paddingLeft = `${depth * 12 + 4}px`;
       row.dataset.folder = folderPath;
-      row.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label">${dirName}</span>`;
+      row.innerHTML = `<span class="twist">▼</span><span class="icon">📁</span><span class="label"></span>`;
+      row.querySelector(".label").textContent = dirName;
       row.addEventListener("click", (e) => {
         if (e.target.classList.contains("twist")) return;
         contextFolder = folderPath;

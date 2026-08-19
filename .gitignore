@@ -13,3 +13,7 @@ spj/*
 !spj/README.md
 !spj/*.spj
 build/
+# Accidental test/runtime dumps; bundled samples stay tracked.
+verilog_sources/demo/
+verilog_sources/demo2/
+verilog_sources/rt/
