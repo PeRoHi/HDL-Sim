@@ -391,15 +391,15 @@ class StatementRunner:
 
 
     def _execute_case(self, stmt: CaseStmt, *, on_complete: ContinueCallback | None = None) -> None:
-        from hdl_sim.engine.four_state import case_match, eval_four_state
+        from hdl_sim.engine.four_state import case_match
 
-        selector = eval_four_state(stmt.expression, self._ctx.evaluator.eval)
+        selector = self._ctx.evaluator.eval_four_state(stmt.expression)
         for item in stmt.items:
             if not item.expressions:
                 self.execute(item.body, on_complete=on_complete)
                 return
             for pattern in item.expressions:
-                pat_val = eval_four_state(pattern, self._ctx.evaluator.eval)
+                pat_val = self._ctx.evaluator.eval_four_state(pattern)
                 if case_match(selector, pat_val, stmt.case_style):
                     self.execute(item.body, on_complete=on_complete)
                     return

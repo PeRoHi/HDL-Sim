@@ -4,7 +4,7 @@
 
 ## リポジトリ側で確認済み（CI 相当）
 
-`cursor/dev-ui-9db8` / **0.5.19 以降** で以下を pytest 確認:
+`cursor/dev-ui-9db8` / **1.1.0 以降** で以下を pytest 確認:
 
 - `signed` / `>>>` / `$signed` / `$unsigned`
 - `reg [7:0] mem [0:N]` と `mem[i]` / `mem[i][j]`
@@ -14,13 +14,13 @@
 
 ```bash
 cd HDL-Sim
-git pull origin cursor/dev-ui-9db8
+git pull origin main
 PYTHONPATH=src python3 -m pytest tests/test_signed_ashr_memory.py tests/test_resolve_top.py -q
 ```
 
 ## ローカル IDE での再確認（あなたの filter 6 ファイル）
 
-1. **バージョン** … Help → About で **0.5.20+**（メニュー左上も Ver 0.5.20）
+1. **バージョン** … Help → About で **1.1.0+**（メニュー左上も Ver 1.1.0）
 2. **Top** … `*_tp` / 課題指定の TB 名（`(auto — *_tp 優先)` でも可）
 3. **Elab** … エラー無し、`top=...` が表示される
 4. **Run** … `[OK] time=...` と `[wave] N signals captured`
@@ -34,7 +34,7 @@ PYTHONPATH=src python3 -m pytest tests/test_signed_ashr_memory.py tests/test_res
 | `mem[i]`, `mem[i][bit]` | 対応 |
 | `input wire` ポート | 対応 |
 | `wait(sig)` | 対応 |
-| ポート `.d(x[3:0])` | **未対応**のことが多い |
+| ポート `.d(x[3:0])` | 対応 |
 | `assign {a,b}=...` | **未対応** |
 
 ## 共有してもらえると Cloud でも再現できる情報

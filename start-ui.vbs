@@ -18,9 +18,9 @@ For Each cmd In commands
   End If
 Next
 
-MsgBox "Python 3.12 が見つかりません。" & vbCrLf & vbCrLf & _
-  "https://www.python.org/downloads/ からインストールしてください。" & vbCrLf & _
-  "または start-ui.bat をお試しください。", _
+MsgBox "Python 3.12 was not found." & vbCrLf & vbCrLf & _
+  "Install it from https://www.python.org/downloads/" & vbCrLf & _
+  "Or try start-ui.bat.", _
   vbCritical, "HDL-Sim"
 
 Function TryRun(sh, cmd)

@@ -45,7 +45,7 @@ def _read_data_dir_override() -> Path | None:
 
 
 def user_data_dir() -> Path:
-    """Writable folder for projects/, spj/, and user files."""
+    """Writable folder for spj/, verilog_sources/, and user files."""
 
     override = _read_data_dir_override()
     if override is not None:

@@ -9,7 +9,7 @@ from hdl_sim.engine.evaluator import ExpressionEvaluator
 from hdl_sim.engine.executor import ProcessContext, ProcessState
 from hdl_sim.engine.nba import NBARegion
 from hdl_sim.engine.nets import SimNet
-from hdl_sim.parser.ast import Block, DeclKind, FunctionDef, Stmt
+from hdl_sim.parser.ast import Block, DeclKind, FunctionDef, Stmt, ValueRange
 
 
 def call_function(
@@ -28,20 +28,27 @@ def call_function(
         msg = f"function {func.name} expects {len(func.inputs)} arguments, got {len(arg_values)}"
         raise RuntimeError(msg)
 
-    return_width = 8
+    ev = _param_eval(params)
+    return_width = _range_width(func.return_range, ev, default=1)
 
     locals: dict[str, SimNet] = {}
     return_net = SimNet(name=func.name, width=return_width, kind=DeclKind.REG)
     locals[func.name] = return_net
 
     for port, value in zip(func.inputs, arg_values):
-        input_net = SimNet(name=port.name, width=return_width, kind=DeclKind.REG, value=value)
+        width = _range_width(port.range, ev, default=return_width)
+        input_net = SimNet(name=port.name, width=width, kind=DeclKind.REG, value=value)
         locals[port.name] = input_net
 
     for decl in func.declarations:
-        width = 32 if decl.kind is DeclKind.INTEGER else (1 if decl.range is None else 32)
         if decl.name not in locals:
-            locals[decl.name] = SimNet.from_declaration(decl.name, decl.kind, None)
+            locals[decl.name] = SimNet.from_declaration(
+                decl.name,
+                decl.kind,
+                ev.resolve_range(decl.range),
+                unpacked_range=ev.resolve_range(decl.unpacked_range),
+                is_signed=decl.is_signed,
+            )
 
     evaluator = ExpressionEvaluator(locals, functions=functions, params=params or {})
 
@@ -64,3 +71,16 @@ def call_function(
             run_stmt(item)
 
     return return_net.value
+
+
+def _param_eval(params: dict[str, int] | None):
+    from hdl_sim.engine.params import ParameterEvaluator
+
+    return ParameterEvaluator(dict(params or {}))
+
+
+def _range_width(value_range: ValueRange | None, evaluator, *, default: int) -> int:
+    if value_range is None:
+        return default
+    resolved = evaluator.resolve_range(value_range)
+    return resolved.width if resolved is not None else default

@@ -143,7 +143,8 @@
         row.className = "menu-item";
         row.dataset.action = key === "projectRecent" ? "project.recent" : "file.recent";
         row.dataset.filename = name;
-        row.innerHTML = `<span class="menu-check"></span><span class="menu-label">${index + 1} ${name}</span>`;
+        row.innerHTML = `<span class="menu-check"></span><span class="menu-label"></span>`;
+        row.querySelector(".menu-label").textContent = `${index + 1} ${name}`;
         frag.appendChild(row);
       });
       return frag;
@@ -168,7 +169,8 @@
         const checked = entry.path === ctx.activeWindow;
         row.innerHTML =
           `<span class="menu-check">${checked ? "✓" : ""}</span>` +
-          `<span class="menu-label">${index + 1} ${entry.label}</span>`;
+          `<span class="menu-label"></span>`;
+        row.querySelector(".menu-label").textContent = `${index + 1} ${entry.label}`;
         frag.appendChild(row);
       });
       return frag;

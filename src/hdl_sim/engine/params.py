@@ -93,6 +93,10 @@ class ParameterEvaluator:
                 return left * right
             if expr.op == "/":
                 return left // right
+            if expr.op == "%":
+                if right == 0:
+                    return 0
+                return left % right
             if expr.op == "<<":
                 return left << right
             if expr.op == ">>":

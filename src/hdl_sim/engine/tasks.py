@@ -48,16 +48,31 @@ def call_task(
             msg = f"unsupported task port kind: {port.kind}"
             raise RuntimeError(msg)
 
+    from hdl_sim.engine.params import ParameterEvaluator
+
+    range_eval = ParameterEvaluator({})
     for decl in task.declarations:
         if decl.name not in locals:
-            locals[decl.name] = SimNet.from_declaration(decl.name, decl.kind, None)
+            locals[decl.name] = SimNet.from_declaration(
+                decl.name,
+                decl.kind,
+                range_eval.resolve_range(decl.range),
+                unpacked_range=range_eval.resolve_range(decl.unpacked_range),
+                is_signed=decl.is_signed,
+            )
 
-    task_evaluator = ExpressionEvaluator(locals)
+    scope = dict(caller_nets)
+    scope.update(locals)
+    task_evaluator = ExpressionEvaluator(
+        scope,
+        caller_nets=caller_nets,
+        global_nets=caller_nets,
+    )
 
     def run_stmt(stmt: Stmt) -> None:
         context = ProcessContext(
             queue=queue,
-            nets=locals,
+            nets=scope,
             evaluator=task_evaluator,
             nba=nba,
             schedule=lambda at, cb: queue.schedule_at(at, cb),

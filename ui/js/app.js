@@ -13,6 +13,22 @@ import {
   saveWaveViewSettings,
 } from "./wave-prefs.js";
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+  ));
+}
+
+function safeHttpUrl(raw, fallback) {
+  try {
+    const parsed = new URL(String(raw || fallback || ""), window.location.href);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.href;
+  } catch {
+    /* ignore */
+  }
+  return fallback || "";
+}
+
 const DEFAULT_SOURCE = `// Verilog を編集して Run (F5) で実行
 \`timescale 1ns/1ps
 
@@ -781,9 +797,10 @@ async function createNewSpj() {
   
   const filename = normalizeSpjFilename(name);
   currentProject = filename.replace(/\.spj$/i, "");
-  
-  // Save empty project
+  const starter = "untitled.v";
+  putFileContent(starter, "module untitled;\nendmodule\n");
   await saveProjectFile();
+  if (window.monaco) openFile(starter);
 }
 
 function currentProjectFileName() {
@@ -851,10 +868,10 @@ async function loadSpjFileList(selectName) {
 function reportSourceWriteback(saved) {
   for (const path of saved.updated_sources || []) {
     const p = typeof path === "string" ? path : path.path;
-    appendConsole(`[spj] 参照先の .v を更新: ${p}`, "ok");
+    appendConsole(`[spj] verilog_sources を更新: ${p}`, "ok");
   }
   for (const err of saved.source_errors || []) {
-    appendConsole(`[spj] 参照先の更新に失敗: ${err}`, "warn");
+    appendConsole(`[spj] verilog_sources の更新に失敗: ${err}`, "warn");
   }
 }
 
@@ -1184,10 +1201,15 @@ async function openProjectFilePicker() {
   } else {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".spj";
+    input.accept = ".spj,.v,.sv";
     input.onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".v") || lower.endsWith(".sv")) {
+        importLocalFiles([file]);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
@@ -1279,8 +1301,8 @@ function renderEditorTabs() {
     tab.className = "editor-tab" + (path === activeFile ? " active" : "");
     tab.setAttribute("role", "tab");
     tab.dataset.path = path;
-    tab.innerHTML = `<span class="label">${path}</span>` +
-      (fileStore.size > 1 ? `<span class="close" data-close="${path}">×</span>` : "");
+    tab.innerHTML = `<span class="label">${escapeHtml(path)}</span>` +
+      (fileStore.size > 1 ? `<span class="close" data-close="${escapeHtml(path)}">×</span>` : "");
     tab.addEventListener("click", (e) => {
       if (e.target.classList.contains("close")) {
         closeFile(e.target.dataset.close);
@@ -2209,7 +2231,12 @@ async function runElaborate() {
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
     const data = await api("/api/elaborate", payload);
     if (!data.ok) {
-      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
+      const loc = [data.error_file, data.error_line].filter((v) => v != null && v !== "").join(":");
+      appendConsole([loc, data.error, data.trace].filter(Boolean).join("\n\n"), "err");
+      if (data.error_file && data.error_line) {
+        const ed = fileEditors.get(data.error_file)?.editor;
+        if (ed?.revealLineInCenter) ed.revealLineInCenter(Number(data.error_line));
+      }
       renderHierarchy(null);
       renderSignalList([]);
       setStatus("Elab error", "err");
@@ -2255,7 +2282,12 @@ async function runSimulate() {
 
     const data = await api("/api/simulate", payload, abortController.signal);
     if (!data.ok) {
-      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
+      const loc = [data.error_file, data.error_line].filter((v) => v != null && v !== "").join(":");
+      appendConsole([loc, data.error, data.trace].filter(Boolean).join("\n\n"), "err");
+      if (data.error_file && data.error_line) {
+        const ed = fileEditors.get(data.error_file)?.editor;
+        if (ed?.revealLineInCenter) ed.revealLineInCenter(Number(data.error_line));
+      }
       if (data.console) appendConsole(data.console);
       renderHierarchy(null);
       renderSignalList([]);
@@ -2619,26 +2651,30 @@ function showUpdateBanner(options) {
     mode = "remote",
   } = options;
 
-  const url = downloadUrl || releaseUrl || "https://github.com/PeRoHi/HDL-Sim/releases/latest";
+  const rawUrl = downloadUrl || releaseUrl || "https://github.com/PeRoHi/HDL-Sim/releases/latest";
   const linkLabel = downloadUrl
     ? (downloadUrl.toLowerCase().endsWith(".zip") ? "ZIP をダウンロード" : "ダウンロード")
     : "リリースを見る";
 
+  const url = safeHttpUrl(rawUrl, "https://github.com/PeRoHi/HDL-Sim/releases/latest");
+  const latest = escapeHtml(latestVersion);
+  const current = escapeHtml(currentVersion);
+
   let message;
   if (mode === "local") {
     message =
-      `<strong>更新あり:</strong> HDL-Sim ${latestVersion} ` +
-      `(前回 ${currentVersion})。ページを再読み込みしてください。`;
+      `<strong>更新あり:</strong> HDL-Sim ${latest} ` +
+      `(前回 ${current})。ページを再読み込みしてください。`;
   } else {
     message =
-      `<strong>新しいバージョンがあります:</strong> ${latestVersion} ` +
-      `(現在 ${currentVersion})。` +
+      `<strong>新しいバージョンがあります:</strong> ${latest} ` +
+      `(現在 ${current})。` +
       ` 新しい ZIP を取得し、フォルダごと入れ替えて更新してください。`;
   }
 
   banner.innerHTML =
     `<span>${message}</span>` +
-    `<a href="${url}" target="_blank" rel="noopener">${linkLabel}</a>` +
+    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${linkLabel}</a>` +
     `<button type="button" id="btn-dismiss-update">後で</button>`;
   banner.hidden = false;
 

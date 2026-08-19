@@ -57,13 +57,14 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 
 ## 既知の制約（抜粋）
 
-- ANSI ポート（`input wire clk`）は未対応 → `input clk` 形式を使用
-- `#N;` の単体 delay は不可。`#N <文>` が必要（例: `#12 rst = 0;`）
-- Web UI は `start_ui.py` / `start-ui.*` で起動可能。高度な波形解析は引き続き VCD + GTKWave も利用可能
+- `#N;` の単体 delay は `#N <文>` 形式を使う（例: `#12 rst = 0;`）
+- `assign {a,b} = ...` の連結左辺は未対応
+- 高度な波形解析は VCD + GTKWave も利用可能
 
 ## ロードマップ
 
-- UI は最後。現状は VCD・`--verbose` / `--trace`・pytest で検証
+- Silos PLI / 混合信号 / gate primitive は未対応
+- Web UI は `start_ui.py` / `start-ui.*` で起動する（本製品の一部）
 
 ## Web UI（Silos 風）
 

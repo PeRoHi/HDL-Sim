@@ -115,9 +115,19 @@ class SimNet:
         self._notify(self.previous, masked, time)
         return True
 
+    def _check_word_index(self, index: int) -> int:
+        if not isinstance(index, int):
+            index = int(index)
+        if index < 0 or index >= len(self.memory):
+            raise ValueError(
+                f"memory {self.name} index {index} out of range 0..{len(self.memory) - 1}"
+            )
+        return index
+
     def read_word(self, index: int) -> int:
         if not self.is_memory:
             return self.value
+        index = self._check_word_index(index)
         return self.memory[index] & self._mask
 
     def update_word(
@@ -131,6 +141,7 @@ class SimNet:
     ) -> bool:
         if not self.is_memory:
             return self.update(value, time=time, x_mask=x_mask, z_mask=z_mask)
+        index = self._check_word_index(index)
         masked = value & self._mask
         next_x = (x_mask if x_mask is not None else self.memory_x_mask[index]) & self._mask
         next_z = (z_mask if z_mask is not None else self.memory_z_mask[index]) & self._mask

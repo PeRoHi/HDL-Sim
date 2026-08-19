@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import contextlib
 import io
 import json
@@ -25,6 +26,7 @@ from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
+from hdl_sim.web.path_safety import ensure_under, join_under, normalize_relpath
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
@@ -374,6 +376,10 @@ def _normalize_spj_data(data: dict[str, Any]) -> dict[str, Any]:
         resolved_files: list[dict[str, Any]] = []
         for rel in files:
             target = (base / rel).resolve()
+            try:
+                ensure_under(base, target)
+            except ValueError as exc:
+                raise ValueError(f".spj の参照パスが不正です: {rel}") from exc
             if not target.is_file():
                 raise ValueError(f".spj が参照するファイルが見つかりません: {rel}")
             resolved_files.append(
@@ -465,21 +471,41 @@ def _project_member_paths() -> set[str]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="HDL-Sim UI", version=__version__)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     import os
     import sys
     import time
     import asyncio
 
     last_ping_time = time.time()
-    HEARTBEAT_TIMEOUT = 180.0
+    heartbeat_timeout = 180.0
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async def heartbeat_watcher() -> None:
+            nonlocal last_ping_time
+            while True:
+                await asyncio.sleep(5)
+                if time.time() - last_ping_time > heartbeat_timeout:
+                    print(
+                        f"No ping received for {heartbeat_timeout} seconds. Shutting down.",
+                        file=sys.stderr,
+                    )
+                    os._exit(0)
+
+        task = asyncio.create_task(heartbeat_watcher())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    app = FastAPI(title="HDL-Sim UI", version=__version__, lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[],
+        allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.post("/api/waveform_sync")
     async def sync_waveform_state(req: WaveformSyncRequest):
@@ -514,17 +540,6 @@ def create_app() -> FastAPI:
         nonlocal last_ping_time
         last_ping_time = time.time()
         return {"status": "ok"}
-
-    @app.on_event("startup")
-    async def startup_event() -> None:
-        async def heartbeat_watcher() -> None:
-            nonlocal last_ping_time
-            while True:
-                await asyncio.sleep(5)
-                if time.time() - last_ping_time > HEARTBEAT_TIMEOUT:
-                    print(f"No ping received for {HEARTBEAT_TIMEOUT} seconds. Shutting down.", file=sys.stderr)
-                    os._exit(0)
-        asyncio.create_task(heartbeat_watcher())
 
     @app.get("/api/ui-info")
     def ui_info() -> dict[str, Any]:
@@ -697,10 +712,22 @@ def create_app() -> FastAPI:
         source = payload.get("source")
         if not project_name or not file_name or source is None:
             raise HTTPException(status_code=400, detail="project_name, file_name, and source are required")
-            
-        vs_dir = user_data_dir() / "verilog_sources" / Path(project_name).stem
-        vs_dir.mkdir(parents=True, exist_ok=True)
-        v_path = vs_dir / file_name
+
+        try:
+            project_stem = normalize_relpath(Path(str(project_name)).name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if project_stem.lower().endswith(".spj"):
+            project_stem = Path(project_stem).stem
+        sources_root = user_data_dir() / "verilog_sources"
+        sources_root.mkdir(parents=True, exist_ok=True)
+        try:
+            vs_dir = join_under(sources_root, project_stem)
+            vs_dir.mkdir(parents=True, exist_ok=True)
+            v_path = join_under(vs_dir, file_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        v_path.parent.mkdir(parents=True, exist_ok=True)
         v_path.write_text(source, encoding="utf-8")
         
         return {"ok": True, "path": str(v_path.resolve())}

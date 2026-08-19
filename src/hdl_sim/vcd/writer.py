@@ -76,10 +76,12 @@ class VCDWriter:
         return self.nets
 
     def render(self) -> str:
+        from hdl_sim import __version__
+
         nets = self._nets_for_render()
         lines = [
             f"$date {datetime.now(tz=UTC).isoformat()} $end",
-            "$version HDL-Sim 0.2.0 $end",
+            f"$version HDL-Sim {__version__} $end",
             f"$timescale {self.timescale} $end",
         ]
         _emit_scope(lines, self._scope_root, nets, self._codes)

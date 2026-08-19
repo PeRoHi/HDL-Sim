@@ -42,7 +42,7 @@ Cursor などエディタ AI に渡す引き継ぎ文は [LOCAL_DEBUG_HANDOFF.md
 ### リリース時のバージョン上げ（開発者）
 
 1. `src/hdl_sim/__init__.py` の `__version__` を更新（ここが exe の正）
-2. 同じ番号を `pyproject.toml`・`src/hdl_sim/web/app.py` の `UI_BUILD`・`ui/index.html` の `?v=` とバッジに反映
+2. 同じ番号を `pyproject.toml`・`src/hdl_sim/web/app.py` の `UI_BUILD`・`ui/index.html` と `ui/waveform.html` の `?v=` とバッジに反映
 3. `packaging\build_windows.bat` → `packaging\build_zip.bat`
 4. GitHub Release に `HDL-Sim-x.x.x-windows-x64.zip` を添付し、タグ `vx.x.x` を付ける
 
