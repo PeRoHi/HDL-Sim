@@ -219,14 +219,21 @@ class Lvalue:
 
 
 @dataclass(frozen=True, slots=True)
+class ConcatLvalue:
+    """Left-hand concatenation such as ``{a, b[1:0]}``."""
+
+    parts: tuple[Lvalue, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class BlockingAssign(Stmt):
-    target: Lvalue
+    target: Lvalue | ConcatLvalue
     expr: Expr
 
 
 @dataclass(frozen=True, slots=True)
 class NonBlockingAssign(Stmt):
-    target: Lvalue
+    target: Lvalue | ConcatLvalue
     expr: Expr
 
 
@@ -262,7 +269,7 @@ class EventControl(Stmt):
 
 @dataclass(frozen=True, slots=True)
 class ContinuousAssign:
-    target: str
+    target: str | ConcatLvalue
     expr: Expr
 
 

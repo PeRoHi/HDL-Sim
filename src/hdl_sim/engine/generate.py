@@ -15,6 +15,7 @@ from hdl_sim.parser.ast import (
     CaseItem,
     CaseStmt,
     ConcatExpr,
+    ConcatLvalue,
     ReplicationExpr,
     ContinuousAssign,
     Declaration,
@@ -234,6 +235,15 @@ def _qualify_item(item: Any, prefix: str) -> Any:
     if isinstance(item, Declaration):
         return replace(item, name=f"{prefix}{item.name}")
     if isinstance(item, ContinuousAssign):
+        if isinstance(item.target, ConcatLvalue):
+            return replace(
+                item,
+                target=ConcatLvalue(
+                    parts=tuple(
+                        replace(part, base=f"{prefix}{part.base}") for part in item.target.parts
+                    )
+                ),
+            )
         return replace(item, target=f"{prefix}{item.target}")
     if isinstance(item, ModuleInstance):
         return replace(item, instance_name=f"{prefix}{item.instance_name}")
@@ -258,9 +268,14 @@ def _substitute_any(node: Any, genvar: str, value: int) -> Any:
     if isinstance(node, Declaration):
         return replace(node, range=_substitute_range(node.range, genvar, value))
     if isinstance(node, ContinuousAssign):
+        target = node.target
+        if isinstance(target, ConcatLvalue):
+            target = ConcatLvalue(
+                parts=tuple(_substitute_lvalue(part, genvar, value) for part in target.parts)
+            )
         return replace(
             node,
-            target=node.target,
+            target=target,
             expr=_substitute_expr(node.expr, genvar, value),
         )
     if isinstance(node, ModuleInstance):
@@ -290,7 +305,7 @@ def _substitute_stmt(stmt: Any, genvar: str, value: int) -> Any:
     if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
         return replace(
             stmt,
-            target=_substitute_lvalue(stmt.target, genvar, value),
+            target=_substitute_assign_target(stmt.target, genvar, value),
             expr=_substitute_expr(stmt.expr, genvar, value),
         )
     if isinstance(stmt, IfStmt):
@@ -324,6 +339,12 @@ def _substitute_stmt(stmt: Any, genvar: str, value: int) -> Any:
     if isinstance(stmt, AlwaysBlock):
         return replace(stmt, body=_substitute_stmt(stmt.body, genvar, value))
     return stmt
+
+
+def _substitute_assign_target(target: Lvalue | ConcatLvalue, genvar: str, value: int) -> Lvalue | ConcatLvalue:
+    if isinstance(target, ConcatLvalue):
+        return ConcatLvalue(parts=tuple(_substitute_lvalue(part, genvar, value) for part in target.parts))
+    return _substitute_lvalue(target, genvar, value)
 
 
 def _substitute_lvalue(target: Lvalue, genvar: str, value: int) -> Lvalue:

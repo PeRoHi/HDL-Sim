@@ -23,6 +23,7 @@ from hdl_sim.parser.ast import (
     IdentRef,
     IfStmt,
     Lvalue,
+    ConcatLvalue,
     NonBlockingAssign,
     Repeat,
     Stmt,
@@ -188,20 +189,21 @@ class StatementRunner:
 
         if isinstance(stmt, (BlockingAssign, NonBlockingAssign)):
             if isinstance(stmt, BlockingAssign):
-                from hdl_sim.parser.ast import DeclKind
+                from hdl_sim.parser.ast import ConcatLvalue, DeclKind
 
-                target_net = self._ctx.nets.get(stmt.target.base)
-                if target_net is not None and target_net.kind is DeclKind.REAL:
-                    target_net.real_value = self._ctx.evaluator.eval_real(stmt.expr)
-                    self._ctx.on_net_update(target_net, self._now())
-                    if on_complete is not None:
-                        on_complete()
-                    return
-                from hdl_sim.engine.lvalue import write_lvalue_logic
+                if not isinstance(stmt.target, ConcatLvalue):
+                    target_net = self._ctx.nets.get(stmt.target.base)
+                    if target_net is not None and target_net.kind is DeclKind.REAL:
+                        target_net.real_value = self._ctx.evaluator.eval_real(stmt.expr)
+                        self._ctx.on_net_update(target_net, self._now())
+                        if on_complete is not None:
+                            on_complete()
+                        return
+                from hdl_sim.engine.lvalue import write_assign_target_logic
 
                 state = self._ctx.evaluator.eval_logic(stmt.expr)
                 state = self._extend_assign_state(stmt, state)
-                write_lvalue_logic(
+                write_assign_target_logic(
                     stmt.target,
                     state,
                     nets=self._ctx.nets,
@@ -300,6 +302,8 @@ class StatementRunner:
         """フルネット代入で RHS が signed のとき、ターゲット幅まで符号拡張する。"""
 
         target = stmt.target
+        if isinstance(target, ConcatLvalue):
+            return state
         if target.bit is not None or target.msb is not None:
             return state
         net = self._ctx.nets.get(target.base)
@@ -310,6 +314,8 @@ class StatementRunner:
         return extend_state_for_assign(state, stmt.expr, self._ctx.nets, net.width)
 
     def _extend_assign_int(self, target, expr, value: int) -> int:
+        if isinstance(target, ConcatLvalue):
+            return value
         if target.bit is not None or target.msb is not None:
             return value
         net = self._ctx.nets.get(target.base)

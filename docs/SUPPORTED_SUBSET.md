@@ -17,7 +17,7 @@ HDL-Sim がパース・シミュレーションできる文法の一覧です。
 | unpacked memory `reg [7:0] mem [0:N]` | 対応 | 範囲外はエラー |
 | `wait(expr)` | 対応 | |
 | ポート接続のビット選択 `.d(x[3:0])` | 対応 | |
-| `assign {a,b} = ...` 連結左辺 | 未対応 | |
+| `assign {a,b} = ...` 連結左辺 | 対応 | 手続き代入 `{a,b} =` / `<=` も含む |
 | Silos PLI / gate primitive / `disable` | 未対応 | |
 
 ## 宣言・型

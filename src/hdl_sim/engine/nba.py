@@ -9,7 +9,7 @@ from hdl_sim.core.events import SimTime
 from hdl_sim.engine.four_state import FourStateValue
 from hdl_sim.engine.lvalue import EvalFn, write_lvalue, write_lvalue_logic
 from hdl_sim.engine.nets import SimNet
-from hdl_sim.parser.ast import Lvalue
+from hdl_sim.parser.ast import ConcatLvalue, Lvalue
 
 NetUpdateCallback = Callable[[SimNet, SimTime], None]
 
@@ -50,12 +50,22 @@ class NBARegion:
 
     def schedule_lvalue_logic(
         self,
-        target: Lvalue,
+        target: Lvalue | ConcatLvalue,
         state: FourStateValue,
         *,
         eval_fn: EvalFn,
         locals: dict[str, SimNet] | None = None,
     ) -> None:
+        if isinstance(target, ConcatLvalue):
+            from hdl_sim.engine.lvalue import concat_part_states
+
+            nets = dict(self.nets)
+            if locals:
+                nets.update(locals)
+            for part, piece in concat_part_states(target, state, nets, eval_fn):
+                self.schedule_lvalue_logic(part, piece, eval_fn=eval_fn, locals=locals)
+            return
+
         global_name = _global_net_name(target.base, locals)
         scratch_src = (
             locals[target.base]
