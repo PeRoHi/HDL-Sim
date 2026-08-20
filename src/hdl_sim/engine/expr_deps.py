@@ -24,6 +24,7 @@ from hdl_sim.parser.ast import (
     WhileStmt,
     ForStmt,
     ConcatExpr,
+    ConcatLvalue,
     ReplicationExpr,
     WaitStmt,
 )
@@ -64,7 +65,12 @@ def identifiers_in_expr(expr: Expr) -> set[str]:
     return set()
 
 
-def identifiers_in_lvalue(lvalue: Lvalue) -> set[str]:
+def identifiers_in_lvalue(lvalue: Lvalue | ConcatLvalue) -> set[str]:
+    if isinstance(lvalue, ConcatLvalue):
+        names: set[str] = set()
+        for part in lvalue.parts:
+            names |= identifiers_in_lvalue(part)
+        return names
     names = {lvalue.base}
     if lvalue.word is not None:
         names |= identifiers_in_expr(lvalue.word)

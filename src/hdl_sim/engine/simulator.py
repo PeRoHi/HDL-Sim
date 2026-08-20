@@ -139,8 +139,19 @@ class Simulator:
             ) -> bool:
                 from hdl_sim.engine.net_state import apply_four_state
                 from hdl_sim.engine.signed_ops import extend_state_for_assign
+                from hdl_sim.parser.ast import ConcatLvalue
+                from hdl_sim.engine.lvalue import write_concat_lvalue_logic
 
                 state = scoped_evaluator.eval_logic(scoped.expr)
+                if isinstance(scoped.target, ConcatLvalue):
+                    return write_concat_lvalue_logic(
+                        scoped.target,
+                        state,
+                        nets=self._nets,
+                        eval_fn=scoped_evaluator.eval,
+                        time=time,
+                        on_update=self._record_net,
+                    )
                 net = self._nets[scoped.target]
                 state = extend_state_for_assign(state, scoped.expr, scoped.locals, net.width)
                 return apply_four_state(net, state, time=time, on_update=self._record_net)

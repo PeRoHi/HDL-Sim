@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from hdl_sim.engine.nets import SimNet
 from hdl_sim.engine.generate import expand_module_generates
@@ -13,6 +13,7 @@ from hdl_sim.parser.ast import (
     AlwaysBlock,
     BitSelect,
     ContinuousAssign,
+    ConcatLvalue,
     DeclKind,
     Design,
     Expr,
@@ -29,7 +30,7 @@ from hdl_sim.parser.ast import (
 
 @dataclass(frozen=True, slots=True)
 class ScopedContinuousAssign:
-    target: str
+    target: str | ConcatLvalue
     expr: Expr
     locals: dict[str, SimNet]
     params: dict[str, int]
@@ -161,12 +162,34 @@ def _elaborate_module(
     module_params = param_evaluator.snapshot()
 
     for assign in module.continuous_assigns:
-        target = _scoped_name(prefix, assign.target)
-        if assign.target in local:
-            global_nets[target] = local[assign.target]
-        elif target not in global_nets:
-            global_nets[target] = SimNet(name=target, width=1, kind=DeclKind.WIRE)
-            local[assign.target] = global_nets[target]
+        if isinstance(assign.target, ConcatLvalue):
+            parts = tuple(
+                replace(
+                    part,
+                    base=_bind_assign_target(
+                        part.base,
+                        prefix=prefix,
+                        local=local,
+                        global_nets=global_nets,
+                    ),
+                )
+                for part in assign.target.parts
+            )
+            continuous.append(
+                ScopedContinuousAssign(
+                    target=ConcatLvalue(parts=parts),
+                    expr=assign.expr,
+                    locals=dict(local),
+                    params=dict(module_params),
+                )
+            )
+            continue
+        target = _bind_assign_target(
+            assign.target,
+            prefix=prefix,
+            local=local,
+            global_nets=global_nets,
+        )
         continuous.append(
             ScopedContinuousAssign(
                 target=target,
@@ -377,6 +400,22 @@ def _resolve_slice_port_connection(
         )
     )
     return port_net
+
+
+def _bind_assign_target(
+    name: str,
+    *,
+    prefix: str,
+    local: dict[str, SimNet],
+    global_nets: dict[str, SimNet],
+) -> str:
+    target = _scoped_name(prefix, name)
+    if name in local:
+        global_nets[target] = local[name]
+    elif target not in global_nets:
+        global_nets[target] = SimNet(name=target, width=1, kind=DeclKind.WIRE)
+        local[name] = global_nets[target]
+    return target
 
 
 def _scoped_name(prefix: str, name: str) -> str:

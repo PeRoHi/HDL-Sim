@@ -311,6 +311,7 @@ signal_ref: IDENT select*
 hier_ident: IDENT ("." IDENT)+
 
 lvalue: signal_ref -> to_lvalue
+      | concat_expr -> concat_to_lvalue
 
 sized_number: /\d+\s*'[bBhHdD]\s*[0-9a-fA-FxXzZ?_]+/i
 

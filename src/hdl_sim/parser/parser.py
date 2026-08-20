@@ -43,6 +43,7 @@ from hdl_sim.parser.ast import (
     IntLiteral,
     RealLiteral,
     Lvalue,
+    ConcatLvalue,
     Module,
     ModuleInstance,
     NonBlockingAssign,
@@ -179,6 +180,22 @@ def _expr_from_selects(name: str, selects: list[SelectStep]) -> Expr:
     if kind == "part":
         return PartSelect(signal=name, msb=first, lsb=second, word=word)
     return BitSelect(signal=name, index=first, word=word)
+
+
+def _expr_as_lvalue_parts(expr: Expr) -> list[Lvalue]:
+    if isinstance(expr, ConcatExpr):
+        parts: list[Lvalue] = []
+        for part in expr.parts:
+            parts.extend(_expr_as_lvalue_parts(part))
+        return parts
+    if isinstance(expr, IdentRef):
+        return [Lvalue(base=expr.name)]
+    if isinstance(expr, BitSelect):
+        return [Lvalue(base=expr.signal, word=expr.word, bit=expr.index)]
+    if isinstance(expr, PartSelect):
+        return [Lvalue(base=expr.signal, word=expr.word, msb=expr.msb, lsb=expr.lsb)]
+    msg = f"unsupported concat lvalue part: {type(expr).__name__}"
+    raise ValueError(msg)
 
 
 class VerilogTransformer(Transformer):
@@ -529,7 +546,12 @@ class VerilogTransformer(Transformer):
         assigns: list[ContinuousAssign] = []
         self._distribute_decl_or_assign(declarations, assigns, item)
         for assign in assigns:
-            statements.append(BlockingAssign(target=Lvalue(base=assign.target), expr=assign.expr))
+            target = (
+                assign.target
+                if isinstance(assign.target, ConcatLvalue)
+                else Lvalue(base=assign.target)
+            )
+            statements.append(BlockingAssign(target=target, expr=assign.expr))
 
     @v_args(inline=True)
     def ident_list(self, first: Token, *rest: Token) -> list[str]:
@@ -691,6 +713,8 @@ class VerilogTransformer(Transformer):
     def continuous_assign(self, items: list[Any]) -> ContinuousAssign:
         filtered = [item for item in items if not isinstance(item, Token)]
         target, expr = filtered[0], filtered[1]
+        if isinstance(target, ConcatLvalue):
+            return ContinuousAssign(target=target, expr=expr)
         return ContinuousAssign(target=target.base, expr=expr)
 
     def initial_block(self, items: list[Any]) -> InitialBlock:
@@ -811,6 +835,9 @@ class VerilogTransformer(Transformer):
     def to_lvalue(self, ref: tuple[str, list[SelectStep]]) -> Lvalue:
         return _lvalue_from_selects(ref[0], ref[1])
 
+    def concat_to_lvalue(self, expr: Any) -> ConcatLvalue:
+        return ConcatLvalue(parts=tuple(_expr_as_lvalue_parts(self._resolve_expr(expr))))
+
     @v_args(inline=True)
     def signal_expr(self, ref: tuple[str, list[SelectStep]]) -> Expr:
         return _expr_from_selects(ref[0], ref[1])
@@ -841,11 +868,11 @@ class VerilogTransformer(Transformer):
         return UnaryExpr(op="$unsigned", operand=operand)
 
     @v_args(inline=True)
-    def blocking_assign(self, target: Lvalue, expr: Any) -> BlockingAssign:
+    def blocking_assign(self, target: Lvalue | ConcatLvalue, expr: Any) -> BlockingAssign:
         return BlockingAssign(target=target, expr=self._resolve_expr(expr))
 
     @v_args(inline=True)
-    def nonblocking_assign(self, target: Lvalue, expr: Any) -> NonBlockingAssign:
+    def nonblocking_assign(self, target: Lvalue | ConcatLvalue, expr: Any) -> NonBlockingAssign:
         return NonBlockingAssign(target=target, expr=self._resolve_expr(expr))
 
     @v_args(inline=True)
