@@ -27,7 +27,6 @@ from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
 from hdl_sim.web.path_safety import ensure_under, join_under, normalize_relpath
-from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
@@ -91,19 +90,6 @@ class SourceFile(BaseModel):
         default=False,
         description="Write to workspace for `include` but do not parse as a top-level module file",
     )
-
-
-class ProjectCreateRequest(BaseModel):
-    name: str
-    top: str | None = None
-    label: str | None = None
-
-
-class ProjectSaveRequest(BaseModel):
-    files: list[SourceFile]
-    top: str | None = None
-    label: str | None = None
-    wave: dict[str, Any] | None = None
 
 
 class ElaborateRequest(BaseModel):
@@ -413,20 +399,6 @@ def _normalize_spj_data(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def _resolve_source_path(raw: str) -> Path | None:
-    """`examples://rel/path.v` または絶対パスを実ファイルパスへ解決する。"""
-
-    if raw.startswith("examples://"):
-        rel = raw[len("examples://"):]
-        path = (EXAMPLES_DIR / rel).resolve()
-        try:
-            path.relative_to(EXAMPLES_DIR.resolve())
-        except ValueError:
-            return None
-        return path
-    return Path(raw)
-
-
 def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
     root = EXAMPLES_DIR.resolve()
     files: list[dict[str, str]] = []
@@ -621,47 +593,6 @@ def create_app() -> FastAPI:
             "top": top,
             "kind": "project" if example_id in EXAMPLE_PROJECTS else "file",
         }
-
-    @app.get("/api/projects")
-    def api_list_projects() -> list[dict[str, Any]]:
-        try:
-            return project_store.list_projects()
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    @app.post("/api/projects")
-    def api_create_project(req: ProjectCreateRequest) -> dict[str, Any]:
-        try:
-            return project_store.create_project(req.name, top=req.top, label=req.label)
-        except FileExistsError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/api/projects/{project_name}")
-    def api_load_project(project_name: str) -> dict[str, Any]:
-        try:
-            return project_store.load_project(project_name)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="project not found") from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.put("/api/projects/{project_name}")
-    def api_save_project(project_name: str, req: ProjectSaveRequest) -> dict[str, Any]:
-        if not req.files:
-            raise HTTPException(status_code=400, detail="files required")
-        try:
-            payload = [{"path": f.path, "content": f.content} for f in req.files]
-            return project_store.save_project(
-                project_name,
-                payload,
-                top=req.top,
-                label=req.label,
-                wave=req.wave,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/spj/info")
     def api_spj_info() -> dict[str, Any]:
