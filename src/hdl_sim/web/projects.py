@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from hdl_sim.web.path_safety import join_under
 from hdl_sim.web.paths import user_data_dir
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -117,13 +118,10 @@ def save_project(
 
     keep = set()
     for item in files:
-        rel = item["path"].replace("\\", "/").lstrip("/")
-        if ".." in rel.split("/"):
-            raise ValueError(f"invalid file path: {rel}")
-        dest = project / rel
+        dest = join_under(project, item["path"])
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(item["content"], encoding="utf-8")
-        keep.add(dest.resolve())
+        keep.add(dest)
 
     for existing in project.rglob("*.v"):
         if existing.resolve() not in keep:

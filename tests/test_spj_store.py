@@ -16,6 +16,7 @@ def test_spj_dir_created() -> None:
 
 def test_spj_save_and_load_roundtrip(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
+    monkeypatch.setattr(spj_store, "user_data_dir", lambda: tmp_path)
     payload = {
         "format": "hdl-sim-project",
         "version": 1,

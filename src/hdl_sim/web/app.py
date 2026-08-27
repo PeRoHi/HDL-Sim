@@ -7,12 +7,13 @@ import io
 import json
 import tempfile
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel, Field
@@ -24,6 +25,8 @@ from hdl_sim.parser.ast import Design, Module, PortDirection
 from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
+from hdl_sim.web.local_http import local_api_rejection, loopback_origins
+from hdl_sim.web.path_safety import join_under, normalize_project_stem, normalize_relpath
 from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
@@ -340,11 +343,11 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
     base = Path(tmp.name)
     paths: list[Path] = []
     for item in files:
-        path = base / item.path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(item.content, encoding="utf-8")
+        dest = join_under(base, item.path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(item.content, encoding="utf-8")
         if not item.include_only:
-            paths.append(path)
+            paths.append(dest)
     if not paths:
         msg = "no elaboration entry files (only include-only sources?)"
         raise ValueError(msg)
@@ -373,14 +376,17 @@ def _normalize_spj_data(data: dict[str, Any]) -> dict[str, Any]:
         base = _spj.spj_dir().resolve()
         resolved_files: list[dict[str, Any]] = []
         for rel in files:
-            target = (base / rel).resolve()
+            try:
+                target = join_under(base, rel)
+            except ValueError as exc:
+                raise ValueError("invalid spj file path") from exc
             if not target.is_file():
-                raise ValueError(f".spj が参照するファイルが見つかりません: {rel}")
+                raise ValueError("spj referenced file not found")
             resolved_files.append(
                 {
                     "path": target.name,
                     "content": read_verilog_text(target),
-                    "source_path": str(target),
+                    "source_path": target.relative_to(base).as_posix(),
                 }
             )
         project = data.get("project") or {}
@@ -408,30 +414,27 @@ def _normalize_spj_data(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_source_path(raw: str) -> Path | None:
-    """`examples://rel/path.v` または絶対パスを実ファイルパスへ解決する。"""
+    """`examples://rel/path.v` を examples 配下へ解決する。絶対パスは対象外。"""
 
-    if raw.startswith("examples://"):
-        rel = raw[len("examples://"):]
-        path = (EXAMPLES_DIR / rel).resolve()
-        try:
-            path.relative_to(EXAMPLES_DIR.resolve())
-        except ValueError:
-            return None
-        return path
-    return Path(raw)
+    if not raw.startswith("examples://"):
+        return None
+    rel = raw[len("examples://"):]
+    try:
+        path = join_under(EXAMPLES_DIR, rel)
+    except ValueError:
+        return None
+    return path if path.is_file() else None
 
 
 def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
-    root = EXAMPLES_DIR.resolve()
     files: list[dict[str, str]] = []
     for rel in rel_paths:
-        path = (EXAMPLES_DIR / rel).resolve()
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail=f"example file not found: {rel}")
         try:
-            path.relative_to(root)
+            path = join_under(EXAMPLES_DIR, rel)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="example not found") from exc
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="example not found")
         files.append(
             {
                 "path": rel,
@@ -465,21 +468,52 @@ def _project_member_paths() -> set[str]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="HDL-Sim UI", version=__version__)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     import os
     import sys
     import time
     import asyncio
 
     last_ping_time = time.time()
-    HEARTBEAT_TIMEOUT = 180.0
+    heartbeat_timeout = 180.0
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async def heartbeat_watcher() -> None:
+            nonlocal last_ping_time
+            while True:
+                await asyncio.sleep(5)
+                if time.time() - last_ping_time > heartbeat_timeout:
+                    print(
+                        f"No ping received for {heartbeat_timeout} seconds. Shutting down.",
+                        file=sys.stderr,
+                    )
+                    os._exit(0)
+
+        task = asyncio.create_task(heartbeat_watcher())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    app = FastAPI(title="HDL-Sim UI", version=__version__, lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=loopback_origins(),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Accept"],
+    )
+
+    @app.middleware("http")
+    async def require_loopback_api(request: Request, call_next):
+        if request.url.path.startswith("/api/"):
+            rejected = local_api_rejection(
+                request.headers.get("host"),
+                request.headers.get("origin"),
+            )
+            if rejected is not None:
+                return JSONResponse({"ok": False, "error": rejected}, status_code=403)
+        return await call_next(request)
 
     @app.post("/api/waveform_sync")
     async def sync_waveform_state(req: WaveformSyncRequest):
@@ -515,17 +549,6 @@ def create_app() -> FastAPI:
         last_ping_time = time.time()
         return {"status": "ok"}
 
-    @app.on_event("startup")
-    async def startup_event() -> None:
-        async def heartbeat_watcher() -> None:
-            nonlocal last_ping_time
-            while True:
-                await asyncio.sleep(5)
-                if time.time() - last_ping_time > HEARTBEAT_TIMEOUT:
-                    print(f"No ping received for {HEARTBEAT_TIMEOUT} seconds. Shutting down.", file=sys.stderr)
-                    os._exit(0)
-        asyncio.create_task(heartbeat_watcher())
-
     @app.get("/api/ui-info")
     def ui_info() -> dict[str, Any]:
         index_path = UI_DIR / "index.html"
@@ -546,7 +569,7 @@ def create_app() -> FastAPI:
     def api_update_check(refresh: bool = False) -> dict[str, Any]:
         try:
             return check_for_updates(__version__, force_refresh=refresh)
-        except Exception as exc:
+        except Exception:
             return {
                 "ok": False,
                 "current_version": __version__,
@@ -554,7 +577,7 @@ def create_app() -> FastAPI:
                 "update_available": False,
                 "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
                 "download_url": None,
-                "error": str(exc),
+                "error": "update check failed",
             }
 
     @app.get("/api/examples")
@@ -584,7 +607,7 @@ def create_app() -> FastAPI:
                     "id": rel,
                     "label": rel,
                     "kind": "file",
-                    "path": str(path),
+                    "path": rel,
                 }
             )
         return items
@@ -611,8 +634,8 @@ def create_app() -> FastAPI:
     def api_list_projects() -> list[dict[str, Any]]:
         try:
             return project_store.list_projects()
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except OSError:
+            raise HTTPException(status_code=500, detail="storage error") from None
 
     @app.post("/api/projects")
     def api_create_project(req: ProjectCreateRequest) -> dict[str, Any]:
@@ -655,8 +678,8 @@ def create_app() -> FastAPI:
                 "path": str(spj_store.spj_dir().resolve()),
                 "files": spj_store.list_spj_files(),
             }
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except OSError:
+            raise HTTPException(status_code=500, detail="storage error") from None
 
     @app.get("/api/spj/{filename}")
     def api_load_spj(filename: str) -> dict[str, Any]:
@@ -667,7 +690,9 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="spj file not found") from exc
         except (ValueError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if isinstance(exc, json.JSONDecodeError):
+                raise HTTPException(status_code=400, detail="invalid spj content") from exc
+            raise HTTPException(status_code=400, detail="invalid spj") from exc
 
     @app.put("/api/spj/{filename}")
     def api_save_spj(filename: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -677,10 +702,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="files required")
         try:
             saved = spj_store.save_spj_file(filename, payload)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        # ローカル参照元への自動書き戻しは廃止（verilog_sources にのみ出力する）
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid file path") from None
         updated_sources: list[Any] = saved.get("updated_sources", [])
         source_errors: list[str] = []
         return {
@@ -697,16 +720,25 @@ def create_app() -> FastAPI:
         source = payload.get("source")
         if not project_name or not file_name or source is None:
             raise HTTPException(status_code=400, detail="project_name, file_name, and source are required")
-            
-        vs_dir = user_data_dir() / "verilog_sources" / Path(project_name).stem
-        vs_dir.mkdir(parents=True, exist_ok=True)
-        v_path = vs_dir / file_name
+        try:
+            project_stem = normalize_project_stem(str(project_name))
+            sources_root = user_data_dir() / "verilog_sources"
+            sources_root.mkdir(parents=True, exist_ok=True)
+            vs_dir = join_under(sources_root, project_stem)
+            vs_dir.mkdir(parents=True, exist_ok=True)
+            v_path = join_under(vs_dir, str(file_name))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid file path") from None
+        v_path.parent.mkdir(parents=True, exist_ok=True)
         v_path.write_text(source, encoding="utf-8")
-        
-        return {"ok": True, "path": str(v_path.resolve())}
+        try:
+            shown = v_path.resolve().relative_to(user_data_dir().resolve()).as_posix()
+        except ValueError:
+            shown = normalize_relpath(str(file_name))
+        return {"ok": True, "path": shown}
 
     def _error_payload(exc: Exception) -> dict[str, Any]:
-        """設計側の誤りは原因メッセージのみ、内部エラーはトレース付きで返す。"""
+        """設計側の誤りは原因メッセージのみ返す。内部例外本文はエコーしない。"""
 
         from hdl_sim.engine.evaluator import EvaluationError
         from hdl_sim.parser.loader import VerilogSyntaxError
@@ -714,21 +746,21 @@ def create_app() -> FastAPI:
         user_error = isinstance(
             exc, (VerilogSyntaxError, ValueError, FileNotFoundError, EvaluationError, KeyError)
         )
-        payload: dict[str, Any] = {
-            "ok": False,
-            "error": str(exc) if not isinstance(exc, KeyError) else f"不明な参照: {exc}",
-        }
         if isinstance(exc, VerilogSyntaxError):
-            payload["error_kind"] = "syntax"
-            payload["error_file"] = exc.file
-            payload["error_line"] = exc.line
-            payload["error_column"] = exc.column
-        elif user_error:
-            payload["error_kind"] = "design"
-        else:
-            payload["error_kind"] = "internal"
-            payload["trace"] = traceback.format_exc()
-        return payload
+            return {
+                "ok": False,
+                "error": str(exc),
+                "error_kind": "syntax",
+                "error_file": exc.file,
+                "error_line": exc.line,
+                "error_column": exc.column,
+            }
+        if isinstance(exc, KeyError):
+            return {"ok": False, "error": "不明な参照", "error_kind": "design"}
+        if user_error:
+            return {"ok": False, "error": str(exc), "error_kind": "design"}
+        print(traceback.format_exc(), file=sys.stderr)
+        return {"ok": False, "error": "internal simulation error", "error_kind": "internal"}
 
     @app.post("/api/elaborate")
     def api_elaborate(req: ElaborateRequest) -> dict[str, Any]:
@@ -776,6 +808,7 @@ def create_app() -> FastAPI:
                 top=top,
                 timescale=loaded.timescale or "1ns",
                 vcd_path=vcd_path,
+                vcd_anchor=base,
             )
             console = io.StringIO()
             with contextlib.redirect_stdout(console):

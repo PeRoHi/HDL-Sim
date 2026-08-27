@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from hdl_sim.web.path_safety import join_under, normalize_relpath
 from hdl_sim.web.paths import user_data_dir
 
 SPJ_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.spj$")
@@ -54,17 +55,28 @@ def load_spj_file(name: str) -> dict[str, Any]:
 
 def save_spj_file(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     path = _resolve_spj_path(name)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    
     vs_dir = user_data_dir() / "verilog_sources" / path.stem
     vs_dir.mkdir(parents=True, exist_ok=True)
-    
-    updated_sources = []
+
+    to_write: list[tuple[str, str]] = []
     if "files" in payload:
         for item in payload["files"]:
             if "path" in item and "content" in item:
-                v_path = vs_dir / item["path"]
-                v_path.write_text(item["content"], encoding="utf-8")
-                updated_sources.append({"name": item["path"], "path": str(v_path.resolve())})
-                
+                rel = normalize_relpath(item["path"])
+                to_write.append((rel, item["content"]))
+
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    data_root = user_data_dir().resolve()
+    updated_sources = []
+    for rel, content in to_write:
+        v_path = join_under(vs_dir, rel)
+        v_path.parent.mkdir(parents=True, exist_ok=True)
+        v_path.write_text(content, encoding="utf-8")
+        try:
+            shown = v_path.resolve().relative_to(data_root).as_posix()
+        except ValueError:
+            shown = rel
+        updated_sources.append({"name": rel, "path": shown})
+
     return {"filename": path.name, "path": str(path.resolve()), "updated_sources": updated_sources}

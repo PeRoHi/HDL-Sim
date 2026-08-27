@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 _COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
 _COMMENT_LINE = re.compile(r"//.*?$", re.MULTILINE)
@@ -82,7 +83,12 @@ def expand_includes(
     def replace(match: re.Match[str]) -> str:
         include_name = match.group(1)
         for directory in search_paths:
-            candidate = (directory / include_name).resolve()
+            root = Path(directory).resolve()
+            candidate = (root / include_name).resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                continue
             if not candidate.is_file():
                 continue
             if candidate in seen:

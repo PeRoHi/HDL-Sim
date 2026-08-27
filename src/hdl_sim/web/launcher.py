@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import threading
@@ -188,6 +189,7 @@ def start_server(
         print(str(exc), file=sys.stderr)
         return 2
     url = f"http://{host}:{port}"
+    os.environ["HDL_SIM_UI_PORT"] = str(port)
     if not is_frozen():
         missing = missing_dependencies()
         if missing:

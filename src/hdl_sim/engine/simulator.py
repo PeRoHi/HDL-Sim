@@ -37,6 +37,7 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        vcd_anchor: Path | None = None,
         tracer: SimulationTracer | None = None,
         top: str | None = None,
     ) -> None:
@@ -74,9 +75,13 @@ class Simulator:
         self._queue.set_nba_flush(regions_flush)
         self._vcd_path = vcd_path
         # Anchor relative $dumpfile paths (e.g. "wave.vcd") to the API-provided directory.
-        self._vcd_anchor: Path | None = (
-            vcd_path.parent.resolve() if vcd_path is not None else None
-        )
+        # Assume: $dumpfile names a file under this directory; ``..`` / absolute escape is rejected.
+        if vcd_anchor is not None:
+            self._vcd_anchor = Path(vcd_anchor).resolve()
+        elif vcd_path is not None:
+            self._vcd_anchor = vcd_path.parent.resolve()
+        else:
+            self._vcd_anchor = None
         self._vcd = (
             VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
         )
@@ -92,9 +97,16 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        vcd_anchor: Path | None = None,
         top: str | None = None,
     ) -> Simulator:
-        return cls(parse_design(source), timescale=timescale, vcd_path=vcd_path, top=top)
+        return cls(
+            parse_design(source),
+            timescale=timescale,
+            vcd_path=vcd_path,
+            vcd_anchor=vcd_anchor,
+            top=top,
+        )
 
     @classmethod
     def from_file(
@@ -189,10 +201,27 @@ class Simulator:
             self._tracer.log(f"#{time} $display {message}")
 
     def _on_dumpfile(self, path: str) -> None:
-        candidate = Path(path)
-        if not candidate.is_absolute() and self._vcd_anchor is not None:
-            candidate = self._vcd_anchor / candidate
-        self._vcd_path = candidate
+        raw = str(path).strip().replace("\\", "/")
+        if not raw or "\x00" in raw:
+            raise ValueError("invalid dumpfile path")
+        candidate = Path(raw)
+        if self._vcd_anchor is None:
+            self._vcd_path = candidate if candidate.is_absolute() else Path(raw)
+            self._ensure_vcd()
+            if self._tracer is not None:
+                self._tracer.log(f"$dumpfile {path}")
+            return
+        if candidate.is_absolute() or raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":"):
+            raise ValueError("dumpfile path must be relative to the simulation directory")
+        parts = [p for p in raw.split("/") if p and p != "."]
+        if not parts or any(p == ".." for p in parts):
+            raise ValueError("dumpfile path must be relative to the simulation directory")
+        dest = (self._vcd_anchor / "/".join(parts)).resolve()
+        try:
+            dest.relative_to(self._vcd_anchor)
+        except ValueError as exc:
+            raise ValueError("dumpfile path must be relative to the simulation directory") from exc
+        self._vcd_path = dest
         self._ensure_vcd()
         if self._tracer is not None:
             self._tracer.log(f"$dumpfile {path}")
