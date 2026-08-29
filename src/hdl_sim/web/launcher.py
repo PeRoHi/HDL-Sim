@@ -116,6 +116,28 @@ def install_dependencies(*, on_line: Callable[[str], None] | None = None) -> tup
     return True, output.strip()
 
 
+def make_uvicorn_config(
+    app_target: object,
+    *,
+    host: str,
+    port: int,
+    reload: bool = False,
+):
+    """Build the UI server config. Do not honor X-Forwarded-* (no trusted proxy)."""
+
+    import uvicorn
+
+    return uvicorn.Config(
+        app_target,
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+        proxy_headers=False,
+    )
+
+
 def open_browser_later(url: str, *, delay: float = 0.3) -> None:
     import time
 
@@ -206,14 +228,7 @@ def start_server(
     else:
         app_target = "hdl_sim.web.app:create_app"
 
-    config = uvicorn.Config(
-        app_target,
-        factory=True,
-        host=host,
-        port=port,
-        reload=reload,
-        log_level="info",
-    )
+    config = make_uvicorn_config(app_target, host=host, port=port, reload=reload)
     server = uvicorn.Server(config)
 
     def _serve() -> None:

@@ -39,6 +39,12 @@ def test_host_and_origin_gate() -> None:
     assert local_api_rejection("127.0.0.1:8765", None) is None
     assert local_api_rejection("127.0.0.1:8765", "null") == "invalid origin"
     assert local_api_rejection("evil.example:8765", None) == "invalid host"
+    # Bind address / wildcards are not allowlist entries.
+    assert not host_is_loopback("0.0.0.0:8765")
+    assert not host_is_loopback("*:8765")
+    assert not host_is_loopback("*.ts.net:8765")
+    assert not host_is_loopback("foo.ts.net:8765")
+    assert local_api_rejection("0.0.0.0:8765", None) == "invalid host"
 
 
 def test_cors_is_not_wildcard() -> None:
@@ -79,6 +85,16 @@ def test_http_rejects_non_loopback_host_and_null_origin() -> None:
     assert null_origin.status_code == 403
     health = client.get("/api/health", headers={"Host": "127.0.0.1:8765"})
     assert health.status_code == 200
+    xff = client.get(
+        "/api/health",
+        headers={
+            "Host": "evil.example:8765",
+            "X-Forwarded-Host": "127.0.0.1:8765",
+            "X-Forwarded-For": "127.0.0.1",
+        },
+    )
+    assert xff.status_code == 403
+    assert xff.json()["error"] == "invalid host"
 
 
 def test_save_v_file_and_spj_reject_traversal(tmp_path, monkeypatch) -> None:
@@ -211,3 +227,54 @@ def test_internal_error_does_not_echo_traceback(monkeypatch) -> None:
     assert data["error_kind"] == "internal"
     assert "trace" not in data
     assert "secret internals" not in str(data.get("error", ""))
+
+
+def test_static_rejects_dotdot_and_does_not_follow_symlink(tmp_path, monkeypatch) -> None:
+    httpx = pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from hdl_sim.web import app as app_module
+
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "ok.js").write_text("console.log(1)\n", encoding="utf-8")
+    (ui / "index.html").write_text("<html></html>", encoding="utf-8")
+    secret = tmp_path / "secret.js"
+    secret.write_text("stolen\n", encoding="utf-8")
+    link = ui / "link.js"
+    try:
+        link.symlink_to(secret)
+    except OSError:
+        pytest.skip("symlink not permitted")
+
+    monkeypatch.setattr(app_module, "UI_DIR", ui)
+    app = create_app()
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    ok = client.get("/assets/ok.js")
+    assert ok.status_code == 200
+    assert "stolen" not in ok.text
+    escaped = client.get("/assets/../secret.js")
+    assert escaped.status_code in {403, 404}
+    assert "stolen" not in escaped.text
+    linked = client.get("/assets/link.js")
+    assert linked.status_code == 404
+    assert "stolen" not in linked.text
+
+
+def test_index_rejects_symlink_file(tmp_path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+    from hdl_sim.web import app as app_module
+
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    outside = tmp_path / "outside.html"
+    outside.write_text("<html>stolen</html>", encoding="utf-8")
+    try:
+        (ui / "index.html").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    monkeypatch.setattr(app_module, "UI_DIR", ui)
+    app = create_app()
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    resp = client.get("/")
+    assert resp.status_code == 404
+    assert "stolen" not in resp.text

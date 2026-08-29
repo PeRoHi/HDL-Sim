@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.path_safety import join_under, normalize_relpath
+from hdl_sim.web.path_safety import atomic_write_text, join_under, normalize_relpath
 from hdl_sim.web.paths import user_data_dir
 
 SPJ_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.spj$")
@@ -65,14 +65,18 @@ def save_spj_file(name: str, payload: dict[str, Any]) -> dict[str, Any]:
                 rel = normalize_relpath(item["path"])
                 to_write.append((rel, item["content"]))
 
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if path.is_file() and path.stat().st_size > 0 and not payload.get("files"):
+        raise ValueError("refusing to overwrite existing project with empty files")
+
+    dumped = json.dumps(payload, indent=2, ensure_ascii=False)
+    atomic_write_text(path, dumped, encoding="utf-8", refuse_empty=True)
 
     data_root = user_data_dir().resolve()
     updated_sources = []
     for rel, content in to_write:
         v_path = join_under(vs_dir, rel)
         v_path.parent.mkdir(parents=True, exist_ok=True)
-        v_path.write_text(content, encoding="utf-8")
+        atomic_write_text(v_path, content, encoding="utf-8")
         try:
             shown = v_path.resolve().relative_to(data_root).as_posix()
         except ValueError:

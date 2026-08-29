@@ -26,7 +26,13 @@ from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
 from hdl_sim.web.local_http import local_api_rejection, loopback_origins
-from hdl_sim.web.path_safety import join_under, normalize_project_stem, normalize_relpath
+from hdl_sim.web.path_safety import (
+    atomic_write_text,
+    jailed_regular_file,
+    join_under,
+    normalize_project_stem,
+    normalize_relpath,
+)
 from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
@@ -71,9 +77,29 @@ class WaveformSyncRequest(BaseModel):
 
 
 class NoCacheStaticFiles(StaticFiles):
-    """Serve UI assets without aggressive browser caching (dev-friendly)."""
+    """Serve UI assets without aggressive browser caching (dev-friendly).
+
+    Paths stay inside the UI directory. Symlinks are not followed.
+    """
+
+    def __init__(self, directory, **kwargs):
+        kwargs.setdefault("html", False)
+        try:
+            super().__init__(directory=directory, follow_symlink=False, **kwargs)
+        except TypeError:
+            super().__init__(directory=directory, **kwargs)
 
     async def get_response(self, path: str, scope: Scope):
+        from starlette.responses import PlainTextResponse
+
+        try:
+            if path and path not in {".", "./"}:
+                safe = normalize_relpath(path)
+                lexical = Path(self.directory) / Path(safe)
+                if lexical.is_symlink():
+                    return PlainTextResponse("Not Found", status_code=404)
+        except ValueError:
+            return PlainTextResponse("Not Found", status_code=404)
         response = await super().get_response(path, scope)
         if path.endswith(_NO_CACHE_SUFFIXES):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -730,7 +756,7 @@ def create_app() -> FastAPI:
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid file path") from None
         v_path.parent.mkdir(parents=True, exist_ok=True)
-        v_path.write_text(source, encoding="utf-8")
+        atomic_write_text(v_path, source, encoding="utf-8")
         try:
             shown = v_path.resolve().relative_to(user_data_dir().resolve()).as_posix()
         except ValueError:
@@ -863,8 +889,12 @@ def create_app() -> FastAPI:
 
         @app.get("/")
         def index() -> FileResponse:
+            try:
+                dest = jailed_regular_file(UI_DIR, "index.html")
+            except ValueError:
+                raise HTTPException(status_code=404, detail="not found") from None
             return FileResponse(
-                UI_DIR / "index.html",
+                dest,
                 headers={
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                     "Pragma": "no-cache",
