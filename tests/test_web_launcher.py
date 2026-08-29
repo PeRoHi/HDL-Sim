@@ -7,6 +7,7 @@ from hdl_sim.web.launcher import (
     find_free_port,
     install_dependencies,
     is_frozen,
+    make_uvicorn_config,
     missing_dependencies,
 )
 from hdl_sim.web.paths import examples_dir, project_root, ui_dir
@@ -98,3 +99,12 @@ def test_frozen_desktop_skips_tk_when_native_available(monkeypatch) -> None:
 
 def test_is_frozen_false_in_dev() -> None:
     assert is_frozen() is False
+
+
+def test_uvicorn_config_disables_proxy_headers() -> None:
+    config = make_uvicorn_config(
+        "hdl_sim.web.app:create_app",
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert config.proxy_headers is False

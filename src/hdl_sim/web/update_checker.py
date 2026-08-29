@@ -105,10 +105,10 @@ def check_for_updates(
     url = f"https://api.github.com/repos/{repo}/releases/latest"
     try:
         release = _fetch_latest_release(url)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         result = dict(base)
         result["ok"] = False
-        result["error"] = str(exc)
+        result["error"] = "update check failed"
         return result
 
     tag = normalize_version(str(release.get("tag_name") or release.get("name") or current))
