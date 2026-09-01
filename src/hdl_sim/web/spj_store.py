@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.paths import user_data_dir
+from hdl_sim.web.paths import atomic_write_text, user_data_dir
 
 SPJ_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.spj$")
 
@@ -53,6 +53,8 @@ def load_spj_file(name: str) -> dict[str, Any]:
 
 
 def save_spj_file(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not payload.get("files"):
+        raise ValueError("refusing to save spj file with no files")
     path = _resolve_spj_path(name)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
     return {"filename": path.name, "path": str(path.resolve())}

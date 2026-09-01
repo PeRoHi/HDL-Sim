@@ -37,6 +37,23 @@ def test_create_load_save_project(isolated_projects) -> None:
     assert paths == {"counter_dut.v", "tb_counter.v"}
 
 
+def test_save_project_rejects_path_escape(isolated_projects) -> None:
+    project_store.create_project("escape")
+    for bad_path in ("../evil.v", "C:/evil.v", "C:evil.v", ""):
+        with pytest.raises(ValueError):
+            project_store.save_project("escape", [{"path": bad_path, "content": "x"}])
+
+
+def test_save_project_rejects_empty_files(isolated_projects) -> None:
+    project_store.create_project("empty")
+    project_store.save_project("empty", [{"path": "tb.v", "content": "module tb; endmodule"}])
+    with pytest.raises(ValueError):
+        project_store.save_project("empty", [])
+    # existing file must survive the rejected empty save
+    loaded = project_store.load_project("empty")
+    assert loaded["files"][0]["path"] == "tb.v"
+
+
 def test_project_api_roundtrip(isolated_projects) -> None:
     app = create_app()
     create = next(r for r in app.routes if getattr(r, "path", None) == "/api/projects" and "POST" in getattr(r, "methods", set())).endpoint

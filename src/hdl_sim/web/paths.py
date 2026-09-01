@@ -4,7 +4,25 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 from pathlib import Path
+
+
+def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Write *text* to *path* without ever leaving a partially-written file.
+
+    A crash or forced-quit mid `write_text()` would leave a truncated or
+    empty file in place of the user's existing (non-empty) save. Write to a
+    sibling temp file first and atomically replace, so *path* either keeps
+    its old contents or gets the full new ones.
+    """
+
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp_path.write_text(text, encoding=encoding)
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def install_dir() -> Path:

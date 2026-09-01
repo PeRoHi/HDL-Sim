@@ -40,3 +40,16 @@ def test_spj_list_files(tmp_path, monkeypatch) -> None:
 def test_spj_invalid_name() -> None:
     with pytest.raises(ValueError):
         spj_store.save_spj_file("bad name.spj", {"format": "hdl-sim-project", "files": []})
+
+
+def test_spj_save_rejects_empty_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
+    with pytest.raises(ValueError):
+        spj_store.save_spj_file("demo.spj", {"format": "hdl-sim-project", "files": []})
+
+
+def test_spj_save_does_not_leave_tmp_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
+    payload = {"format": "hdl-sim-project", "files": [{"path": "tb.v", "content": "x"}]}
+    spj_store.save_spj_file("demo.spj", payload)
+    assert [p.name for p in tmp_path.iterdir()] == ["demo.spj"]
