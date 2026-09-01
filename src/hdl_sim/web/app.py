@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
@@ -282,12 +281,10 @@ def _project_member_paths() -> set[str]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="HDL-Sim UI", version=__version__)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # The UI only ever calls its own origin with relative fetch() paths, so no
+    # cross-origin access is legitimate. A wildcard CORS policy here would let
+    # any other webpage open in the user's browser read/write local projects
+    # via this loopback-only API.
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
