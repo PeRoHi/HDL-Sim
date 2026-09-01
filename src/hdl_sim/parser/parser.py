@@ -6,9 +6,11 @@ from functools import lru_cache
 from importlib import resources
 from pathlib import Path
 import sys
+from collections.abc import Iterable
 from typing import Any
 
 from lark import Lark, Token, Transformer, Tree, v_args
+from lark.lexer import PatternStr
 
 from hdl_sim.parser.ast import (
     Stmt,
@@ -1150,6 +1152,27 @@ def _build_parser() -> Lark:
         propagate_positions=False,
         maybe_placeholders=False,
     )
+
+
+_TERMINAL_DISPLAY_FALLBACK = {
+    "IDENT": "identifier",
+    "NUMBER": "number",
+    "STRING": "string literal",
+}
+
+
+def describe_expected(terminal_names: Iterable[str]) -> list[str]:
+    """Turn LALR terminal names (e.g. "RPAR") into user-facing text (")")."""
+
+    by_name = {term.name: term for term in _build_parser().terminals}
+    labels: set[str] = set()
+    for name in terminal_names:
+        term = by_name.get(name)
+        if term is not None and isinstance(term.pattern, PatternStr):
+            labels.add(f"'{term.pattern.value}'")
+        else:
+            labels.add(_TERMINAL_DISPLAY_FALLBACK.get(name, name))
+    return sorted(labels)
 
 
 def parse_design(source: str) -> Design:

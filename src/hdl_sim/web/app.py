@@ -20,6 +20,7 @@ from hdl_sim import __version__
 from hdl_sim.engine.elaborator import elaborate
 from hdl_sim.engine.simulator import Simulator
 from hdl_sim.parser.ast import Design, Module, PortDirection
+from hdl_sim.parser.errors import HdlSimSyntaxError
 from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
@@ -228,6 +229,30 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     return build(top_name, None)
 
 
+def _api_error_body(exc: Exception) -> dict[str, Any]:
+    """Classify an exception for the UI: syntax (with location) vs. design
+    (deliberate ValueError) vs. internal (unexpected bug, keeps the trace)."""
+
+    if isinstance(exc, HdlSimSyntaxError):
+        return {
+            "ok": False,
+            "kind": "syntax",
+            "file": str(exc.file),
+            "line": exc.line,
+            "column": exc.column,
+            "message": exc.message,
+            "excerpt": exc.excerpt,
+        }
+    if isinstance(exc, ValueError):
+        return {"ok": False, "kind": "design", "message": str(exc)}
+    return {
+        "ok": False,
+        "kind": "internal",
+        "message": str(exc),
+        "trace": traceback.format_exc(),
+    }
+
+
 def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile.TemporaryDirectory[str]]:
     """Write virtual sources to a temp directory and load them."""
 
@@ -239,7 +264,15 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(item.content, encoding="utf-8")
         paths.append(path)
-    loaded = load_design_with_meta(paths)
+    try:
+        loaded = load_design_with_meta(paths)
+    except HdlSimSyntaxError as exc:
+        # Report the virtual path the user typed, not the scratch temp path.
+        try:
+            exc.file = Path(exc.file).relative_to(base).as_posix()
+        except ValueError:
+            exc.file = Path(exc.file).name
+        raise
     return loaded, base, tmp
 
 
@@ -464,11 +497,7 @@ def create_app() -> FastAPI:
                 "always_blocks": len(elaborated.always_blocks),
             }
         except Exception as exc:
-            return {
-                "ok": False,
-                "error": str(exc),
-                "trace": traceback.format_exc(),
-            }
+            return _api_error_body(exc)
 
     @app.post("/api/simulate")
     def api_simulate(req: SimulateRequest) -> dict[str, Any]:
@@ -513,12 +542,7 @@ def create_app() -> FastAPI:
                 "files_loaded": [f.path for f in req.files],
             }
         except Exception as exc:
-            return {
-                "ok": False,
-                "error": str(exc),
-                "trace": traceback.format_exc(),
-                "console": "",
-            }
+            return {**_api_error_body(exc), "console": ""}
 
     if UI_DIR.is_dir():
         app.mount("/assets", NoCacheStaticFiles(directory=UI_DIR), name="assets")

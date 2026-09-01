@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hdl_sim.web.app import SimulateRequest, SourceFile, create_app
+from hdl_sim.web.app import ElaborateRequest, SimulateRequest, SourceFile, create_app
 
 ROOT = Path(__file__).resolve().parents[1]
 SILOS = ROOT / "examples" / "silos_regression.v"
@@ -133,6 +133,51 @@ def test_update_check_endpoint(monkeypatch) -> None:
     data = handler(refresh=True)
     assert data["update_available"] is True
     assert data["latest_version"] == "0.6.0"
+
+
+def test_elaborate_syntax_error_is_structured_not_a_traceback() -> None:
+    app = create_app()
+    handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/elaborate"
+    ).endpoint
+    src = (
+        "// comment\n"
+        "`timescale 1ns/1ps\n"
+        "\n"
+        "module counter #(parameter WIDTH = 4\n"
+        "  input clk\n"
+        ");\n"
+        "endmodule\n"
+    )
+    req = ElaborateRequest(files=[SourceFile(path="design.v", content=src)])
+    data = handler(req)
+    assert data["ok"] is False
+    assert data["kind"] == "syntax"
+    assert data["file"] == "design.v"
+    # Line 5 is "input clk" in the *original* source; a naive preprocessor
+    # that strips the leading comment/timescale lines without preserving
+    # line count would misreport this as line 2 or 3.
+    assert data["line"] == 5
+    assert "trace" not in data
+    assert "lark" not in data["message"].lower()
+
+
+def test_elaborate_duplicate_module_error_hides_temp_path() -> None:
+    app = create_app()
+    handler = next(
+        r for r in app.routes if getattr(r, "path", None) == "/api/elaborate"
+    ).endpoint
+    req = ElaborateRequest(
+        files=[
+            SourceFile(path="a.v", content="module dup; endmodule"),
+            SourceFile(path="b.v", content="module dup; endmodule"),
+        ]
+    )
+    data = handler(req)
+    assert data["ok"] is False
+    assert data["kind"] == "design"
+    assert data["message"] == "duplicate module definition: dup in b.v"
+    assert "trace" not in data
 
 
 def test_spj_api_roundtrip() -> None:

@@ -21,9 +21,16 @@ class PreprocessResult:
     defines: dict[str, str] | None = None
 
 
+def _blank(match: re.Match[str]) -> str:
+    """Replace a match with newlines only, so later line/column error positions
+    still point at the right place in the user's original source."""
+
+    return "\n" * match.group(0).count("\n")
+
+
 def strip_comments(source: str) -> str:
-    without_block = _COMMENT_BLOCK.sub("", source)
-    return _COMMENT_LINE.sub("", without_block)
+    without_block = _COMMENT_BLOCK.sub(_blank, source)
+    return _COMMENT_LINE.sub(_blank, without_block)
 
 
 def apply_defines(source: str, defines: dict[str, str]) -> str:
@@ -47,14 +54,14 @@ def preprocess(source: str, *, extra_defines: dict[str, str] | None = None) -> P
         defines.pop(match.group(1), None)
 
     cleaned = strip_comments(source)
-    cleaned = _TIMESCALE.sub("", cleaned)
-    cleaned = _DEFINE.sub("", cleaned)
-    cleaned = _UNDEF.sub("", cleaned)
-    cleaned = _IFDEF_BLOCK.sub("", cleaned)
-    cleaned = _DIRECTIVE_LINE.sub("", cleaned)
+    cleaned = _TIMESCALE.sub(_blank, cleaned)
+    cleaned = _DEFINE.sub(_blank, cleaned)
+    cleaned = _UNDEF.sub(_blank, cleaned)
+    cleaned = _IFDEF_BLOCK.sub(_blank, cleaned)
+    cleaned = _DIRECTIVE_LINE.sub(_blank, cleaned)
     cleaned = apply_defines(cleaned, defines)
 
-    return PreprocessResult(source=cleaned.strip(), timescale=timescale, defines=defines)
+    return PreprocessResult(source=cleaned.rstrip(), timescale=timescale, defines=defines)
 
 
 

@@ -1580,6 +1580,21 @@ async function openExample(id) {
   }
 }
 
+function formatApiError(data) {
+  if (data.kind === "syntax") {
+    const where = [data.file, data.line, data.column].filter((v) => v !== null && v !== undefined).join(":");
+    return [`構文エラー: ${where}`, data.excerpt, data.message].filter(Boolean).join("\n");
+  }
+  if (data.kind === "design") {
+    return `設計エラー: ${data.message}`;
+  }
+  if (data.kind === "internal") {
+    return [`内部エラー（想定外の問題です）: ${data.message}`, data.trace].filter(Boolean).join("\n\n");
+  }
+  // Older/unclassified error shape.
+  return [data.error, data.trace].filter(Boolean).join("\n\n");
+}
+
 async function runElaborate() {
   setStatus("Elaborating…", "busy");
   createOutputWindow();
@@ -1588,7 +1603,7 @@ async function runElaborate() {
     appendConsole(`[elab] ${payload.files.length} file(s): ${payload.files.map((f) => f.path).join(", ")}`, "info");
     const data = await api("/api/elaborate", payload);
     if (!data.ok) {
-      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
+      appendConsole(formatApiError(data), "err");
       renderHierarchy(null);
       renderSignalList([]);
       setStatus("Elab error", "err");
@@ -1622,7 +1637,7 @@ async function runSimulate() {
 
     const data = await api("/api/simulate", payload, abortController.signal);
     if (!data.ok) {
-      appendConsole([data.error, data.trace].filter(Boolean).join("\n\n"), "err");
+      appendConsole(formatApiError(data), "err");
       if (data.console) appendConsole(data.console);
       renderHierarchy(null);
       renderSignalList([]);
