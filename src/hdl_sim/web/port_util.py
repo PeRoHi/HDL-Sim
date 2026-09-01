@@ -85,7 +85,12 @@ def _listener_pids_unix(port: int) -> list[int]:
     return []
 
 
+_OWN_PROCESS_TOKENS = ("python", "hdl-sim")
+
+
 def pid_looks_like_python(pid: int) -> bool:
+    """True if *pid* looks like a Python interpreter or a frozen HDL-Sim build."""
+
     if sys.platform == "win32":
         try:
             proc = subprocess.run(
@@ -96,13 +101,14 @@ def pid_looks_like_python(pid: int) -> bool:
             )
         except OSError:
             return False
-        return "python" in proc.stdout.lower()
+        stdout = proc.stdout.lower()
+        return any(token in stdout for token in _OWN_PROCESS_TOKENS)
     try:
         Path = __import__("pathlib").Path
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", errors="ignore")
-        return "python" in cmdline.lower()
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", errors="ignore").lower()
+        return any(token in cmdline for token in _OWN_PROCESS_TOKENS)
     except OSError:
-        return True
+        return False
 
 
 def kill_pid(pid: int) -> bool:

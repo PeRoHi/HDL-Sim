@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from hdl_sim.web.port_util import (
     ensure_default_port,
+    pid_looks_like_python,
     port_is_free,
     release_port,
 )
@@ -33,3 +34,15 @@ def test_release_port_skips_non_python(monkeypatch) -> None:
     with patch("hdl_sim.web.port_util.kill_pid") as kill:
         assert release_port(8765) == []
         kill.assert_not_called()
+
+
+def test_pid_looks_like_python_recognizes_frozen_build() -> None:
+    fake_run = type(
+        "R",
+        (),
+        {"stdout": '"HDL-Sim.exe","4242","Console","1","50,000 K"', "returncode": 0},
+    )()
+    with patch("hdl_sim.web.port_util.sys") as fake_sys:
+        fake_sys.platform = "win32"
+        with patch("hdl_sim.web.port_util.subprocess.run", return_value=fake_run):
+            assert pid_looks_like_python(4242) is True
