@@ -32,7 +32,7 @@ packaging\build_zip.bat
 ### バージョンの確認（`HDL-Sim.exe`）
 
 1. **起動ウィンドウ** … 起動直後の小さな GUI に `Ver x.x.x` と表示
-2. **IDE** … 左上メニューバーの `Ver x.x.x` バッジ（サーバー `/api/version` と同期）
+2. **IDE** … 左上メニューバーの `Ver x.x.x` バッジ（サーバー `/api/ui-info` と同期）
 3. **Help → About** … ダイアログでバージョン表示
 
 ### リリース時のバージョン上げ（開発者）

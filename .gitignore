@@ -3,8 +3,10 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 dist/
+build/
 .venv/
 *.vcd
+*.log
 projects/*
 !projects/.gitkeep
 spj/*
