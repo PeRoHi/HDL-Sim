@@ -37,7 +37,7 @@ def _load_tk():
 
 
 class HDLSimGuiLauncher:
-    def __init__(self, *, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+    def __init__(self, *, host: str = "127.0.0.1", port: int = 8765, native_window: bool = True) -> None:
         _load_tk()
         self.host = host
         self.port = port
@@ -199,8 +199,12 @@ class HDLSimGuiLauncher:
         self.root.withdraw()
         try:
             open_ui_window(self.server.url, server=self.server, native=True, on_log=self.append_log)
-        finally:
             self.on_close()
+        except Exception as e:
+            self.append_log(f"専用ウィンドウ起動失敗: {e}")
+            self.root.deiconify()
+            messagebox.showwarning("起動エラー", f"専用ウィンドウの起動に失敗しました。\n\n{e}\n\n代わりにブラウザを開きます。")
+            open_browser_later(self.server.url)
 
     def on_close(self) -> None:
         if self.server is not None:
@@ -211,7 +215,7 @@ class HDLSimGuiLauncher:
         self.root.mainloop()
 
 
-def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = False) -> None:
+def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = True) -> None:
     _load_tk()
     HDLSimGuiLauncher(host=host, port=port, native_window=native_window).run()
 
@@ -219,8 +223,7 @@ def run_gui(*, host: str = "127.0.0.1", port: int = 8765, native_window: bool = 
 def main() -> int:
     prepare_runtime()
     try:
-        # Installed builds show the launcher log so startup errors are visible.
-        run_gui(native_window=is_frozen())
+        run_gui(native_window=True)
         return 0
     except Exception as exc:
         log_path = write_crash_log(exc, context="gui_launcher.main")

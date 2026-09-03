@@ -7,7 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.paths import atomic_write_text, user_data_dir
+from hdl_sim.web.path_safety import join_under
+from hdl_sim.web.paths import user_data_dir
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 META_FILE = ".hdl_sim_project.json"
@@ -68,7 +69,7 @@ def create_project(name: str, *, top: str | None = None, label: str | None = Non
         raise FileExistsError(f"project already exists: {name}")
     path.mkdir(parents=True, exist_ok=False)
     meta = {"label": label or name, "top": top}
-    atomic_write_text(path / META_FILE, json.dumps(meta, indent=2))
+    (path / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return {"name": name, "label": meta["label"], "top": top, "files": []}
 
 
@@ -94,11 +95,13 @@ def load_project(name: str) -> dict[str, Any]:
         content = (project / rel).read_text(encoding="utf-8")
         files.append({"path": rel, "content": content})
     meta = _read_meta(project)
+    wave = meta.get("wave")
     return {
         "name": name,
         "label": meta.get("label", name),
         "top": meta.get("top"),
         "files": files,
+        "wave": wave if isinstance(wave, dict) else None,
     }
 
 
@@ -108,26 +111,17 @@ def save_project(
     *,
     top: str | None = None,
     label: str | None = None,
+    wave: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if not files:
-        raise ValueError("refusing to save project with no files")
-
     project = _project_path(name)
     project.mkdir(parents=True, exist_ok=True)
 
-    project_resolved = project.resolve()
     keep = set()
     for item in files:
-        rel = item["path"].replace("\\", "/").lstrip("/")
-        if not rel or ".." in rel.split("/") or Path(rel).is_absolute() or Path(rel).drive:
-            raise ValueError(f"invalid file path: {rel}")
-        dest = project / rel
-        resolved = dest.resolve()
-        if resolved != project_resolved and project_resolved not in resolved.parents:
-            raise ValueError(f"invalid file path: {rel}")
+        dest = join_under(project, item["path"])
         dest.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(dest, item["content"])
-        keep.add(resolved)
+        dest.write_text(item["content"], encoding="utf-8")
+        keep.add(dest)
 
     for existing in project.rglob("*.v"):
         if existing.resolve() not in keep:
@@ -138,7 +132,9 @@ def save_project(
         meta["top"] = top
     if label is not None:
         meta["label"] = label
+    if wave is not None:
+        meta["wave"] = wave
     meta.setdefault("label", name)
-    atomic_write_text(project / META_FILE, json.dumps(meta, indent=2))
+    (project / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     return load_project(name)

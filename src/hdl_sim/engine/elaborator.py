@@ -11,6 +11,7 @@ from hdl_sim.parser.ast import (
     FunctionDef,
     TaskDef,
     AlwaysBlock,
+    BitSelect,
     ContinuousAssign,
     DeclKind,
     Design,
@@ -19,6 +20,7 @@ from hdl_sim.parser.ast import (
     InitialBlock,
     Module,
     ModuleInstance,
+    PartSelect,
     PortConnection,
     PortDirection,
     Stmt,
@@ -30,6 +32,7 @@ class ScopedContinuousAssign:
     target: str
     expr: Expr
     locals: dict[str, SimNet]
+    params: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,11 +125,18 @@ def _elaborate_module(
             net = port_bindings[port.name]
         else:
             full_name = _scoped_name(prefix, port.name)
-            if port.direction in (PortDirection.INPUT, PortDirection.INOUT):
+            if port.net_kind is not None:
+                kind = port.net_kind
+            elif port.direction in (PortDirection.INPUT, PortDirection.INOUT):
                 kind = DeclKind.WIRE
             else:
                 kind = DeclKind.REG
-            net = SimNet.from_declaration(full_name, kind, param_evaluator.resolve_range(port.range))
+            net = SimNet.from_declaration(
+                full_name,
+                kind,
+                param_evaluator.resolve_range(port.range),
+                is_signed=port.is_signed,
+            )
             global_nets[full_name] = net
         local[port.name] = net
 
@@ -134,9 +144,21 @@ def _elaborate_module(
         if decl.name in local:
             continue
         full_name = _scoped_name(prefix, decl.name)
-        net = SimNet.from_declaration(full_name, decl.kind, param_evaluator.resolve_range(decl.range))
+        net = SimNet.from_declaration(
+            full_name,
+            decl.kind,
+            param_evaluator.resolve_range(decl.range),
+            unpacked_range=(
+                param_evaluator.resolve_range(decl.unpacked_range)
+                if decl.unpacked_range is not None
+                else None
+            ),
+            is_signed=decl.is_signed,
+        )
         local[decl.name] = net
         global_nets[full_name] = net
+
+    module_params = param_evaluator.snapshot()
 
     for assign in module.continuous_assigns:
         target = _scoped_name(prefix, assign.target)
@@ -146,10 +168,14 @@ def _elaborate_module(
             global_nets[target] = SimNet(name=target, width=1, kind=DeclKind.WIRE)
             local[assign.target] = global_nets[target]
         continuous.append(
-            ScopedContinuousAssign(target=target, expr=assign.expr, locals=dict(local))
+            ScopedContinuousAssign(
+                target=target,
+                expr=assign.expr,
+                locals=dict(local),
+                params=dict(module_params),
+            )
         )
 
-    module_params = param_evaluator.snapshot()
     for block in module.initial_blocks:
         initials.append(ScopedProcess(body=block.body, locals=dict(local), params=dict(module_params)))
 
@@ -157,9 +183,28 @@ def _elaborate_module(
         always_blocks.append((block, dict(local), dict(module_params)))
 
     for instance in module.instances:
+        if instance.module_type not in modules:
+            known = ", ".join(sorted(modules)) or "(なし)"
+            msg = (
+                f"モジュール '{instance.module_type}' が見つかりません"
+                f"（モジュール '{module.name}' 内のインスタンス '{instance.instance_name}' が参照）。\n"
+                f"読み込まれているモジュール: {known}\n"
+                "ヒント: 定義ファイルがワークスペースに追加されているか、モジュール名の綴りを確認してください。"
+            )
+            raise ValueError(msg)
         child = modules[instance.module_type]
         child_prefix = _scoped_name(prefix, instance.instance_name)
-        bindings = _resolve_instance_ports(instance, child, local, prefix, global_nets)
+        bindings = _resolve_instance_ports(
+            instance,
+            child,
+            local,
+            prefix,
+            global_nets,
+            child_prefix=child_prefix,
+            param_evaluator=param_evaluator,
+            continuous=continuous,
+            module_params=module_params,
+        )
         child_params = ParameterEvaluator(param_evaluator.snapshot()).resolve_module_params(
             child.parameters,
             instance.parameter_overrides,
@@ -185,23 +230,72 @@ def _resolve_instance_ports(
     parent_local: dict[str, SimNet],
     parent_prefix: str,
     global_nets: dict[str, SimNet],
+    *,
+    child_prefix: str,
+    param_evaluator: ParameterEvaluator,
+    continuous: list[ScopedContinuousAssign],
+    module_params: dict[str, int],
 ) -> dict[str, SimNet]:
     bindings: dict[str, SimNet] = {}
     port_names = [p.name for p in child.ports]
+    port_dirs = {p.name: p.direction for p in child.ports}
     for index, connection in enumerate(instance.connections):
         port_name = connection.port or (
             port_names[index] if index < len(port_names) else ""
         )
         if not port_name:
-            msg = f"positional port connection out of range for {instance.module_type}"
+            msg = (
+                f"ポート接続が多すぎます: モジュール '{instance.module_type}' のポートは "
+                f"{len(port_names)} 個 ({', '.join(port_names)}) ですが、"
+                f"インスタンス '{instance.instance_name}' は {len(instance.connections)} 個接続しています。"
+            )
             raise ValueError(msg)
-        bindings[port_name] = _resolve_connection_expr(
-            connection,
-            parent_local,
-            parent_prefix,
-            global_nets,
-        )
+        if connection.port and connection.port not in port_dirs:
+            msg = (
+                f"モジュール '{instance.module_type}' にポート '{connection.port}' はありません"
+                f"（インスタンス '{instance.instance_name}'）。"
+                f" 定義されているポート: {', '.join(port_names)}"
+            )
+            raise ValueError(msg)
+        direction = port_dirs.get(port_name, PortDirection.INPUT)
+        try:
+            bindings[port_name] = _resolve_connection_expr(
+                connection,
+                parent_local,
+                parent_prefix,
+                global_nets,
+                child_prefix=child_prefix,
+                port_name=port_name,
+                port_direction=direction,
+                param_evaluator=param_evaluator,
+                continuous=continuous,
+                module_params=module_params,
+            )
+        except ValueError as exc:
+            msg = (
+                f"インスタンス '{instance.instance_name}' (モジュール {instance.module_type}) の"
+                f"ポート '{port_name}' の接続でエラー: {exc}"
+            )
+            raise ValueError(msg) from exc
     return bindings
+
+
+def _lookup_parent_net(
+    name: str,
+    parent_local: dict[str, SimNet],
+    parent_prefix: str,
+    global_nets: dict[str, SimNet],
+) -> SimNet:
+    if name in parent_local:
+        return parent_local[name]
+    full_name = _scoped_name(parent_prefix, name)
+    if full_name in global_nets:
+        return global_nets[full_name]
+    msg = (
+        f"信号 '{name}' が見つかりません。"
+        "wire/reg の宣言漏れ、または信号名の綴りを確認してください。"
+    )
+    raise ValueError(msg)
 
 
 def _resolve_connection_expr(
@@ -209,18 +303,80 @@ def _resolve_connection_expr(
     parent_local: dict[str, SimNet],
     parent_prefix: str,
     global_nets: dict[str, SimNet],
+    *,
+    child_prefix: str,
+    port_name: str,
+    port_direction: PortDirection,
+    param_evaluator: ParameterEvaluator,
+    continuous: list[ScopedContinuousAssign],
+    module_params: dict[str, int],
 ) -> SimNet:
     expr = connection.expr
     if isinstance(expr, IdentRef):
-        if expr.name in parent_local:
-            return parent_local[expr.name]
-        full_name = _scoped_name(parent_prefix, expr.name)
-        if full_name in global_nets:
-            return global_nets[full_name]
-        msg = f"unknown connection signal: {expr.name}"
-        raise ValueError(msg)
-    msg = f"unsupported port connection expression for {connection.port}"
+        return _lookup_parent_net(expr.name, parent_local, parent_prefix, global_nets)
+    if isinstance(expr, BitSelect):
+        expr = PartSelect(signal=expr.signal, msb=expr.index, lsb=expr.index, word=expr.word)
+    if isinstance(expr, PartSelect):
+        return _resolve_slice_port_connection(
+            expr,
+            parent_local,
+            parent_prefix,
+            global_nets,
+            child_prefix=child_prefix,
+            port_name=port_name,
+            port_direction=port_direction,
+            param_evaluator=param_evaluator,
+            continuous=continuous,
+            module_params=module_params,
+        )
+    msg = f"unsupported port connection expression for {connection.port or port_name}"
     raise ValueError(msg)
+
+
+def _resolve_slice_port_connection(
+    expr: PartSelect,
+    parent_local: dict[str, SimNet],
+    parent_prefix: str,
+    global_nets: dict[str, SimNet],
+    *,
+    child_prefix: str,
+    port_name: str,
+    port_direction: PortDirection,
+    param_evaluator: ParameterEvaluator,
+    continuous: list[ScopedContinuousAssign],
+    module_params: dict[str, int],
+) -> SimNet:
+    _lookup_parent_net(expr.signal, parent_local, parent_prefix, global_nets)
+    msb = param_evaluator.eval(expr.msb)
+    lsb = param_evaluator.eval(expr.lsb)
+    if msb < lsb:
+        msb, lsb = lsb, msb
+    slice_width = msb - lsb + 1
+
+    port_full = _scoped_name(child_prefix, port_name)
+    port_net = SimNet(name=port_full, width=slice_width, kind=DeclKind.WIRE)
+    global_nets[port_full] = port_net
+
+    if port_direction is PortDirection.OUTPUT:
+        msg = (
+            f"output port {port_name} connected to slice {expr.signal}[{msb}:{lsb}] "
+            "is not supported yet"
+        )
+        raise ValueError(msg)
+
+    if port_direction is PortDirection.INOUT:
+        msg = f"inout port slice connection for {port_name} is not supported yet"
+        raise ValueError(msg)
+
+    continuous.append(
+        ScopedContinuousAssign(
+            target=port_full,
+            expr=expr,
+            locals=dict(parent_local),
+            params=dict(module_params),
+        )
+    )
+    return port_net
 
 
 def _scoped_name(prefix: str, name: str) -> str:

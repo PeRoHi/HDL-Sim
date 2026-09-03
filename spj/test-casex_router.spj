@@ -1,0 +1,30 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "test-casex_router",
+  "top": "tb_priority_enc",
+  "until": 15000,
+  "max_events": 2000,
+  "files": [
+    {
+      "path": "priority_enc.v",
+      "content": "module priority_enc (\n    input wire [3:0] req,\n    output reg [1:0] grant,\n    output reg valid\n);\n    always @(*) begin\n        valid = 1;\n        // casexによる優先度付きエンコーダ\n        casex (req)\n            4'b1xxx: grant = 2'd3;\n            4'b01xx: grant = 2'd2;\n            4'b001x: grant = 2'd1;\n            4'b0001: grant = 2'd0;\n            default: begin\n                grant = 2'd0;\n                valid = 0;\n            end\n        endcase\n    end\nendmodule\n"
+    },
+    {
+      "path": "tb_priority_enc.v",
+      "content": "`timescale 1ns/1ns\nmodule tb_priority_enc;\n    reg [3:0] req;\n    wire [1:0] grant;\n    wire valid;\n\n    priority_enc dut (.req(req), .grant(grant), .valid(valid));\n\n    initial begin\n        req = 4'b0000; #10;\n        req = 4'b0001; #10;\n        req = 4'b0101; #10; // bit 2 should win\n        req = 4'b1001; #10; // bit 3 should win\n        req = 4'b0110; #10;\n        req = 4'b1111; #10;\n        $finish;\n    end\nendmodule\n"
+    }
+  ],
+  "wave": {
+    "selection": [],
+    "order": [
+      "grant",
+      "req",
+      "valid"
+    ],
+    "filePaths": [
+      "priority_enc.v",
+      "tb_priority_enc.v"
+    ]
+  }
+}

@@ -11,6 +11,7 @@ class DeclKind(Enum):
     REG = auto()
     WIRE = auto()
     INTEGER = auto()
+    REAL = auto()
 
 
 class PortDirection(Enum):
@@ -52,6 +53,14 @@ class Port:
     direction: PortDirection
     name: str
     range: ValueRange | None = None
+    net_kind: DeclKind | None = None
+    is_signed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class IdentDecl:
+    name: str
+    unpacked_range: ValueRange | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +68,8 @@ class Declaration:
     kind: DeclKind
     name: str
     range: ValueRange | None = None
+    unpacked_range: ValueRange | None = None
+    is_signed: bool = False
     loc: SourceLocation | None = None
 
 
@@ -72,6 +83,11 @@ class IntLiteral(Expr):
     width: int | None = None
     x_mask: int = 0
     z_mask: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class RealLiteral(Expr):
+    value: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +154,12 @@ class ConcatExpr(Expr):
     parts: tuple[Expr, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ReplicationExpr(Expr):
+    count: Expr
+    expr: Expr
+
+
 class Stmt:
     pass
 
@@ -177,6 +199,11 @@ class TaskEnable(Stmt):
 
 
 @dataclass(frozen=True, slots=True)
+class WaitStmt(Stmt):
+    condition: Expr
+
+
+@dataclass(frozen=True, slots=True)
 class Block(Stmt):
     statements: tuple[Stmt, ...]
     label: str | None = None
@@ -185,6 +212,7 @@ class Block(Stmt):
 @dataclass(frozen=True, slots=True)
 class Lvalue:
     base: str
+    word: Expr | None = None
     bit: Expr | None = None
     msb: Expr | None = None
     lsb: Expr | None = None
@@ -277,6 +305,7 @@ class DisplayArg:
 class BitSelect(Expr):
     signal: str
     index: Expr
+    word: Expr | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +313,7 @@ class PartSelect(Expr):
     signal: str
     msb: Expr
     lsb: Expr
+    word: Expr | None = None
 
 
 @dataclass(frozen=True, slots=True)

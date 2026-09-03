@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "test-fsm",
+    "description": "Test case for FSM execution."
+  },
+  "simulation": {
+    "top_module": "tb_debug_fsm",
+    "timescale": "1ns",
+    "defines": {}
+  },
+  "files": [
+    "../examples/test/fsm/debug_fsm.v",
+    "../examples/test/fsm/tb_debug_fsm.v"
+  ]
+}

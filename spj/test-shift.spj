@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "test-shift",
+    "description": "Test case for shift operations."
+  },
+  "simulation": {
+    "top_module": "tb_debug_shift",
+    "timescale": "1ns",
+    "defines": {}
+  },
+  "files": [
+    "../examples/test/shift/debug_shift.v",
+    "../examples/test/shift/tb_debug_shift.v"
+  ]
+}

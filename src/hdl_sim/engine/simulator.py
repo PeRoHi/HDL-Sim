@@ -37,6 +37,7 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        vcd_anchor: Path | None = None,
         tracer: SimulationTracer | None = None,
         top: str | None = None,
     ) -> None:
@@ -67,14 +68,27 @@ class Simulator:
                 self._delta.flush(time)
             finally:
                 self._in_delta = False
+            if self._monitor_dirty:
+                self._flush_monitors()
+                self._monitor_dirty = False
 
         self._queue.set_nba_flush(regions_flush)
         self._vcd_path = vcd_path
+        # Anchor relative $dumpfile paths (e.g. "wave.vcd") to the API-provided directory.
+        # Assume: $dumpfile names a file under this directory; ``..`` / absolute escape is rejected.
+        if vcd_anchor is not None:
+            self._vcd_anchor = Path(vcd_anchor).resolve()
+        elif vcd_path is not None:
+            self._vcd_anchor = vcd_path.parent.resolve()
+        else:
+            self._vcd_anchor = None
         self._vcd = (
             VCDWriter(elaborated.top_module, self._nets, timescale=timescale) if vcd_path else None
         )
         self._tracer = tracer
         self._monitors: list[tuple[tuple[DisplayArg, ...], dict[str, SimNet]]] = []
+        self._monitor_dirty = False
+        self._monitor_last_sig: list[tuple[int, ...]] = []
 
     @classmethod
     def from_source(
@@ -83,9 +97,16 @@ class Simulator:
         *,
         timescale: str = "1ns",
         vcd_path: Path | None = None,
+        vcd_anchor: Path | None = None,
         top: str | None = None,
     ) -> Simulator:
-        return cls(parse_design(source), timescale=timescale, vcd_path=vcd_path, top=top)
+        return cls(
+            parse_design(source),
+            timescale=timescale,
+            vcd_path=vcd_path,
+            vcd_anchor=vcd_anchor,
+            top=top,
+        )
 
     @classmethod
     def from_file(
@@ -113,13 +134,27 @@ class Simulator:
 
     def _register_continuous_updates(self) -> None:
         for assign in self._elaborated.continuous_assigns:
-            evaluator = ExpressionEvaluator(assign.locals, functions=self._functions, queue=self._queue, nba=self._nba, on_net_update=self._record_net)
+            evaluator = ExpressionEvaluator(
+                assign.locals,
+                functions=self._functions,
+                queue=self._queue,
+                nba=self._nba,
+                on_net_update=self._record_net,
+                params=assign.params,
+                global_nets=self._nets,
+            )
 
-            def recompute(time: SimTime, scoped: ScopedContinuousAssign = assign) -> bool:
+            def recompute(
+                time: SimTime,
+                scoped: ScopedContinuousAssign = assign,
+                scoped_evaluator: ExpressionEvaluator = evaluator,
+            ) -> bool:
                 from hdl_sim.engine.net_state import apply_four_state
+                from hdl_sim.engine.signed_ops import extend_state_for_assign
 
-                state = evaluator.eval_logic(scoped.expr)
+                state = scoped_evaluator.eval_logic(scoped.expr)
                 net = self._nets[scoped.target]
+                state = extend_state_for_assign(state, scoped.expr, scoped.locals, net.width)
                 return apply_four_state(net, state, time=time, on_update=self._record_net)
 
             self._delta.add_continuous(recompute)
@@ -129,9 +164,33 @@ class Simulator:
         merged = {**self._nets, **locals}
         self._monitors.append((args, merged))
 
-    def _check_monitors(self) -> None:
-        for args, locals in self._monitors:
-            evaluator = ExpressionEvaluator(locals, queue=self._queue)
+    def _monitor_signature(
+        self,
+        args: tuple[DisplayArg, ...],
+        evaluator: ExpressionEvaluator,
+    ) -> tuple[int, ...]:
+        values: list[int] = [self._queue.now]
+        for arg in args:
+            if arg.expr is not None:
+                values.append(evaluator.eval(arg.expr))
+        return tuple(values)
+
+    def _flush_monitors(self) -> None:
+        from hdl_sim.engine.executor import render_display_args
+
+        for index, (args, locals) in enumerate(self._monitors):
+            evaluator = ExpressionEvaluator(
+                locals,
+                queue=self._queue,
+                global_nets=self._nets,
+                sim_time=self._queue.now,
+            )
+            signature = self._monitor_signature(args, evaluator)
+            if index < len(self._monitor_last_sig) and self._monitor_last_sig[index] == signature:
+                continue
+            while len(self._monitor_last_sig) <= index:
+                self._monitor_last_sig.append(())
+            self._monitor_last_sig[index] = signature
             message = render_display_args(args, evaluator)
             print(message, flush=True)
             if self._tracer is not None:
@@ -142,7 +201,27 @@ class Simulator:
             self._tracer.log(f"#{time} $display {message}")
 
     def _on_dumpfile(self, path: str) -> None:
-        self._vcd_path = Path(path)
+        raw = str(path).strip().replace("\\", "/")
+        if not raw or "\x00" in raw:
+            raise ValueError("invalid dumpfile path")
+        candidate = Path(raw)
+        if self._vcd_anchor is None:
+            self._vcd_path = candidate if candidate.is_absolute() else Path(raw)
+            self._ensure_vcd()
+            if self._tracer is not None:
+                self._tracer.log(f"$dumpfile {path}")
+            return
+        if candidate.is_absolute() or raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":"):
+            raise ValueError("dumpfile path must be relative to the simulation directory")
+        parts = [p for p in raw.split("/") if p and p != "."]
+        if not parts or any(p == ".." for p in parts):
+            raise ValueError("dumpfile path must be relative to the simulation directory")
+        dest = (self._vcd_anchor / "/".join(parts)).resolve()
+        try:
+            dest.relative_to(self._vcd_anchor)
+        except ValueError as exc:
+            raise ValueError("dumpfile path must be relative to the simulation directory") from exc
+        self._vcd_path = dest
         self._ensure_vcd()
         if self._tracer is not None:
             self._tracer.log(f"$dumpfile {path}")
@@ -213,7 +292,8 @@ class Simulator:
     def _record_net(self, net: SimNet, time: SimTime) -> None:
         if net.previous is not None and self._tracer is not None:
             self._tracer.on_net_change(net, net.previous, net.value, time)
-        self._check_monitors()
+        if self._monitors:
+            self._monitor_dirty = True
         if self._vcd is not None:
             self._vcd.change(net, time)
 
@@ -361,6 +441,7 @@ class Simulator:
         stop_time = self._queue.now
 
         if self._vcd_path is not None and self._vcd is not None:
+            self._vcd.set_active_nets(None)
             self._vcd.write(self._vcd_path)
 
         return SimulationResult(

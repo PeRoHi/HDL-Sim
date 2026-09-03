@@ -8,6 +8,7 @@ from pathlib import Path
 
 from hdl_sim.core.events import SimTime
 from hdl_sim.engine.nets import SimNet
+from hdl_sim.parser.ast import DeclKind
 
 
 @dataclass(slots=True)
@@ -53,8 +54,9 @@ class VCDWriter:
         self._active_nets = names
 
     def change(self, net: SimNet, time: SimTime) -> None:
-        if self._active_nets is not None and net.name not in self._active_nets:
+        if net.name not in self._codes:
             return
+        # Record all net transitions; $dumpvars scope only affects dump_initial().
         value = net.vcd_value()
         if self._last_dumped.get(net.name) == value:
             return
@@ -69,9 +71,9 @@ class VCDWriter:
             self.change(net, time)
 
     def _nets_for_render(self) -> dict[str, SimNet]:
-        if self._active_nets is None:
-            return self.nets
-        return {name: self.nets[name] for name in self._active_nets if name in self.nets}
+        if self._active_nets is not None:
+            return {name: self.nets[name] for name in self._active_nets if name in self.nets}
+        return self.nets
 
     def render(self) -> str:
         nets = self._nets_for_render()
@@ -129,5 +131,14 @@ def _emit_scope(
             continue
         net = nets[net_name]
         code = codes[net_name]
-        lines.append(f"$var wire {net.width} {code} {net_name.split('.')[-1]} $end")
+        if net.kind is DeclKind.REAL:
+            vcd_kind = "real"
+            width = 64
+        elif net.kind is DeclKind.INTEGER:
+            vcd_kind = "integer"
+            width = net.width
+        else:
+            vcd_kind = "wire"
+            width = net.width
+        lines.append(f"$var {vcd_kind} {width} {code} {net_name.split('.')[-1]} $end")
     lines.append("$upscope $end")

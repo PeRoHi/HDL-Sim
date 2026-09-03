@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "test-generate_tree",
+    "description": "Test case for generate tree execution."
+  },
+  "simulation": {
+    "top_module": "tb_xor_chain",
+    "timescale": "1ns",
+    "defines": {}
+  },
+  "files": [
+    "../examples/test/generate_tree/xor_chain.v",
+    "../examples/test/generate_tree/tb_xor_chain.v"
+  ]
+}

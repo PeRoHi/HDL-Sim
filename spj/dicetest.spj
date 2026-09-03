@@ -1,0 +1,18 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "dicetest",
+  "top": "sai_test",
+  "until": 50,
+  "max_events": 500,
+  "files": [
+    {
+      "path": "sai.v",
+      "content": "module sai (ck, reset, enable,lamp);\r\ninput ck,reset,enable;\r\noutput [6:0] lamp;\r\nreg [2:0] cnt;\r\nalways @(posedge ck or posedge reset) begin\r\n if (reset == 1)\r\n   cnt <= 1;\r\n   else if (enable == 1)\r\n      if (cnt == 6)\r\n          cnt <= 1;\r\n     else\r\n          cnt <= cnt+1;\r\nend\r\nfunction [6:0] dec;\r\ninput [2:0] in;\r\n  case (in)\r\n    1 : dec = 7'b0001000;\r\n    2 : dec = 7'b1000001;\r\n    3 : dec = 7'b0011100;\r\n    4 : dec = 7'b1010101;\r\n    5 : dec = 7'b1011101;\r\n    6 : dec = 7'b1110111;\r\n    default : dec = 7'b0000000;\r\n  endcase\r\nendfunction\r\nassign lamp = dec(cnt);\r\nendmodule"
+    },
+    {
+      "path": "saitest.v",
+      "content": "module sai_test; \r\n  reg ck, reset, enable; \r\n  wire [6:0] lamp; \r\n  parameter STEP = 1000; \r\n  sai sai( ck, reset, enable, lamp ); \r\ninitial ck=0;\r\nalways#(STEP/2)\r\n   ck = ~ck;\r\ninitial begin\r\n\t\treset = 0; enable = 0;\r\n   #STEP \treset = 1; \r\n   #STEP \treset = 0; \r\n   #STEP\tenable = 1;\r\n   #(STEP*5) \tenable = 0;\r\n   #STEP \tenable = 1;  \r\n   #(STEP*5) $finish;\r\nend \r\ninitial $monitor( $stime, \" reset= %b enable= %b saikoro= %h lamp=%b\", reset, enable, sai.cnt, lamp); \r\nendmodule "
+    }
+  ]
+}

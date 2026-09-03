@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hdl-sim"
-version = "0.5.8"
+version = "1.1.0"
 description = "A lightweight event-driven Verilog HDL simulator with VCD output."
 authors = ["Cursor Agent <cursor@example.com>"]
 readme = "README.md"
@@ -18,6 +18,7 @@ desktop = ["pywebview"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=9.0,<10.0"
+httpx = ">=0.27,<1.0"
 
 [build-system]
 requires = ["poetry-core>=1.9.0"]

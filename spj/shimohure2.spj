@@ -1,0 +1,34 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "shimohure2",
+  "top": "tb",
+  "until": 15000,
+  "max_events": 2000,
+  "files": [
+    {
+      "path": "lfsr8.v",
+      "content": "module lfsr8(CLK, RST, RAND_OUT);\r\n    input CLK;\r\n    input RST;\r\n    output [7:0] RAND_OUT;\r\n    reg [7:0] RAND_OUT;\r\n\r\n    always @(posedge CLK or posedge RST) begin\r\n        if (RST) RAND_OUT <= 8'b10101010;\r\n        else RAND_OUT <= {RAND_OUT[6:0], RAND_OUT[7] ^ RAND_OUT[5] ^ RAND_OUT[4] ^ RAND_OUT[3]};\r\n    end\r\nendmodule\r\n"
+    },
+    {
+      "path": "main_controller.v",
+      "content": "module main_controller(CLK, RST, START_BTN, STOP_BTN, RAND_VAL, TIMER_VAL, LED_TARGET, LED_FOUL, TIMER_EN, TIMER_RST);\r\n    input CLK, RST, START_BTN, STOP_BTN;\r\n    input [7:0] RAND_VAL;\r\n    input [15:0] TIMER_VAL;\r\n    output LED_TARGET, LED_FOUL, TIMER_EN, TIMER_RST;\r\n    reg LED_TARGET, LED_FOUL, TIMER_EN, TIMER_RST;\r\n    \r\n    reg [1:0] cur, nxt;\r\n    reg [7:0] wait_time;\r\n\r\n    parameter IDLE = 2'b00, WAIT_STATE = 2'b01, MEASURE = 2'b10, RESULT = 2'b11;\r\n\r\n    // ��ԑJ�� (P.116)\r\n    always @(posedge CLK or posedge RST) begin\r\n        if (RST) cur <= IDLE;\r\n        else cur <= nxt;\r\n    end\r\n\r\n    // ����Ԍ��� (P.117)\r\n    always @(cur or START_BTN or STOP_BTN or TIMER_VAL or wait_time) begin\r\n        nxt = cur;\r\n        case (cur)\r\n            IDLE: if (START_BTN) nxt = WAIT_STATE;\r\n            WAIT_STATE: begin\r\n                if (STOP_BTN) nxt = RESULT; \r\n                else if (TIMER_VAL[7:0] >= wait_time) nxt = MEASURE;\r\n            end\r\n            MEASURE: if (STOP_BTN) nxt = RESULT;\r\n            RESULT: if (START_BTN) nxt = IDLE;\r\n        endcase\r\n    end\r\n\r\n   // �o�͐��� (P.118)\r\n    always @(posedge CLK) begin\r\n        LED_TARGET <= 1'b0; \r\n        TIMER_EN <= 1'b0; \r\n        TIMER_RST <= 1'b0;\r\n\r\n        case (cur)\r\n            IDLE: begin \r\n                TIMER_RST <= 1'b1; \r\n                wait_time <= RAND_VAL; \r\n                LED_FOUL <= 1'b0; // IDLE�ɖ߂�������FOUL������\r\n            end\r\n            WAIT_STATE: begin\r\n                TIMER_EN <= 1'b1;\r\n                if (STOP_BTN) LED_FOUL <= 1'b1; // �t���C���O���ɓ_��\r\n                if (TIMER_VAL[7:0] >= wait_time) begin\r\n                    TIMER_RST <= 1'b1; // ���蒼�O�Ƀ^�C�}�[��0���Z�b�g\r\n                end\r\n            end\r\n            MEASURE: begin \r\n                LED_TARGET <= 1'b1; \r\n                TIMER_EN <= 1'b1; \r\n            end\r\n            RESULT: begin \r\n                if (LED_FOUL) LED_FOUL <= 1'b1; // �t���C���O��Ԃ����ʉ�ʂł��ێ�\r\n            end\r\n        endcase\r\n    end\r\nendmodule\r\n"
+    },
+    {
+      "path": "reflex_game_tp.v",
+      "content": "`timescale 1ns/1ns\r\nmodule reflex_game_tp;\r\n    reg CLK, RST, START_BTN, STOP_BTN;\r\n    wire LED_TARGET, LED_FOUL;\r\n    wire [6:0] SEG_OUT;\r\n\r\n    // �݌v������H���Ăяo��\r\n    reflex_game dut (CLK, RST, START_BTN, STOP_BTN, LED_TARGET, LED_FOUL, SEG_OUT);\r\n\r\n    // �N���b�N�̍쐬 (�e�L�X�gP.63�Q��)\r\n    always #5 CLK = ~CLK;\r\n\r\n    initial begin\r\n        CLK = 0; RST = 1; START_BTN = 0; STOP_BTN = 0;\r\n        #20 RST = 0;\r\n        #20 START_BTN = 1; // �����ŃX�^�[�g�{�^��������\r\n        #10 START_BTN = 0;\r\n        #500 STOP_BTN = 1; \r\n        #20 STOP_BTN = 0;\r\n        #3000 $finish;\r\n    end\r\nendmodule"
+    },
+    {
+      "path": "reflex_game.v",
+      "content": "module reflex_game(CLK, RST, START_BTN, STOP_BTN, LED_TARGET, LED_FOUL, SEG_OUT);\r\n    input CLK;\r\n    input RST;\r\n    input START_BTN;\r\n    input STOP_BTN;\r\n    output LED_TARGET;\r\n    output LED_FOUL;\r\n    output [6:0] SEG_OUT;\r\n\r\n    // �����z��\r\n    wire [7:0] random_val;\r\n    wire [15:0] timer_val;\r\n    wire timer_en, timer_rst;\r\n\r\n    // (1) LFSR�Ăяo��\r\n    lfsr8 u_lfsr (CLK, RST, random_val);\r\n\r\n    // (2) �^�C�}�[�Ăяo��\r\n    timer16 u_timer (CLK, timer_rst, timer_en, timer_val);\r\n\r\n    // (3) �f�R�[�_�Ăяo��\r\n    seg7_decoder u_seg (timer_val[3:0], SEG_OUT);\r\n\r\n    // (4) ���C���R���g���[���Ăяo��\r\n    main_controller u_ctrl (CLK, RST, START_BTN, STOP_BTN, random_val, timer_val, LED_TARGET, LED_FOUL, timer_en, timer_rst);\r\n\r\nendmodule\r\n"
+    },
+    {
+      "path": "seg7_decoder.v",
+      "content": "module seg7_decoder(DIN, SEG);\r\n    input [3:0] DIN;\r\n    output [6:0] SEG;\r\n    reg [6:0] SEG;\r\n\r\n    always @(DIN) begin\r\n        case (DIN)\r\n            4'h0: SEG = 7'b0111111;\r\n            4'h1: SEG = 7'b0000110;\r\n            4'h2: SEG = 7'b1011011;\r\n            4'h3: SEG = 7'b1001111;\r\n            4'h4: SEG = 7'b1100110;\r\n            4'h5: SEG = 7'b1101101;\r\n            4'h6: SEG = 7'b1111101;\r\n            4'h7: SEG = 7'b0100111;\r\n            4'h8: SEG = 7'b1111111;\r\n            4'h9: SEG = 7'b1101111;\r\n            default: SEG = 7'b0000000;\r\n        endcase\r\n    end\r\nendmodule\r\n"
+    },
+    {
+      "path": "timer16.v",
+      "content": "module timer16(CLK, RST, EN, COUNT);\r\n    input CLK;\r\n    input RST;\r\n    input EN;\r\n    output [15:0] COUNT;\r\n    reg [15:0] COUNT;\r\n\r\n    always @(posedge CLK) begin\r\n        if (RST) COUNT <= 16'd0;\r\n        else if (EN) COUNT <= COUNT + 16'd1;\r\n    end\r\nendmodule\r\n"
+    }
+  ]
+}

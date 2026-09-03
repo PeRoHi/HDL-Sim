@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "test-task_func",
+    "description": "Test case for tasks and functions."
+  },
+  "simulation": {
+    "top_module": "tb_math_utils",
+    "timescale": "1ns",
+    "defines": {}
+  },
+  "files": [
+    "../examples/test/task_func/math_utils.v",
+    "../examples/test/task_func/tb_math_utils.v"
+  ]
+}

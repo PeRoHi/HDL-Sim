@@ -56,3 +56,17 @@ def test_check_for_updates_no_update_when_current(monkeypatch) -> None:
 
     result = check_for_updates("0.5.0", force_refresh=True)
     assert result["update_available"] is False
+
+
+def test_check_for_updates_does_not_echo_oserror(monkeypatch) -> None:
+    def boom(*_a, **_k):
+        raise OSError("secret resolver failure at /etc/hosts")
+
+    monkeypatch.setattr("hdl_sim.web.update_checker._fetch_latest_release", boom)
+    monkeypatch.setattr("hdl_sim.web.update_checker._cache", {"at": 0.0, "payload": None})
+
+    result = check_for_updates("1.1.0", force_refresh=True)
+    assert result["ok"] is False
+    assert result["error"] == "update check failed"
+    assert "secret" not in str(result["error"])
+    assert "/etc/hosts" not in str(result)

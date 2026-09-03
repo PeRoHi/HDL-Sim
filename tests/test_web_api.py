@@ -100,15 +100,51 @@ def test_list_examples_includes_projects() -> None:
     assert "@project/counter" in ids
 
 
+def test_expr_to_str_part_select() -> None:
+    from hdl_sim.parser.ast import IntLiteral, PartSelect
+    from hdl_sim.web.app import _expr_to_str
+
+    expr = PartSelect(
+        signal="timer_val",
+        msb=IntLiteral(value=3),
+        lsb=IntLiteral(value=0),
+    )
+    assert _expr_to_str(expr) == "timer_val[3:0]"
+
+
+def test_elaborate_reflex_slice_port_in_overview() -> None:
+    """Regression: design_overview must stringify timer_val[3:0] port connections."""
+    from hdl_sim.parser.parser import parse_module
+    from hdl_sim.web.app import design_overview
+
+    mod = parse_module(
+        """
+        module top;
+          wire [15:0] timer_val;
+          wire [6:0] seg;
+          seg7_decoder u_seg (timer_val[3:0], seg);
+        endmodule
+        """
+    )
+    from hdl_sim.parser.ast import Design
+
+    overview = design_overview(Design(modules=(mod,)))
+    u_seg = overview["modules"][0]["instances"][0]
+    signals = [c["signal"] for c in u_seg["connections"]]
+    assert "timer_val[3:0]" in signals
+
+
 def test_ui_info_reports_ide_layout() -> None:
     app = create_app()
     handler = next(
         r for r in app.routes if getattr(r, "path", None) == "/api/ui-info"
     ).endpoint
     data = handler()
+    from hdl_sim import __version__
+
     assert data["ide_layout"] is True
-    assert data["version"] == "0.5.8"
-    assert data["version_label"] == "Ver 0.5.8"
+    assert data["version"] == __version__
+    assert data["version_label"] == f"Ver {__version__}"
     assert "release_url" in data
     assert "spj_dir" in data
 
@@ -123,8 +159,8 @@ def test_update_check_endpoint(monkeypatch) -> None:
         "hdl_sim.web.app.check_for_updates",
         lambda *_a, **_k: {
             "ok": True,
-            "current_version": "0.5.8",
-            "latest_version": "0.6.0",
+            "current_version": "1.0.0",
+            "latest_version": "1.0.0",
             "update_available": True,
             "release_url": "https://example.com/release",
             "download_url": "https://example.com/setup.exe",
@@ -132,7 +168,7 @@ def test_update_check_endpoint(monkeypatch) -> None:
     )
     data = handler(refresh=True)
     assert data["update_available"] is True
-    assert data["latest_version"] == "0.6.0"
+    assert data["latest_version"] == "1.0.0"
 
 
 def test_elaborate_syntax_error_is_structured_not_a_traceback() -> None:
@@ -152,14 +188,14 @@ def test_elaborate_syntax_error_is_structured_not_a_traceback() -> None:
     req = ElaborateRequest(files=[SourceFile(path="design.v", content=src)])
     data = handler(req)
     assert data["ok"] is False
-    assert data["kind"] == "syntax"
-    assert data["file"] == "design.v"
-    # Line 5 is "input clk" in the *original* source; a naive preprocessor
-    # that strips the leading comment/timescale lines without preserving
-    # line count would misreport this as line 2 or 3.
-    assert data["line"] == 5
+    assert data["error_kind"] == "syntax"
+    assert data["error_file"] == "design.v"
+    # Line 5 is "input clk" in the *original* source; a preprocessor that
+    # strips the leading comment/timescale lines without preserving line
+    # count would misreport this as line 2 or 3.
+    assert data["error_line"] == 5
     assert "trace" not in data
-    assert "lark" not in data["message"].lower()
+    assert "lark" not in data["error"].lower()
 
 
 def test_elaborate_duplicate_module_error_hides_temp_path() -> None:
@@ -175,9 +211,11 @@ def test_elaborate_duplicate_module_error_hides_temp_path() -> None:
     )
     data = handler(req)
     assert data["ok"] is False
-    assert data["kind"] == "design"
-    assert data["message"] == "duplicate module definition: dup in b.v"
+    assert data["error_kind"] == "design"
+    assert "a.v" in data["error"] and "b.v" in data["error"]
     assert "trace" not in data
+    # Must not leak the scratch temp directory the files were written to.
+    assert "hdl_sim_ui_" not in data["error"]
 
 
 def test_spj_api_roundtrip() -> None:

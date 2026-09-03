@@ -34,13 +34,16 @@ from hdl_sim.parser.ast import (
     FunctionDef,
     FunctionInput,
     TaskEnable,
+    WaitStmt,
     TaskPortKind,
     TaskPort,
     TaskDef,
+    IdentDecl,
     IdentRef,
     IfStmt,
     InitialBlock,
     IntLiteral,
+    RealLiteral,
     Lvalue,
     Module,
     ModuleInstance,
@@ -63,6 +66,7 @@ from hdl_sim.parser.ast import (
     GenerateFor,
     GenerateBlock,
     ConcatExpr,
+    ReplicationExpr,
     UnaryExpr,
     WhileStmt,
 )
@@ -146,32 +150,37 @@ def _fold_binary(op: str, children: tuple[Expr, ...]) -> Expr:
     return result
 
 
-SelectInfo = tuple[str, Expr, Expr | None] | None
+SelectStep = tuple[str, Expr, Expr | None]
 
 
-def _select_info(select: Any | None) -> SelectInfo:
-    if select is None:
-        return None
-    return select
-
-
-def _lvalue_from_signal(name: str, select: SelectInfo) -> Lvalue:
-    if select is None:
+def _lvalue_from_selects(name: str, selects: list[SelectStep]) -> Lvalue:
+    if not selects:
         return Lvalue(base=name)
-    kind, first, second = select
-    if kind == "bit":
+    if len(selects) == 1:
+        kind, first, second = selects[0]
+        if kind == "part":
+            return Lvalue(base=name, msb=first, lsb=second)
         return Lvalue(base=name, bit=first)
-    return Lvalue(base=name, msb=first, lsb=second)
+    word = selects[0][1]
+    kind, first, second = selects[1]
+    if kind == "part":
+        return Lvalue(base=name, word=word, msb=first, lsb=second)
+    return Lvalue(base=name, word=word, bit=first)
 
 
-def _expr_from_signal(name: str, select: SelectInfo) -> Expr:
-    if select is None:
+def _expr_from_selects(name: str, selects: list[SelectStep]) -> Expr:
+    if not selects:
         return IdentRef(name)
-    kind, first, second = select
-    if kind == "bit":
+    if len(selects) == 1:
+        kind, first, second = selects[0]
+        if kind == "part":
+            return PartSelect(signal=name, msb=first, lsb=second)
         return BitSelect(signal=name, index=first)
-    assert second is not None
-    return PartSelect(signal=name, msb=first, lsb=second)
+    word = selects[0][1]
+    kind, first, second = selects[1]
+    if kind == "part":
+        return PartSelect(signal=name, msb=first, lsb=second, word=word)
+    return BitSelect(signal=name, index=first, word=word)
 
 
 class VerilogTransformer(Transformer):
@@ -181,6 +190,14 @@ class VerilogTransformer(Transformer):
         return list(children)
 
     def _resolve_expr(self, value: Any) -> Any:
+        if isinstance(value, list):
+            if len(value) == 1:
+                return self._resolve_expr(value[0])
+            if not value:
+                msg = "empty expression list"
+                raise ValueError(msg)
+            msg = "ambiguous expression list"
+            raise ValueError(msg)
         if isinstance(value, Tree):
             return self.transform(value)
         return value
@@ -261,10 +278,8 @@ class VerilogTransformer(Transformer):
                     ports.append(candidate)
                 elif isinstance(candidate, ParameterDecl):
                     parameters.append(candidate)
-                elif isinstance(candidate, (Declaration, tuple)):
-                    self._append_declaration(declarations, candidate)
-                elif isinstance(candidate, ContinuousAssign):
-                    continuous_assigns.append(candidate)
+                elif isinstance(candidate, (Declaration, tuple, ContinuousAssign)):
+                    self._distribute_decl_or_assign(declarations, continuous_assigns, candidate)
                 elif isinstance(candidate, InitialBlock):
                     initial_blocks.append(candidate)
                 elif isinstance(candidate, AlwaysBlock):
@@ -327,12 +342,46 @@ class VerilogTransformer(Transformer):
     def port_name(self, name: Token) -> Port:
         return Port(direction=PortDirection.IMPLICIT, name=str(name))
 
+    @v_args(inline=True)
+    def port_type(self, kind: Token) -> Token:
+        return kind
+
+    def _port_net_kind(self, value: Any) -> DeclKind | None:
+        if isinstance(value, Tree) and str(value.data) == "port_type" and value.children:
+            value = value.children[0]
+        if isinstance(value, Token):
+            text = str(value).lower()
+        elif isinstance(value, str):
+            text = value.lower()
+        else:
+            return None
+        if text == "wire":
+            return DeclKind.WIRE
+        if text == "reg":
+            return DeclKind.REG
+        return None
+
     def _port_decl_with_dir(self, port_dir: PortDirection, *rest: Any) -> Port:
-        if len(rest) == 2:
-            value_range, name = rest
-            return Port(direction=port_dir, name=str(name), range=value_range)
-        (name,) = rest
-        return Port(direction=port_dir, name=str(name))
+        rest_list = [r for r in rest if not isinstance(r, Token) or str(r.type) != "SIGNED"]
+        is_signed = any(isinstance(r, Token) and str(r.type) == "SIGNED" for r in rest)
+        net_kind = None
+        if rest_list and self._port_net_kind(rest_list[0]) is not None:
+            net_kind = self._port_net_kind(rest_list[0])
+            rest_list = rest_list[1:]
+        if rest_list and rest_list[0] is True:
+            is_signed = True
+            rest_list = rest_list[1:]
+        if len(rest_list) == 2:
+            value_range, name = rest_list
+            return Port(
+                direction=port_dir,
+                name=str(name),
+                range=value_range,
+                net_kind=net_kind,
+                is_signed=is_signed,
+            )
+        (name,) = rest_list
+        return Port(direction=port_dir, name=str(name), net_kind=net_kind, is_signed=is_signed)
 
     def port_decls_body(self, items: list[Any]) -> list[Port]:
         dir_text = str(items[0]).lower()
@@ -342,14 +391,28 @@ class VerilogTransformer(Transformer):
             port_dir = PortDirection.INOUT
         else:
             port_dir = PortDirection.OUTPUT
-        if len(items) == 2:
-            names = items[1]
-            value_range = None
-        else:
-            value_range = items[1]
-            names = items[2]
+        idx = 1
+        net_kind = None
+        if idx < len(items) and self._port_net_kind(items[idx]) is not None:
+            net_kind = self._port_net_kind(items[idx])
+            idx += 1
+        is_signed = False
+        if idx < len(items) and items[idx] is True:
+            is_signed = True
+            idx += 1
+        value_range = None
+        if idx < len(items) and not isinstance(items[idx], list):
+            value_range = items[idx]
+            idx += 1
+        names = items[idx]
         return [
-            self._port_decl_with_dir(port_dir, value_range, name)
+            Port(
+                direction=port_dir,
+                name=str(name),
+                range=value_range,
+                net_kind=net_kind,
+                is_signed=is_signed,
+            )
             for name in names
         ]
 
@@ -398,12 +461,19 @@ class VerilogTransformer(Transformer):
     def parameter_list(self, params: list[ParameterDecl]) -> list[ParameterDecl]:
         return params
 
-    @v_args(inline=True)
-    def parameter_assign(self, name: Token, expr: Expr) -> ParameterDecl:
-        return ParameterDecl(name=str(name), expr=expr)
+    def parameter_assign(self, items: list[Any]) -> ParameterDecl:
+        return self.parameter_body(items)
 
-    @v_args(inline=True)
-    def parameter_decl(self, name: Token, expr: Expr) -> ParameterDecl:
+    def parameter_decl(self, body: ParameterDecl) -> ParameterDecl:
+        return body
+
+    def parameter_body(self, items: list[Any]) -> ParameterDecl:
+        expr = items[-1]
+        name = items[-2]
+        if not isinstance(name, Token):
+            raise TypeError(f"expected parameter name token, got {type(name)!r}")
+        if not isinstance(expr, Expr):
+            raise TypeError(f"expected parameter expr, got {type(expr)!r}")
         return ParameterDecl(name=str(name), expr=expr)
 
     def parameter_decl_stmt_multi(self, items: list[Any]) -> list[ParameterDecl]:
@@ -432,44 +502,110 @@ class VerilogTransformer(Transformer):
     def positional_port_connection(self, expr: Expr) -> PortConnection:
         return PortConnection(port="", expr=expr)
 
-    def _append_declaration(self, bucket: list[Declaration], item: Any) -> None:
-        if isinstance(item, Declaration):
-            bucket.append(item)
-        elif isinstance(item, tuple):
-            for sub in item:
-                if isinstance(sub, Declaration):
-                    bucket.append(sub)
+    def _distribute_decl_or_assign(
+        self,
+        declarations: list[Declaration],
+        continuous_assigns: list[ContinuousAssign] | None,
+        item: Any,
+    ) -> None:
+        for candidate in _flatten(item if isinstance(item, list) else [item]):
+            if isinstance(candidate, Declaration):
+                declarations.append(candidate)
+            elif isinstance(candidate, tuple):
+                for sub in candidate:
+                    if isinstance(sub, Declaration):
+                        declarations.append(sub)
+                    elif isinstance(sub, ContinuousAssign):
+                        if continuous_assigns is not None:
+                            continuous_assigns.append(sub)
+            elif isinstance(candidate, ContinuousAssign):
+                if continuous_assigns is not None:
+                    continuous_assigns.append(candidate)
 
     @v_args(inline=True)
     def ident_list(self, first: Token, *rest: Token) -> list[str]:
         return [str(first), *(str(r) for r in rest)]
+
+    def ident_decl_list(self, items: list[IdentDecl]) -> list[IdentDecl]:
+        return items
+
+    @v_args(inline=True)
+    def ident_decl(self, name: Token, unpacked: ValueRange | None = None) -> IdentDecl:
+        return IdentDecl(name=str(name), unpacked_range=unpacked)
+
+    @v_args(inline=True)
+    def unpacked_dimension(self, msb: Expr, lsb: Expr) -> ValueRange:
+        return ValueRange(msb=msb, lsb=lsb)
+
+    @v_args(inline=True)
+    def signed_opt(self, _signed: Token | None = None) -> bool:
+        return _signed is not None
+
+    def _parse_decl_head(self, children: list[Any]) -> tuple[bool, ValueRange | None, Any]:
+        filtered = [
+            c
+            for c in children
+            if not isinstance(c, Token) or str(c.type) not in {"REG", "WIRE", "INTEGER", "REAL"}
+        ]
+        is_signed = False
+        idx = 0
+        if idx < len(filtered) and filtered[idx] is True:
+            is_signed = True
+            idx += 1
+        range_node = None
+        if idx < len(filtered) and isinstance(filtered[idx], ValueRange):
+            range_node = filtered[idx]
+            idx += 1
+        rest = filtered[idx:]
+        return is_signed, range_node, rest[0] if rest else None
+
+    def _decls_from_ident_decls(
+        self,
+        kind: DeclKind,
+        ident_decls: list[IdentDecl],
+        range_node: ValueRange | None,
+        *,
+        is_signed: bool = False,
+    ) -> tuple[Declaration, ...]:
+        decls: list[Declaration] = []
+        for item in ident_decls:
+            decls.append(
+                Declaration(
+                    kind=kind,
+                    name=item.name,
+                    range=range_node,
+                    unpacked_range=item.unpacked_range,
+                    is_signed=is_signed,
+                )
+            )
+        return tuple(decls)
 
     def _decls_from_names(
         self,
         kind: DeclKind,
         names: list[str],
         range_node: ValueRange | None = None,
+        *,
+        is_signed: bool = False,
     ) -> tuple[Declaration, ...]:
-        decls: list[Declaration] = []
-        for name in names:
-            if range_node is not None:
-                decls.append(Declaration(kind=kind, name=name, range=range_node))
-            else:
-                decls.append(Declaration(kind=kind, name=name))
-        return tuple(decls)
+        return self._decls_from_ident_decls(
+            kind,
+            [IdentDecl(name=name) for name in names],
+            range_node,
+            is_signed=is_signed,
+        )
 
     def _multi_decl(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ...]:
-        filtered = [c for c in children if not isinstance(c, Token)]
-        if not filtered:
+        is_signed, range_node, payload = self._parse_decl_head(children)
+        if kind is DeclKind.INTEGER:
+            is_signed = True
+        if payload is None:
             return ()
-        if len(filtered) == 1:
-            names = filtered[0]
-            return self._decls_from_names(kind, names, None)
-        range_node, names = filtered[0], filtered[1]
-        if not isinstance(range_node, ValueRange):
-            names = filtered[0]
-            range_node = None
-        return self._decls_from_names(kind, names, range_node)
+        if isinstance(payload, list) and payload and isinstance(payload[0], IdentDecl):
+            return self._decls_from_ident_decls(kind, payload, range_node, is_signed=is_signed)
+        if isinstance(payload, list):
+            return self._decls_from_names(kind, payload, range_node, is_signed=is_signed)
+        return ()
 
     def make_reg_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
         return self._multi_decl(DeclKind.REG, children)
@@ -480,14 +616,24 @@ class VerilogTransformer(Transformer):
     def make_integer_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
         return self._multi_decl(DeclKind.INTEGER, children)
 
+    def make_real_decls(self, children: list[Any]) -> tuple[Declaration, ...]:
+        return self._multi_decl(DeclKind.REAL, children)
+
     def _decl_assign(self, kind: DeclKind, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
-        filtered = [c for c in children if not isinstance(c, Token) or str(c) not in {"reg", "wire", "integer"}]
-        range_node = None
-        if len(filtered) == 3:
-            range_node, name, expr = filtered
+        is_signed, range_node, rest = self._parse_decl_head(children)
+        if not rest:
+            msg = "invalid declaration with assignment"
+            raise ValueError(msg)
+        if isinstance(rest, list) and len(rest) >= 2:
+            name, expr = rest[0], rest[1]
         else:
-            name, expr = filtered[-2], filtered[-1]
-        decl = Declaration(kind=kind, name=str(name), range=range_node if isinstance(range_node, ValueRange) else None)
+            name, expr = rest, children[-1]
+        decl = Declaration(
+            kind=kind,
+            name=str(name),
+            range=range_node,
+            is_signed=is_signed,
+        )
         return (decl, ContinuousAssign(target=str(name), expr=expr))
 
     def make_reg_decl_assign(self, children: list[Any]) -> tuple[Declaration, ContinuousAssign]:
@@ -500,9 +646,16 @@ class VerilogTransformer(Transformer):
         return self._decl_assign(DeclKind.INTEGER, children)
 
     @v_args(inline=True)
+    def genvar_decl(self, name: Token) -> Declaration:
+        """Handle genvar declarations as integer-typed variables."""
+        return Declaration(kind=DeclKind.INTEGER, name=str(name))
+
+    @v_args(inline=True)
     def declaration(self, *rest: Any) -> Declaration | tuple[Declaration, ...]:
         """Legacy fallback if a single declaration slips through."""
         if len(rest) == 1 and isinstance(rest[0], tuple):
+            return rest[0]
+        if len(rest) == 1 and isinstance(rest[0], Declaration):
             return rest[0]
         if len(rest) == 3:
             decl_type, range_node, name = rest
@@ -636,16 +789,22 @@ class VerilogTransformer(Transformer):
         return StringLiteral(value=raw[1:-1])
 
     @v_args(inline=True)
-    def signal_ref(self, name: Token, select: SelectInfo = None) -> tuple[str, SelectInfo]:
-        return (str(name), _select_info(select))
+    def string_expr(self, lit: StringLiteral) -> StringLiteral:
+        return lit
+
+    def signal_ref(self, children: list[Any]) -> tuple[str, list[SelectStep]]:
+        args = self._child_args(children)
+        name = str(args[0])
+        selects = [item for item in args[1:] if isinstance(item, tuple)]
+        return (name, selects)
 
     @v_args(inline=True)
-    def to_lvalue(self, ref: tuple[str, SelectInfo]) -> Lvalue:
-        return _lvalue_from_signal(ref[0], ref[1])
+    def to_lvalue(self, ref: tuple[str, list[SelectStep]]) -> Lvalue:
+        return _lvalue_from_selects(ref[0], ref[1])
 
     @v_args(inline=True)
-    def signal_expr(self, ref: tuple[str, SelectInfo]) -> Expr:
-        return _expr_from_signal(ref[0], ref[1])
+    def signal_expr(self, ref: tuple[str, list[SelectStep]]) -> Expr:
+        return _expr_from_selects(ref[0], ref[1])
 
     @v_args(inline=True)
     def hier_ident(self, first: Token, *rest: Token) -> IdentRef:
@@ -657,20 +816,32 @@ class VerilogTransformer(Transformer):
         return IdentRef(name=str(token))
 
     @v_args(inline=True)
-    def bit_sel(self, index: Expr) -> SelectInfo:
+    def bit_sel(self, index: Expr) -> SelectStep:
         return ("bit", index, None)
 
     @v_args(inline=True)
-    def part_sel(self, msb: Expr, lsb: Expr) -> SelectInfo:
+    def part_sel(self, msb: Expr, lsb: Expr) -> SelectStep:
         return ("part", msb, lsb)
 
     @v_args(inline=True)
-    def blocking_assign(self, target: Lvalue, expr: Expr) -> BlockingAssign:
-        return BlockingAssign(target=target, expr=expr)
+    def signed_cast(self, operand: Expr) -> UnaryExpr:
+        return UnaryExpr(op="$signed", operand=operand)
 
     @v_args(inline=True)
-    def nonblocking_assign(self, target: Lvalue, expr: Expr) -> NonBlockingAssign:
-        return NonBlockingAssign(target=target, expr=expr)
+    def unsigned_cast(self, operand: Expr) -> UnaryExpr:
+        return UnaryExpr(op="$unsigned", operand=operand)
+
+    @v_args(inline=True)
+    def blocking_assign(self, target: Lvalue, expr: Any) -> BlockingAssign:
+        return BlockingAssign(target=target, expr=self._resolve_expr(expr))
+
+    @v_args(inline=True)
+    def nonblocking_assign(self, target: Lvalue, expr: Any) -> NonBlockingAssign:
+        return NonBlockingAssign(target=target, expr=self._resolve_expr(expr))
+
+    @v_args(inline=True)
+    def empty_stmt(self) -> Block:
+        return Block(statements=())
 
     @v_args(inline=True)
     def delay_control(self, delay: Expr, body: Stmt) -> DelayControl:
@@ -793,8 +964,8 @@ class VerilogTransformer(Transformer):
         for item in flat[1:]:
             if isinstance(item, TaskPort):
                 ports.append(item)
-            elif isinstance(item, (Declaration, tuple)):
-                self._append_declaration(declarations, item)
+            elif isinstance(item, (Declaration, tuple, ContinuousAssign)):
+                self._distribute_decl_or_assign(declarations, None, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):
@@ -831,6 +1002,10 @@ class VerilogTransformer(Transformer):
         (name,) = rest
         return TaskPort(kind=TaskPortKind.OUTPUT, name=str(name))
 
+    def wait_stmt(self, items: list[Any]) -> WaitStmt:
+        condition = items[-1]
+        return WaitStmt(condition=condition)
+
     @v_args(inline=True)
     def task_call(self, name: Token, *args: Expr) -> TaskEnable:
         return TaskEnable(name=str(name), args=tuple(args))
@@ -855,8 +1030,8 @@ class VerilogTransformer(Transformer):
         for item in flat[index:]:
             if isinstance(item, FunctionInput):
                 inputs.append(item)
-            elif isinstance(item, (Declaration, tuple)):
-                self._append_declaration(declarations, item)
+            elif isinstance(item, (Declaration, tuple, ContinuousAssign)):
+                self._distribute_decl_or_assign(declarations, None, item)
             elif isinstance(item, Block):
                 statements.extend(item.statements)
             elif isinstance(item, Stmt):
@@ -890,8 +1065,20 @@ class VerilogTransformer(Transformer):
     def func_call(self, name: Token, *args: Expr) -> FunctionCall:
         return FunctionCall(name=str(name), args=tuple(args))
 
-    def concat_expr(self, children: list[Any]) -> ConcatExpr:
-        return ConcatExpr(parts=tuple(self._child_args(tuple(children))))
+    def concat_expr(self, body: Expr) -> Expr:
+        return body
+
+    def concat_single(self, value: Any) -> ConcatExpr:
+        expr = self._resolve_expr(value)
+        return ConcatExpr(parts=(expr,))
+
+    def concat_list(self, *exprs: Any) -> ConcatExpr:
+        flat = self._child_args(exprs)
+        return ConcatExpr(parts=tuple(self._resolve_expr(e) for e in flat))
+
+    @v_args(inline=True)
+    def replication(self, count: Expr, inner: Expr) -> ReplicationExpr:
+        return ReplicationExpr(count=count, expr=inner)
 
     @v_args(inline=True)
     def for_init(self, target: Lvalue, expr: Expr) -> BlockingAssign:
@@ -972,11 +1159,13 @@ class VerilogTransformer(Transformer):
     def ev_expr(self, expr: Expr) -> Expr:
         return expr
 
-    def event_control(self, *events: Expr, body: Stmt | None = None) -> EventControl:
-        if body is None:
-            *event_nodes, body = events
-            return EventControl(events=tuple(event_nodes), body=body)
-        return EventControl(events=tuple(events), body=body)
+    @v_args(inline=True)
+    def event_control(self, *children: Any) -> EventControl:
+        body = children[-1]
+        if isinstance(body, Tree):
+            body = self.transform(body)
+        events = tuple(children[:-1])
+        return EventControl(events=events, body=body)
 
     def ternary_expr(self, *children: Any) -> Expr:
         children = self._child_args(children)
@@ -1063,7 +1252,12 @@ class VerilogTransformer(Transformer):
         while index < len(resolved):
             op = str(resolved[index])
             if op.startswith("OP_"):
-                op = "<<" if "SHL" in op else ">>"
+                if "ASHR" in op:
+                    op = ">>>"
+                elif "SHL" in op:
+                    op = "<<"
+                else:
+                    op = ">>"
             right = resolved[index + 1]
             result = BinaryExpr(op, result, right)
             index += 2
@@ -1115,6 +1309,10 @@ class VerilogTransformer(Transformer):
     @v_args(inline=True)
     def NUMBER(self, token: Token) -> IntLiteral:
         return IntLiteral(value=_int(token))
+
+    @v_args(inline=True)
+    def REAL_NUMBER(self, token: Token) -> RealLiteral:
+        return RealLiteral(value=float(str(token)))
 
     @v_args(inline=True)
     def sized_number(self, token: Token) -> IntLiteral:

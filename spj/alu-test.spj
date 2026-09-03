@@ -1,0 +1,32 @@
+{
+  "format": "hdl-sim-project",
+  "version": 1,
+  "name": "alu-test",
+  "top": "tb_debug_alu",
+  "until": 15000,
+  "max_events": 2000,
+  "files": [
+    {
+      "path": "debug_alu.v",
+      "content": "module debug_alu (\n    input wire [3:0] a,\n    input wire [3:0] b,\n    input wire [2:0] op,\n    output reg [3:0] out,\n    output reg zero\n);\n    always @(*) begin\n        case (op)\n            3'b000: out = a + b;\n            3'b001: out = a - b;\n            3'b010: out = a & b;\n            3'b011: out = a | b;\n            3'b100: out = a ^ b;\n            3'b101: out = ~a;\n            3'b110: out = (a == b) ? 4'b0001 : 4'b0000;\n            default: out = 4'b0000;\n        endcase\n        zero = (out == 4'b0000);\n    end\nendmodule\n"
+    },
+    {
+      "path": "tb_debug_alu.v",
+      "content": "`timescale 1ns/1ns\nmodule tb_debug_alu;\n    reg [3:0] a, b;\n    reg [2:0] op;\n    wire [3:0] out;\n    wire zero;\n\n    debug_alu dut (\n        .a(a), .b(b), .op(op),\n        .out(out), .zero(zero)\n    );\n\n    initial begin\n        a = 4'b0011; b = 4'b0101;\n        \n        op = 3'b000; #10; // ADD: 3 + 5 = 8\n        op = 3'b001; #10; // SUB: 3 - 5 = -2 (1110)\n        op = 3'b010; #10; // AND: 0011 & 0101 = 0001\n        op = 3'b011; #10; // OR:  0011 | 0101 = 0111\n        op = 3'b100; #10; // XOR: 0011 ^ 0101 = 0110\n        op = 3'b101; #10; // NOT: ~0011 = 1100\n        op = 3'b110; #10; // EQ:  3 == 5 -> 0\n        \n        a = 4'b0111; b = 4'b0111;\n        op = 3'b110; #10; // EQ: 7 == 7 -> 1\n        op = 3'b001; #10; // SUB: 7 - 7 = 0 (zero flag should be 1)\n        \n        #10 $finish;\n    end\nendmodule\n"
+    }
+  ],
+  "wave": {
+    "selection": [],
+    "order": [
+      "a",
+      "b",
+      "op",
+      "out",
+      "zero"
+    ],
+    "filePaths": [
+      "debug_alu.v",
+      "tb_debug_alu.v"
+    ]
+  }
+}

@@ -7,11 +7,13 @@ import io
 import json
 import tempfile
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel, Field
@@ -20,16 +22,23 @@ from hdl_sim import __version__
 from hdl_sim.engine.elaborator import elaborate
 from hdl_sim.engine.simulator import Simulator
 from hdl_sim.parser.ast import Design, Module, PortDirection
-from hdl_sim.parser.errors import HdlSimSyntaxError
 from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
-from hdl_sim.web.paths import examples_dir, ui_dir
+from hdl_sim.web.local_http import local_api_rejection, loopback_origins
+from hdl_sim.web.path_safety import (
+    atomic_write_text,
+    jailed_regular_file,
+    join_under,
+    normalize_project_stem,
+    normalize_relpath,
+)
+from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
 from hdl_sim.web import projects as project_store
 from hdl_sim.web import spj_store
 from hdl_sim.web.update_checker import check_for_updates
 
-UI_BUILD = "0.5.8"
+UI_BUILD = "1.1.0"
 _NO_CACHE_SUFFIXES = (".js", ".css", ".html", ".map")
 
 # Multi-file projects (Silos-style: DUT + TB + lib in one workspace)
@@ -58,11 +67,39 @@ EXAMPLE_TOPS: dict[str, str] = {
     "hierarchy.v": "tb",
 }
 
+_shared_waveform_state: dict[str, Any] = {}
+
+class WaveformSyncRequest(BaseModel):
+    waveform: dict[str, Any]
+    filteredWaveform: dict[str, Any] | None = None
+    selection: list[str] = Field(default_factory=list)
+    order: list[str] = Field(default_factory=list)
+
 
 class NoCacheStaticFiles(StaticFiles):
-    """Serve UI assets without aggressive browser caching (dev-friendly)."""
+    """Serve UI assets without aggressive browser caching (dev-friendly).
+
+    Paths stay inside the UI directory. Symlinks are not followed.
+    """
+
+    def __init__(self, directory, **kwargs):
+        kwargs.setdefault("html", False)
+        try:
+            super().__init__(directory=directory, follow_symlink=False, **kwargs)
+        except TypeError:
+            super().__init__(directory=directory, **kwargs)
 
     async def get_response(self, path: str, scope: Scope):
+        from starlette.responses import PlainTextResponse
+
+        try:
+            if path and path not in {".", "./"}:
+                safe = normalize_relpath(path)
+                lexical = Path(self.directory) / Path(safe)
+                if lexical.is_symlink():
+                    return PlainTextResponse("Not Found", status_code=404)
+        except ValueError:
+            return PlainTextResponse("Not Found", status_code=404)
         response = await super().get_response(path, scope)
         if path.endswith(_NO_CACHE_SUFFIXES):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -77,6 +114,10 @@ EXAMPLES_DIR = examples_dir()
 class SourceFile(BaseModel):
     path: str = Field(description="Virtual path, e.g. tb.v")
     content: str
+    include_only: bool = Field(
+        default=False,
+        description="Write to workspace for `include` but do not parse as a top-level module file",
+    )
 
 
 class ProjectCreateRequest(BaseModel):
@@ -89,6 +130,7 @@ class ProjectSaveRequest(BaseModel):
     files: list[SourceFile]
     top: str | None = None
     label: str | None = None
+    wave: dict[str, Any] | None = None
 
 
 class ElaborateRequest(BaseModel):
@@ -99,9 +141,36 @@ class ElaborateRequest(BaseModel):
 class SimulateRequest(BaseModel):
     files: list[SourceFile]
     top: str | None = None
-    until: int | None = 50
-    max_events: int | None = 500
+    until: int | None = 15000
+    max_events: int | None = 2000
     generate_vcd: bool = True
+
+
+def resolve_top_module(design: Design, top: str | None) -> str:
+    """Pick elaboration top; ignore stale UI values like ``tb`` when absent from design."""
+
+    names = {m.name for m in design.modules}
+    requested = (top or "").strip()
+    if requested and requested in names:
+        return requested
+
+    for suffix in ("_tp", "_tb", "_test", "_testbench"):
+        for module in design.modules:
+            if module.name.endswith(suffix):
+                return module.name
+
+    for candidate in ("stimulus", "tb", "testbench", "top"):
+        if candidate in names:
+            return candidate
+
+    by_instances = sorted(design.modules, key=lambda m: len(m.instances), reverse=True)
+    if by_instances and by_instances[0].instances:
+        return by_instances[0].name
+
+    try:
+        return design.top.name
+    except ValueError:
+        return design.modules[-1].name
 
 
 def _port_dir_name(direction: PortDirection) -> str:
@@ -144,17 +213,22 @@ def _module_to_dict(module: Module) -> dict[str, Any]:
 
 
 def _expr_to_str(expr: Any) -> str:
-    from hdl_sim.parser.ast import BitSelect, IdentRef, PartSelect
+    from hdl_sim.parser.ast import BitSelect, IdentRef, IntLiteral, PartSelect
 
     if isinstance(expr, IdentRef):
         return expr.name
+    if isinstance(expr, IntLiteral):
+        return str(expr.value)
     if isinstance(expr, BitSelect):
-        return f"{_expr_to_str(expr.base)}[{_expr_to_str(expr.index)}]"
+        base = expr.signal
+        if expr.word is not None:
+            base = f"{base}[{_expr_to_str(expr.word)}]"
+        return f"{base}[{_expr_to_str(expr.index)}]"
     if isinstance(expr, PartSelect):
-        return (
-            f"{_expr_to_str(expr.base)}[{_expr_to_str(expr.msb)}:"
-            f"{_expr_to_str(expr.lsb)}]"
-        )
+        base = expr.signal
+        if expr.word is not None:
+            base = f"{base}[{_expr_to_str(expr.word)}]"
+        return f"{base}[{_expr_to_str(expr.msb)}:{_expr_to_str(expr.lsb)}]"
     return str(expr)
 
 
@@ -183,6 +257,53 @@ def nets_overview(sim: Simulator) -> list[dict[str, Any]]:
     return rows
 
 
+def _signal_path(path_prefix: str, name: str) -> str:
+    return f"{path_prefix}{name}" if path_prefix else name
+
+
+def suggested_sim_until(design: Design, *, top: str | None) -> int | None:
+    """Heuristic default simulation stop time from top-level parameters."""
+
+    from hdl_sim.engine.params import ParameterEvaluator
+
+    modules = {m.name: m for m in design.modules}
+    top_name = top or design.modules[0].name
+    module = modules.get(top_name)
+    if module is None:
+        return None
+    evaluator = ParameterEvaluator()
+    try:
+        evaluator.resolve_module_params(module.parameters)
+    except Exception:
+        return None
+    step = evaluator.snapshot().get("STEP")
+    if step is not None and step > 0:
+        return step * 15
+    return None
+
+
+def simulation_time_hints(
+    design: Design,
+    *,
+    top: str | None,
+    stop_time: int,
+    until: int | None,
+) -> list[str]:
+    """User-facing hints when until is shorter than bench timing."""
+
+    suggested = suggested_sim_until(design, top=top)
+    if suggested is None or until is None:
+        return []
+    if until >= suggested:
+        return []
+    if stop_time < until:
+        return []
+    return [
+        f"Until={until} は短すぎる可能性があります（STEP ベンチなら Until≈{suggested} 以上を推奨）。"
+        " クロック・リセットが動く前に停止していると波形がフラットに見えます。",
+    ]
+
+
 def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     """Build a simple module/instance tree for the sidebar."""
 
@@ -191,7 +312,12 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     if top_name not in modules:
         return {"name": top_name, "kind": "module", "children": []}
 
-    def build(module_name: str, instance_label: str | None) -> dict[str, Any]:
+    def build(
+        module_name: str,
+        instance_label: str | None,
+        *,
+        path_prefix: str = "",
+    ) -> dict[str, Any]:
         module = modules[module_name]
         label = instance_label or module_name
         children: list[dict[str, Any]] = []
@@ -201,6 +327,7 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
                     "name": port.name,
                     "kind": "port",
                     "direction": _port_dir_name(port.direction),
+                    "signalPath": _signal_path(path_prefix, port.name),
                     "children": [],
                 }
             )
@@ -209,12 +336,18 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
                 {
                     "name": decl.name,
                     "kind": decl.kind.name.lower(),
+                    "signalPath": _signal_path(path_prefix, decl.name),
                     "children": [],
                 }
             )
         for inst in module.instances:
+            child_prefix = (
+                f"{path_prefix}{inst.instance_name}."
+                if path_prefix
+                else f"{inst.instance_name}."
+            )
             if inst.module_type in modules:
-                children.append(build(inst.module_type, inst.instance_name))
+                children.append(build(inst.module_type, inst.instance_name, path_prefix=child_prefix))
             else:
                 children.append(
                     {
@@ -229,30 +362,6 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     return build(top_name, None)
 
 
-def _api_error_body(exc: Exception) -> dict[str, Any]:
-    """Classify an exception for the UI: syntax (with location) vs. design
-    (deliberate ValueError) vs. internal (unexpected bug, keeps the trace)."""
-
-    if isinstance(exc, HdlSimSyntaxError):
-        return {
-            "ok": False,
-            "kind": "syntax",
-            "file": str(exc.file),
-            "line": exc.line,
-            "column": exc.column,
-            "message": exc.message,
-            "excerpt": exc.excerpt,
-        }
-    if isinstance(exc, ValueError):
-        return {"ok": False, "kind": "design", "message": str(exc)}
-    return {
-        "ok": False,
-        "kind": "internal",
-        "message": str(exc),
-        "trace": traceback.format_exc(),
-    }
-
-
 def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile.TemporaryDirectory[str]]:
     """Write virtual sources to a temp directory and load them."""
 
@@ -260,34 +369,106 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
     base = Path(tmp.name)
     paths: list[Path] = []
     for item in files:
-        path = base / item.path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(item.content, encoding="utf-8")
-        paths.append(path)
-    try:
-        loaded = load_design_with_meta(paths)
-    except HdlSimSyntaxError as exc:
-        # Report the virtual path the user typed, not the scratch temp path.
-        try:
-            exc.file = Path(exc.file).relative_to(base).as_posix()
-        except ValueError:
-            exc.file = Path(exc.file).name
-        raise
+        dest = join_under(base, item.path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(item.content, encoding="utf-8")
+        if not item.include_only:
+            paths.append(dest)
+    if not paths:
+        msg = "no elaboration entry files (only include-only sources?)"
+        raise ValueError(msg)
+    loaded = load_design_with_meta(paths)
     return loaded, base, tmp
 
 
+def _examples_by_basename() -> dict[str, list[Path]]:
+    table: dict[str, list[Path]] = {}
+    if EXAMPLES_DIR.is_dir():
+        for path in EXAMPLES_DIR.rglob("*.v"):
+            table.setdefault(path.name, []).append(path)
+    return table
+
+
+def _normalize_spj_data(data: dict[str, Any]) -> dict[str, Any]:
+    """旧形式 (.v をパス参照する .spj) をインライン形式へ変換し、
+    source_path が欠けているファイルは examples から一意に補完する。"""
+
+    from hdl_sim.web import spj_store as _spj
+
+    files = data.get("files")
+
+    # 旧 SILOS 風: files がパス文字列のリスト → 実ファイルを読み込む
+    if isinstance(files, list) and files and all(isinstance(f, str) for f in files):
+        base = _spj.spj_dir().resolve()
+        resolved_files: list[dict[str, Any]] = []
+        for rel in files:
+            try:
+                target = join_under(base, rel)
+            except ValueError as exc:
+                raise ValueError("invalid spj file path") from exc
+            if not target.is_file():
+                raise ValueError("spj referenced file not found")
+            resolved_files.append(
+                {
+                    "path": target.name,
+                    "content": read_verilog_text(target),
+                    "source_path": target.relative_to(base).as_posix(),
+                }
+            )
+        project = data.get("project") or {}
+        sim = data.get("simulation") or {}
+        return {
+            "format": "hdl-sim-project",
+            "version": 1,
+            "name": project.get("name") or data.get("name") or "project",
+            "top": sim.get("top_module") or data.get("top"),
+            "files": resolved_files,
+        }
+
+    # インライン形式: source_path 欠落分をファイル名で examples から補完
+    if isinstance(files, list):
+        table = _examples_by_basename()
+        for item in files:
+            if not isinstance(item, dict) or item.get("source_path"):
+                continue
+            name = str(item.get("path", "")).split("/")[-1]
+            matches = table.get(name, [])
+            if len(matches) == 1:
+                rel = matches[0].resolve().relative_to(EXAMPLES_DIR.resolve()).as_posix()
+                item["source_path"] = f"examples://{rel}"
+    return data
+
+
+def _resolve_source_path(raw: str) -> Path | None:
+    """`examples://rel/path.v` を examples 配下へ解決する。絶対パスは対象外。"""
+
+    if not raw.startswith("examples://"):
+        return None
+    rel = raw[len("examples://"):]
+    try:
+        path = join_under(EXAMPLES_DIR, rel)
+    except ValueError:
+        return None
+    return path if path.is_file() else None
+
+
 def _read_example_paths(rel_paths: list[str]) -> list[dict[str, str]]:
-    root = EXAMPLES_DIR.resolve()
     files: list[dict[str, str]] = []
     for rel in rel_paths:
-        path = (EXAMPLES_DIR / rel).resolve()
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail=f"example file not found: {rel}")
         try:
-            path.relative_to(root)
+            path = join_under(EXAMPLES_DIR, rel)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="example not found") from exc
-        files.append({"path": rel, "content": read_verilog_text(path)})
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="example not found")
+        files.append(
+            {
+                "path": rel,
+                "content": read_verilog_text(path),
+                # examples:// 形式はマシン間で .spj を移動しても解決できる
+                "source_path": f"examples://{rel}",
+            }
+        )
     return files
 
 
@@ -313,14 +494,85 @@ def _project_member_paths() -> set[str]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="HDL-Sim UI", version=__version__)
-    # The UI only ever calls its own origin with relative fetch() paths, so no
-    # cross-origin access is legitimate. A wildcard CORS policy here would let
-    # any other webpage open in the user's browser read/write local projects
-    # via this loopback-only API.
+    import os
+    import sys
+    import time
+    import asyncio
+
+    last_ping_time = time.time()
+    heartbeat_timeout = 180.0
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async def heartbeat_watcher() -> None:
+            nonlocal last_ping_time
+            while True:
+                await asyncio.sleep(5)
+                if time.time() - last_ping_time > heartbeat_timeout:
+                    print(
+                        f"No ping received for {heartbeat_timeout} seconds. Shutting down.",
+                        file=sys.stderr,
+                    )
+                    os._exit(0)
+
+        task = asyncio.create_task(heartbeat_watcher())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    app = FastAPI(title="HDL-Sim UI", version=__version__, lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=loopback_origins(),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Accept"],
+    )
+
+    @app.middleware("http")
+    async def require_loopback_api(request: Request, call_next):
+        if request.url.path.startswith("/api/"):
+            rejected = local_api_rejection(
+                request.headers.get("host"),
+                request.headers.get("origin"),
+            )
+            if rejected is not None:
+                return JSONResponse({"ok": False, "error": rejected}, status_code=403)
+        return await call_next(request)
+
+    @app.post("/api/waveform_sync")
+    async def sync_waveform_state(req: WaveformSyncRequest):
+        global _shared_waveform_state
+        _shared_waveform_state = req.model_dump()
+        return {"status": "ok"}
+
+    @app.get("/api/waveform_sync")
+    async def get_waveform_state():
+        return _shared_waveform_state
+
+    @app.post("/api/open_waveform_window")
+    async def api_open_waveform_window():
+        import sys
+        is_native = "webview" in sys.modules
+        if is_native:
+            try:
+                import webview
+                if webview.windows and hasattr(webview.windows[0].js_api, "open_waveform_window"):
+                    webview.windows[0].js_api.open_waveform_window("/assets/waveform.html")
+                    return {"opened_native": True}
+            except Exception:
+                pass
+        return {"opened_native": False}
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/api/ping")
+    def ping() -> dict[str, str]:
+        nonlocal last_ping_time
+        last_ping_time = time.time()
         return {"status": "ok"}
 
     @app.get("/api/ui-info")
@@ -343,7 +595,7 @@ def create_app() -> FastAPI:
     def api_update_check(refresh: bool = False) -> dict[str, Any]:
         try:
             return check_for_updates(__version__, force_refresh=refresh)
-        except Exception as exc:
+        except Exception:
             return {
                 "ok": False,
                 "current_version": __version__,
@@ -351,7 +603,7 @@ def create_app() -> FastAPI:
                 "update_available": False,
                 "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
                 "download_url": None,
-                "error": str(exc),
+                "error": "update check failed",
             }
 
     @app.get("/api/examples")
@@ -381,7 +633,7 @@ def create_app() -> FastAPI:
                     "id": rel,
                     "label": rel,
                     "kind": "file",
-                    "path": str(path),
+                    "path": rel,
                 }
             )
         return items
@@ -408,8 +660,8 @@ def create_app() -> FastAPI:
     def api_list_projects() -> list[dict[str, Any]]:
         try:
             return project_store.list_projects()
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except OSError:
+            raise HTTPException(status_code=500, detail="storage error") from None
 
     @app.post("/api/projects")
     def api_create_project(req: ProjectCreateRequest) -> dict[str, Any]:
@@ -440,6 +692,7 @@ def create_app() -> FastAPI:
                 payload,
                 top=req.top,
                 label=req.label,
+                wave=req.wave,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -451,18 +704,21 @@ def create_app() -> FastAPI:
                 "path": str(spj_store.spj_dir().resolve()),
                 "files": spj_store.list_spj_files(),
             }
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except OSError:
+            raise HTTPException(status_code=500, detail="storage error") from None
 
     @app.get("/api/spj/{filename}")
     def api_load_spj(filename: str) -> dict[str, Any]:
         try:
             loaded = spj_store.load_spj_file(filename)
-            return {"filename": loaded["filename"], **loaded["data"]}
+            data = _normalize_spj_data(loaded["data"])
+            return {"filename": loaded["filename"], **data}
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="spj file not found") from exc
         except (ValueError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if isinstance(exc, json.JSONDecodeError):
+                raise HTTPException(status_code=400, detail="invalid spj content") from exc
+            raise HTTPException(status_code=400, detail="invalid spj") from exc
 
     @app.put("/api/spj/{filename}")
     def api_save_spj(filename: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -472,9 +728,65 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="files required")
         try:
             saved = spj_store.save_spj_file(filename, payload)
-            return {"ok": True, **saved}
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid file path") from None
+        updated_sources: list[Any] = saved.get("updated_sources", [])
+        source_errors: list[str] = []
+        return {
+            "ok": True,
+            **saved,
+            "updated_sources": updated_sources,
+            "source_errors": source_errors,
+        }
+
+    @app.post("/api/save_v_file")
+    def api_save_v_file(payload: dict[str, Any]) -> dict[str, Any]:
+        project_name = payload.get("project_name")
+        file_name = payload.get("file_name")
+        source = payload.get("source")
+        if not project_name or not file_name or source is None:
+            raise HTTPException(status_code=400, detail="project_name, file_name, and source are required")
+        try:
+            project_stem = normalize_project_stem(str(project_name))
+            sources_root = user_data_dir() / "verilog_sources"
+            sources_root.mkdir(parents=True, exist_ok=True)
+            vs_dir = join_under(sources_root, project_stem)
+            vs_dir.mkdir(parents=True, exist_ok=True)
+            v_path = join_under(vs_dir, str(file_name))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid file path") from None
+        v_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(v_path, source, encoding="utf-8")
+        try:
+            shown = v_path.resolve().relative_to(user_data_dir().resolve()).as_posix()
+        except ValueError:
+            shown = normalize_relpath(str(file_name))
+        return {"ok": True, "path": shown}
+
+    def _error_payload(exc: Exception) -> dict[str, Any]:
+        """設計側の誤りは原因メッセージのみ返す。内部例外本文はエコーしない。"""
+
+        from hdl_sim.engine.evaluator import EvaluationError
+        from hdl_sim.parser.loader import VerilogSyntaxError
+
+        user_error = isinstance(
+            exc, (VerilogSyntaxError, ValueError, FileNotFoundError, EvaluationError, KeyError)
+        )
+        if isinstance(exc, VerilogSyntaxError):
+            return {
+                "ok": False,
+                "error": str(exc),
+                "error_kind": "syntax",
+                "error_file": exc.file,
+                "error_line": exc.line,
+                "error_column": exc.column,
+            }
+        if isinstance(exc, KeyError):
+            return {"ok": False, "error": "不明な参照", "error_kind": "design"}
+        if user_error:
+            return {"ok": False, "error": str(exc), "error_kind": "design"}
+        print(traceback.format_exc(), file=sys.stderr)
+        return {"ok": False, "error": "internal simulation error", "error_kind": "internal"}
 
     @app.post("/api/elaborate")
     def api_elaborate(req: ElaborateRequest) -> dict[str, Any]:
@@ -483,11 +795,13 @@ def create_app() -> FastAPI:
         try:
             loaded, _base, _tmp = load_design_from_files(req.files)
             design = loaded.design
-            top = req.top or design.modules[-1].name
+            requested_top = (req.top or "").strip() or None
+            top = resolve_top_module(design, req.top)
             elaborated = elaborate(design, top=top)
-            return {
+            payload: dict[str, Any] = {
                 "ok": True,
                 "top": elaborated.top_module,
+                "signal_names": sorted(elaborated.nets.keys()),
                 "module_names": design_overview(design)["module_names"],
                 "overview": design_overview(design),
                 "hierarchy": hierarchy_tree(design, top=top),
@@ -495,9 +809,14 @@ def create_app() -> FastAPI:
                 "continuous_assigns": len(elaborated.continuous_assigns),
                 "initial_blocks": len(elaborated.initial_blocks),
                 "always_blocks": len(elaborated.always_blocks),
+                "suggested_until": suggested_sim_until(design, top=top),
             }
+            if requested_top and requested_top != top:
+                payload["top_auto"] = top
+                payload["top_requested"] = requested_top
+            return payload
         except Exception as exc:
-            return _api_error_body(exc)
+            return _error_payload(exc)
 
     @app.post("/api/simulate")
     def api_simulate(req: SimulateRequest) -> dict[str, Any]:
@@ -506,9 +825,8 @@ def create_app() -> FastAPI:
         try:
             loaded, base, _tmp = load_design_from_files(req.files)
             design = loaded.design
-            top = req.top
-            if top is None:
-                top = design.modules[-1].name
+            requested_top = (req.top or "").strip() or None
+            top = resolve_top_module(design, req.top)
 
             vcd_path = base / "wave.vcd" if req.generate_vcd else None
             sim = Simulator(
@@ -516,6 +834,7 @@ def create_app() -> FastAPI:
                 top=top,
                 timescale=loaded.timescale or "1ns",
                 vcd_path=vcd_path,
+                vcd_anchor=base,
             )
             console = io.StringIO()
             with contextlib.redirect_stdout(console):
@@ -523,34 +842,59 @@ def create_app() -> FastAPI:
 
             waveform: dict[str, Any] | None = None
             vcd_text = ""
-            if vcd_path is not None and vcd_path.is_file():
-                vcd_text = vcd_path.read_text(encoding="utf-8")
+            vcd_read = vcd_path
+            if (
+                vcd_read is not None
+                and not vcd_read.is_file()
+                and result.vcd_path is not None
+                and result.vcd_path.is_file()
+            ):
+                vcd_read = result.vcd_path
+            if vcd_read is not None and vcd_read.is_file():
+                vcd_text = vcd_read.read_text(encoding="utf-8")
                 waveform = timeline_to_json(parse_vcd_timeline(vcd_text))
 
-            return {
+            payload = {
                 "ok": True,
                 "top_module": result.top_module,
+                "top": top,
                 "stop_time": result.stop_time,
                 "events_processed": result.events_processed,
                 "console": console.getvalue(),
                 "vcd": vcd_text,
                 "waveform": waveform,
                 "signals": nets_overview(sim),
+                "signal_names": sorted(sim._nets.keys()),
                 "hierarchy": hierarchy_tree(design, top=top),
                 "overview": design_overview(design),
                 "module_names": design_overview(design)["module_names"],
                 "files_loaded": [f.path for f in req.files],
+                "suggested_until": suggested_sim_until(design, top=top),
+                "hints": simulation_time_hints(
+                    design,
+                    top=top,
+                    stop_time=result.stop_time,
+                    until=req.until,
+                ),
             }
+            if requested_top and requested_top != top:
+                payload["top_auto"] = top
+                payload["top_requested"] = requested_top
+            return payload
         except Exception as exc:
-            return {**_api_error_body(exc), "console": ""}
+            return {**_error_payload(exc), "console": ""}
 
     if UI_DIR.is_dir():
         app.mount("/assets", NoCacheStaticFiles(directory=UI_DIR), name="assets")
 
         @app.get("/")
         def index() -> FileResponse:
+            try:
+                dest = jailed_regular_file(UI_DIR, "index.html")
+            except ValueError:
+                raise HTTPException(status_code=404, detail="not found") from None
             return FileResponse(
-                UI_DIR / "index.html",
+                dest,
                 headers={
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                     "Pragma": "no-cache",

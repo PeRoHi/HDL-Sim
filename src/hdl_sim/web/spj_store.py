@@ -7,7 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.paths import atomic_write_text, user_data_dir
+from hdl_sim.web.path_safety import atomic_write_text, join_under, normalize_relpath
+from hdl_sim.web.paths import user_data_dir
 
 SPJ_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.spj$")
 
@@ -53,8 +54,33 @@ def load_spj_file(name: str) -> dict[str, Any]:
 
 
 def save_spj_file(name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if not payload.get("files"):
-        raise ValueError("refusing to save spj file with no files")
     path = _resolve_spj_path(name)
-    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
-    return {"filename": path.name, "path": str(path.resolve())}
+    vs_dir = user_data_dir() / "verilog_sources" / path.stem
+    vs_dir.mkdir(parents=True, exist_ok=True)
+
+    to_write: list[tuple[str, str]] = []
+    if "files" in payload:
+        for item in payload["files"]:
+            if "path" in item and "content" in item:
+                rel = normalize_relpath(item["path"])
+                to_write.append((rel, item["content"]))
+
+    if path.is_file() and path.stat().st_size > 0 and not payload.get("files"):
+        raise ValueError("refusing to overwrite existing project with empty files")
+
+    dumped = json.dumps(payload, indent=2, ensure_ascii=False)
+    atomic_write_text(path, dumped, encoding="utf-8", refuse_empty=True)
+
+    data_root = user_data_dir().resolve()
+    updated_sources = []
+    for rel, content in to_write:
+        v_path = join_under(vs_dir, rel)
+        v_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(v_path, content, encoding="utf-8")
+        try:
+            shown = v_path.resolve().relative_to(data_root).as_posix()
+        except ValueError:
+            shown = rel
+        updated_sources.append({"name": rel, "path": shown})
+
+    return {"filename": path.name, "path": str(path.resolve()), "updated_sources": updated_sources}

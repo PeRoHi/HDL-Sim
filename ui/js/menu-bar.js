@@ -9,7 +9,7 @@
         { id: "file.new", label: "New", shortcut: "Ctrl+N" },
         { id: "file.open", label: "Open...", shortcut: "Ctrl+O" },
         { id: "file.save", label: "Save", shortcut: "Ctrl+S" },
-        { id: "file.save-as", label: "Save As..." },
+        { id: "file.save-as", label: "Save As...", shortcut: "Ctrl+Shift+S" },
         { type: "sep" },
         { type: "recent", recentKey: "fileRecent" },
         { type: "sep" },
@@ -36,6 +36,10 @@
     view: {
       label: "View",
       items: [
+        { id: "view.zoom-in", label: "Zoom In", shortcut: "Ctrl+=" },
+        { id: "view.zoom-out", label: "Zoom Out", shortcut: "Ctrl+-" },
+        { id: "view.zoom-reset", label: "Reset Zoom", shortcut: "Ctrl+Numpad0" },
+        { type: "sep" },
         { id: "view.main-toolbar", label: "Main Toolbar", checkKey: "view.main-toolbar" },
         { id: "view.output-panel", label: "Output Panel", checkKey: "view.output-panel" },
         { id: "view.project-bar", label: "Project Bar", checkKey: "view.project-bar" },
@@ -86,6 +90,8 @@
     help: {
       label: "Help",
       items: [
+        { id: "help.tutorial", label: "チュートリアルを表示" },
+        { type: "sep" },
         { id: "help.guide", label: "使い方..." },
         { type: "sep" },
         { id: "help.about", label: "About HDL-Sim..." },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import threading
@@ -115,6 +116,28 @@ def install_dependencies(*, on_line: Callable[[str], None] | None = None) -> tup
     return True, output.strip()
 
 
+def make_uvicorn_config(
+    app_target: object,
+    *,
+    host: str,
+    port: int,
+    reload: bool = False,
+):
+    """Build the UI server config. Do not honor X-Forwarded-* (no trusted proxy)."""
+
+    import uvicorn
+
+    return uvicorn.Config(
+        app_target,
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+        proxy_headers=False,
+    )
+
+
 def open_browser_later(url: str, *, delay: float = 0.3) -> None:
     import time
 
@@ -188,6 +211,7 @@ def start_server(
         print(str(exc), file=sys.stderr)
         return 2
     url = f"http://{host}:{port}"
+    os.environ["HDL_SIM_UI_PORT"] = str(port)
     if not is_frozen():
         missing = missing_dependencies()
         if missing:
@@ -204,14 +228,7 @@ def start_server(
     else:
         app_target = "hdl_sim.web.app:create_app"
 
-    config = uvicorn.Config(
-        app_target,
-        factory=True,
-        host=host,
-        port=port,
-        reload=reload,
-        log_level="info",
-    )
+    config = make_uvicorn_config(app_target, host=host, port=port, reload=reload)
     server = uvicorn.Server(config)
 
     def _serve() -> None:
@@ -243,9 +260,19 @@ def start_server(
 
     if open_browser:
         if native_window:
-            open_ui_window(url, server=running, native=True, on_log=on_log)
-            return 0 if blocking else running
-        open_browser_later(url)
+            try:
+                open_ui_window(url, server=running, native=True, on_log=on_log)
+                return 0 if blocking else running
+            except Exception as e:
+                msg = f"専用ウィンドウの起動に失敗しました ({e})。ブラウザで開きます。"
+                if on_log is not None:
+                    on_log(msg)
+                else:
+                    print(msg, file=sys.stderr)
+                native_window = False
+        
+        if not native_window:
+            open_browser_later(url)
 
     if blocking:
         print("=" * 58)
@@ -267,9 +294,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind (default: 8765)")
     parser.add_argument("--no-open", action="store_true", help="Do not open the browser automatically")
     parser.add_argument(
+        "--no-window",
+        action="store_true",
+        help="Do not open in a dedicated desktop window (open in browser instead)",
+    )
+    parser.add_argument(
         "--window",
         action="store_true",
-        help="Open in a dedicated desktop window (requires pywebview)",
+        help="Open in a dedicated desktop window (default, requires pywebview)",
     )
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for development")
     parser.add_argument("--gui", action="store_true", help="Open the small GUI launcher (no terminal needed)")
@@ -281,7 +313,7 @@ def run(
     port: int = DEFAULT_PORT,
     *,
     open_browser: bool = True,
-    native_window: bool = False,
+    native_window: bool = True,
     reload: bool = False,
     gui: bool = False,
 ) -> int:
@@ -308,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         port=args.port,
         open_browser=not args.no_open,
-        native_window=args.window,
+        native_window=not args.no_window,
         reload=args.reload,
         gui=args.gui,
     )

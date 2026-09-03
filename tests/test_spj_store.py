@@ -16,6 +16,7 @@ def test_spj_dir_created() -> None:
 
 def test_spj_save_and_load_roundtrip(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
+    monkeypatch.setattr(spj_store, "user_data_dir", lambda: tmp_path)
     payload = {
         "format": "hdl-sim-project",
         "version": 1,
@@ -42,14 +43,11 @@ def test_spj_invalid_name() -> None:
         spj_store.save_spj_file("bad name.spj", {"format": "hdl-sim-project", "files": []})
 
 
-def test_spj_save_rejects_empty_files(tmp_path, monkeypatch) -> None:
+def test_spj_refuses_empty_overwrite_of_existing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
-    with pytest.raises(ValueError):
-        spj_store.save_spj_file("demo.spj", {"format": "hdl-sim-project", "files": []})
-
-
-def test_spj_save_does_not_leave_tmp_files(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
-    payload = {"format": "hdl-sim-project", "files": [{"path": "tb.v", "content": "x"}]}
-    spj_store.save_spj_file("demo.spj", payload)
-    assert [p.name for p in tmp_path.iterdir()] == ["demo.spj"]
+    monkeypatch.setattr(spj_store, "user_data_dir", lambda: tmp_path)
+    existing = tmp_path / "keep.spj"
+    existing.write_text('{"format": "hdl-sim-project", "files": [{"path": "a.v"}]}', encoding="utf-8")
+    with pytest.raises(ValueError, match="empty"):
+        spj_store.save_spj_file("keep.spj", {"format": "hdl-sim-project", "files": []})
+    assert "a.v" in existing.read_text(encoding="utf-8")

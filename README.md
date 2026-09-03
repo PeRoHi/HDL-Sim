@@ -53,6 +53,7 @@ PYTHONPATH=src python3 -m pytest tests/test_silos_regression.py -v
 
 - [docs/architecture.md](docs/architecture.md) — パイプラインと主要コンポーネント
 - [docs/SUPPORTED_SUBSET.md](docs/SUPPORTED_SUBSET.md) — 対応文法・制約
+- [docs/LOCAL_DEBUG_HANDOFF.md](docs/LOCAL_DEBUG_HANDOFF.md) — ローカルデバッグ用の引き継ぎプロンプト（Cursor 向け）
 
 ## 既知の制約（抜粋）
 

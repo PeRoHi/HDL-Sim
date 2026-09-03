@@ -13,5 +13,6 @@ def test_sai_testbench_simulates_with_module_functions() -> None:
     loaded = load_design_with_meta(paths)
     elaborated = elaborate(loaded.design, top="sai_test")
     assert any(func.name == "dec" for func in elaborated.functions)
-    result = Simulator(elaborated).run(until=50, max_events=500)
-    assert result.events_processed > 0
+    result = Simulator(elaborated).run(until=15_000, max_events=5000)
+    assert result.events_processed > 10
+    assert result.stop_time >= 1000

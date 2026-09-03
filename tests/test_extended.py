@@ -58,6 +58,12 @@ def test_concat_expr() -> None:
     assert sim._nets["y"].value == 0xA5
 
 
+def test_concat_with_part_select_and_expr() -> None:
+    """Regression: lfsr8-style {bus[6:0], xor...} must parse (concat_list flatten)."""
+    loaded = load_design_with_meta([ROOT / "examples" / "lfsr8.v"])
+    assert "lfsr8" in {m.name for m in loaded.design.modules}
+
+
 def test_define_and_include() -> None:
     header = ROOT / "examples" / "lib" / "pulse.v"
     header.write_text(
