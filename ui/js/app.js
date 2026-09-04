@@ -350,6 +350,19 @@ function mdiViewport() {
   };
 }
 
+// Where a brand-new window should first appear: centered in the visible
+// viewport (not pinned near the top-left corner). Cascades still offset
+// down-right from this point per window, matching familiar desktop
+// "new window nudges over" behavior — just anchored to the middle instead
+// of a corner.
+function mdiCenteredStart(width, height) {
+  const { originX, originY, width: viewW, height: viewH } = mdiViewport();
+  return {
+    x: originX + Math.max(16, Math.floor((viewW - width) / 2)),
+    y: originY + Math.max(16, Math.floor((viewH - height) / 2)),
+  };
+}
+
 function bringMdiToFront(win) {
   if (!win) return;
   mdiZ += 1;
@@ -652,15 +665,20 @@ function initMdiPan() {
 }
 
 function tileFileWindows() {
+  const start = mdiCenteredStart(560, 390);
   let index = 0;
   for (const path of fileStore.keys()) {
-    openFile(path, { focus: index === 0, x: 36 + index * 34, y: 32 + index * 34 });
+    openFile(path, { focus: index === 0, x: start.x + index * 34, y: start.y + index * 34 });
     index += 1;
   }
-  // openFile() places each window at a fixed 560x390 regardless of how much
-  // canvas space is available; actually fill it like Window > Tile does,
-  // so a fresh/single-file session doesn't start cramped in a corner.
-  windowTile();
+  // Multiple files (opening a project/.spj) keep the classic cascade —
+  // auto-tiling them into a grid on every load looked unnervingly rigid.
+  // A single file (first boot / a fresh default file) has nothing to
+  // cascade against, so fill the workspace instead of sitting small in
+  // the corner.
+  if (fileStore.size === 1) {
+    windowTile();
+  }
 }
 
 function workspaceFilePaths() {
@@ -1470,10 +1488,10 @@ function openFile(path, options = {}) {
   const entry = fileStore.get(path);
   const id = fileWindowId(path);
   const index = [...fileStore.keys()].indexOf(path);
-  const { originX, originY } = mdiViewport();
+  const start = mdiCenteredStart(560, 390);
   const win = createMdiWindow(id, path, {
-    x: options.x ?? originX + 40 + Math.max(index, 0) * 28,
-    y: options.y ?? originY + 38 + Math.max(index, 0) * 28,
+    x: options.x ?? start.x + Math.max(index, 0) * 28,
+    y: options.y ?? start.y + Math.max(index, 0) * 28,
     width: 560,
     height: 390,
     bodyClass: "mdi-editor",
@@ -1949,10 +1967,10 @@ function highlightSignal(name) {
 }
 
 function createOutputWindow() {
-  const { originX, originY } = mdiViewport();
+  const start = mdiCenteredStart(640, 250);
   const win = createMdiWindow("output", "Output", {
-    x: originX + 70,
-    y: originY + 330,
+    x: start.x,
+    y: start.y,
     width: 640,
     height: 250,
     bodyClass: "mdi-output",
