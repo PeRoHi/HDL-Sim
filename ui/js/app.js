@@ -328,6 +328,28 @@ function mdiCanvas() {
   return $("mdi-canvas");
 }
 
+// .mdi-canvas is a fixed 2400x1600 pannable surface (see app.css), much
+// bigger than any real window. Positioning new/tiled windows against its
+// full size (instead of the visible, scrolled .mdi-desktop viewport) can
+// place them far outside what the user can currently see without panning.
+function mdiViewport() {
+  const desktop = $("mdi-desktop");
+  // The desktop can measure 0x0 for a moment before first layout (e.g. the
+  // tab/pane isn't visible yet when this runs). Fall back to the window
+  // size rather than a floor so small-window math doesn't wrongly kick in.
+  const fallbackW = window.innerWidth || 1280;
+  const fallbackH = window.innerHeight || 720;
+  if (!desktop || desktop.clientWidth === 0 || desktop.clientHeight === 0) {
+    return { originX: 0, originY: 0, width: fallbackW, height: fallbackH };
+  }
+  return {
+    originX: desktop.scrollLeft,
+    originY: desktop.scrollTop,
+    width: desktop.clientWidth,
+    height: desktop.clientHeight,
+  };
+}
+
 function bringMdiToFront(win) {
   if (!win) return;
   mdiZ += 1;
@@ -635,6 +657,10 @@ function tileFileWindows() {
     openFile(path, { focus: index === 0, x: 36 + index * 34, y: 32 + index * 34 });
     index += 1;
   }
+  // openFile() places each window at a fixed 560x390 regardless of how much
+  // canvas space is available; actually fill it like Window > Tile does,
+  // so a fresh/single-file session doesn't start cramped in a corner.
+  windowTile();
 }
 
 function workspaceFilePaths() {
@@ -1053,30 +1079,30 @@ function getWindowFileList() {
 }
 
 function windowCascade() {
+  const { originX, originY } = mdiViewport();
   let i = 0;
   for (const [, win] of mdiWindows) {
     if (win.hidden) continue;
-    win.style.left = `${36 + i * 28}px`;
-    win.style.top = `${32 + i * 28}px`;
+    win.style.left = `${originX + 36 + i * 28}px`;
+    win.style.top = `${originY + 32 + i * 28}px`;
     i += 1;
   }
 }
 
 function windowTile() {
-  const canvas = mdiCanvas();
-  if (!canvas) return;
   const visible = [...mdiWindows.entries()].filter(([, w]) => !w.hidden);
   const n = visible.length;
   if (!n) return;
+  const { originX, originY, width, height } = mdiViewport();
   const cols = Math.ceil(Math.sqrt(n));
   const pad = 8;
-  const cellW = Math.max(280, Math.floor((canvas.clientWidth - pad * (cols + 1)) / cols));
-  const cellH = Math.max(180, Math.floor((canvas.clientHeight - pad * 2) / Math.ceil(n / cols)));
+  const cellW = Math.max(280, Math.floor((width - pad * (cols + 1)) / cols));
+  const cellH = Math.max(180, Math.floor((height - pad * 2) / Math.ceil(n / cols)));
   visible.forEach(([, win], index) => {
     const col = index % cols;
     const row = Math.floor(index / cols);
-    win.style.left = `${pad + col * (cellW + pad)}px`;
-    win.style.top = `${pad + row * (cellH + pad)}px`;
+    win.style.left = `${originX + pad + col * (cellW + pad)}px`;
+    win.style.top = `${originY + pad + row * (cellH + pad)}px`;
     win.style.width = `${cellW}px`;
     win.style.height = `${cellH}px`;
     win.querySelector(".mdi-body")?.firstElementChild?.dispatchEvent(new Event("resize"));
@@ -1444,9 +1470,10 @@ function openFile(path, options = {}) {
   const entry = fileStore.get(path);
   const id = fileWindowId(path);
   const index = [...fileStore.keys()].indexOf(path);
+  const { originX, originY } = mdiViewport();
   const win = createMdiWindow(id, path, {
-    x: options.x ?? 40 + Math.max(index, 0) * 28,
-    y: options.y ?? 38 + Math.max(index, 0) * 28,
+    x: options.x ?? originX + 40 + Math.max(index, 0) * 28,
+    y: options.y ?? originY + 38 + Math.max(index, 0) * 28,
     width: 560,
     height: 390,
     bodyClass: "mdi-editor",
@@ -1922,9 +1949,10 @@ function highlightSignal(name) {
 }
 
 function createOutputWindow() {
+  const { originX, originY } = mdiViewport();
   const win = createMdiWindow("output", "Output", {
-    x: 70,
-    y: 330,
+    x: originX + 70,
+    y: originY + 330,
     width: 640,
     height: 250,
     bodyClass: "mdi-output",
@@ -1943,11 +1971,20 @@ function createOutputWindow() {
 }
 
 function createWaveformWindow() {
+  // Size/position relative to the visible .mdi-desktop viewport, not the
+  // fixed 2400x1600 .mdi-canvas — a fixed x:760/width:720 (or sizing against
+  // the full canvas) placed the waveform mostly or entirely outside what
+  // the user can see without panning.
+  const { originX, originY, width: viewW, height: viewH } = mdiViewport();
+  const width = Math.max(480, Math.min(900, Math.floor(viewW * 0.55)));
+  const height = Math.max(280, Math.min(560, Math.floor(viewH * 0.6)));
+  const x = originX + Math.max(16, viewW - width - 16);
+  const y = originY + Math.min(80, Math.max(16, viewH - height - 16));
   const win = createMdiWindow("waveform", "Waveform", {
-    x: 760,
-    y: 80,
-    width: 720,
-    height: 360,
+    x,
+    y,
+    width,
+    height,
     bodyClass: "mdi-waveform",
     show: waveformVisible,
   });
