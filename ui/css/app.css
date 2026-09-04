@@ -270,6 +270,22 @@ body.view-hide-project-bar .project-bar { display: none; }
   margin: 0 4px;
 }
 
+.tb-zoom-label {
+  min-width: 40px;
+  height: 20px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-ui);
+  text-align: center;
+  cursor: pointer;
+}
+
+.tb-zoom-label:hover { background: var(--bg-hover); color: var(--text); }
+
 .tb-field {
   display: inline-flex;
   align-items: center;

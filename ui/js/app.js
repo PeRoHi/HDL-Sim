@@ -58,6 +58,11 @@ let editor = null;
 const fileEditors = new Map();
 const mdiWindows = new Map();
 let mdiZ = 10;
+const MDI_ZOOM_KEY = "hdl-sim-mdi-zoom";
+const MDI_ZOOM_MIN = 50;
+const MDI_ZOOM_MAX = 200;
+const MDI_ZOOM_STEP = 10;
+let mdiZoomPercent = 100;
 let lastWaveform = null;
 let lastWaveformFull = null;
 let lastTopModule = "";
@@ -334,19 +339,24 @@ function mdiCanvas() {
 // place them far outside what the user can currently see without panning.
 function mdiViewport() {
   const desktop = $("mdi-desktop");
+  const zoom = mdiZoomPercent / 100;
   // The desktop can measure 0x0 for a moment before first layout (e.g. the
   // tab/pane isn't visible yet when this runs). Fall back to the window
   // size rather than a floor so small-window math doesn't wrongly kick in.
   const fallbackW = window.innerWidth || 1280;
   const fallbackH = window.innerHeight || 720;
   if (!desktop || desktop.clientWidth === 0 || desktop.clientHeight === 0) {
-    return { originX: 0, originY: 0, width: fallbackW, height: fallbackH };
+    return { originX: 0, originY: 0, width: fallbackW / zoom, height: fallbackH / zoom };
   }
+  // desktop.clientWidth/scrollLeft are real screen pixels; window positions
+  // (style.left/top/width/height) are set in #mdi-canvas's own coordinate
+  // space, which CSS `zoom` scales for rendering — convert real px back to
+  // that local space so windows land where they visually appear to be.
   return {
-    originX: desktop.scrollLeft,
-    originY: desktop.scrollTop,
-    width: desktop.clientWidth,
-    height: desktop.clientHeight,
+    originX: desktop.scrollLeft / zoom,
+    originY: desktop.scrollTop / zoom,
+    width: desktop.clientWidth / zoom,
+    height: desktop.clientHeight / zoom,
   };
 }
 
@@ -361,6 +371,59 @@ function mdiCenteredStart(width, height) {
     x: originX + Math.max(16, Math.floor((viewW - width) / 2)),
     y: originY + Math.max(16, Math.floor((viewH - height) / 2)),
   };
+}
+
+// Zoom scales how the whole MDI workspace is *displayed* (CSS `zoom` on
+// #mdi-canvas) — it never touches any window's own left/top/width/height.
+// CSS `zoom` (unlike transform: scale()) also grows/shrinks the canvas's
+// layout size as its scroll container sees it, so .mdi-desktop's native
+// scrollbars keep covering the whole zoomed workspace for free.
+function setMdiZoom(percent) {
+  const clamped = Math.max(MDI_ZOOM_MIN, Math.min(MDI_ZOOM_MAX, Math.round(percent)));
+  if (clamped === mdiZoomPercent) return;
+  const desktop = $("mdi-desktop");
+  const canvas = mdiCanvas();
+  const oldZoom = mdiZoomPercent / 100;
+  // Keep the same point of the canvas centered under the viewport instead
+  // of drifting toward the top-left as the content grows/shrinks around it.
+  let centerLocalX = null;
+  let centerLocalY = null;
+  if (desktop && desktop.clientWidth > 0 && desktop.clientHeight > 0) {
+    centerLocalX = (desktop.scrollLeft + desktop.clientWidth / 2) / oldZoom;
+    centerLocalY = (desktop.scrollTop + desktop.clientHeight / 2) / oldZoom;
+  }
+
+  mdiZoomPercent = clamped;
+  if (canvas) canvas.style.zoom = String(clamped / 100);
+  const label = $("btn-mdi-zoom-reset");
+  if (label) label.textContent = `${clamped}%`;
+
+  if (desktop && centerLocalX !== null) {
+    const newZoom = clamped / 100;
+    desktop.scrollLeft = centerLocalX * newZoom - desktop.clientWidth / 2;
+    desktop.scrollTop = centerLocalY * newZoom - desktop.clientHeight / 2;
+  }
+  try {
+    localStorage.setItem(MDI_ZOOM_KEY, String(clamped));
+  } catch {
+    /* storage unavailable (private mode etc.) — zoom just won't persist */
+  }
+}
+
+function loadMdiZoom() {
+  let saved = 100;
+  try {
+    const raw = localStorage.getItem(MDI_ZOOM_KEY);
+    if (raw) saved = Number(raw);
+  } catch {
+    /* storage unavailable */
+  }
+  if (!Number.isFinite(saved)) saved = 100;
+  mdiZoomPercent = Math.max(MDI_ZOOM_MIN, Math.min(MDI_ZOOM_MAX, saved));
+  const canvas = mdiCanvas();
+  if (canvas) canvas.style.zoom = String(mdiZoomPercent / 100);
+  const label = $("btn-mdi-zoom-reset");
+  if (label) label.textContent = `${mdiZoomPercent}%`;
 }
 
 function bringMdiToFront(win) {
@@ -475,8 +538,11 @@ function attachMdiTitlebar(win, id, titlebar) {
   });
   titlebar.addEventListener("pointermove", (e) => {
     if (!dragging) return;
-    win.style.left = `${Math.max(0, startLeft + e.clientX - startX)}px`;
-    win.style.top = `${Math.max(0, startTop + e.clientY - startY)}px`;
+    // Pointer coordinates are real screen pixels; win.style.left/top are in
+    // #mdi-canvas's local (pre-zoom) space, so convert the drag delta.
+    const zoom = mdiZoomPercent / 100;
+    win.style.left = `${Math.max(0, startLeft + (e.clientX - startX) / zoom)}px`;
+    win.style.top = `${Math.max(0, startTop + (e.clientY - startY) / zoom)}px`;
   });
   titlebar.addEventListener("pointerup", (e) => {
     if (!dragging) return;
@@ -2459,6 +2525,9 @@ function bindUi() {
   $("btn-wave-toggle").addEventListener("click", () => toggleWaveform());
   $("btn-wave-close")?.addEventListener("click", () => toggleWaveform(false));
   $("btn-wave-fit")?.addEventListener("click", fitWaveform);
+  $("btn-mdi-zoom-out")?.addEventListener("click", () => setMdiZoom(mdiZoomPercent - MDI_ZOOM_STEP));
+  $("btn-mdi-zoom-in")?.addEventListener("click", () => setMdiZoom(mdiZoomPercent + MDI_ZOOM_STEP));
+  $("btn-mdi-zoom-reset")?.addEventListener("click", () => setMdiZoom(100));
   $("btn-open-files").addEventListener("click", () => openFilePicker());
   $("btn-new-file").addEventListener("click", () => addFileInFolder(workspaceTree?.getContextFolder() || ""));
   $("btn-delete-file").addEventListener("click", () => deleteFile());
@@ -2774,6 +2843,7 @@ async function verifyUiBuild() {
 initFiles();
 initSplits();
 bindUi();
+loadMdiZoom();
 initMdiPan();
 initMonaco();
 
