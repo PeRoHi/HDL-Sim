@@ -97,6 +97,7 @@ def _listener_pids_windows(port: int) -> list[int]:
             capture_output=True,
             text=True,
             check=False,
+            shell=False,
         )
     except OSError:
         return []
@@ -109,7 +110,7 @@ def _listener_pids_unix(port: int) -> list[int]:
         ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
     ):
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, shell=False)
         except OSError:
             continue
         pids: set[int] = set()
@@ -152,6 +153,7 @@ def pid_looks_like_python(pid: int) -> bool:
                 capture_output=True,
                 text=True,
                 check=False,
+                shell=False,
             )
         except OSError:
             return False
@@ -167,6 +169,7 @@ def pid_looks_like_python(pid: int) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            shell=False,
         )
     except OSError:
         return False
@@ -183,6 +186,7 @@ def kill_pid(pid: int) -> bool:
                 capture_output=True,
                 text=True,
                 check=False,
+                shell=False,
             )
             return proc.returncode == 0
         import os

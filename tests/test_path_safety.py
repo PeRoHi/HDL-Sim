@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from hdl_sim.web.path_safety import (
+    client_error_from_exception,
     ensure_under,
     join_under,
     normalize_project_stem,
     normalize_relpath,
+    summarize_client_error,
 )
 
 
@@ -32,6 +34,9 @@ def test_normalize_relpath_allows_nested_verilog() -> None:
         "C:/Windows/secret.v",
         "//server/share",
         "foo\x00.v",
+        "%2e%2e/secret.v",
+        "%252e%252e/secret.v",
+        "lib/%2e%2e/secret.v",
     ],
 )
 def test_normalize_relpath_rejects_escapes(raw: str) -> None:
@@ -110,3 +115,43 @@ def test_atomic_write_refuses_empty_overwrite(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="empty"):
         atomic_write_text(dest, "", refuse_empty=True)
     assert dest.read_text(encoding="utf-8") == '{"ok": true}'
+
+
+def test_atomic_write_refuses_symlink_dest(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import atomic_write_text
+
+    real = tmp_path / "real.spj"
+    real.write_text("keep", encoding="utf-8")
+    dest = tmp_path / "link.spj"
+    try:
+        dest.symlink_to(real)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    with pytest.raises(ValueError, match="symlink"):
+        atomic_write_text(dest, "new")
+    assert real.read_text(encoding="utf-8") == "keep"
+
+
+def test_join_under_refuses_parent_symlink(tmp_path: Path) -> None:
+    jail = tmp_path / "jail"
+    outside = tmp_path / "outside"
+    jail.mkdir()
+    outside.mkdir()
+    (outside / "secret.v").write_text("stolen", encoding="utf-8")
+    parent = jail / "nested"
+    try:
+        parent.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    with pytest.raises(ValueError):
+        join_under(jail, "nested/secret.v")
+
+
+def test_summarize_client_error_covers_arrays_and_os_leaks() -> None:
+    assert summarize_client_error("invalid file path") == "invalid file path"
+    assert summarize_client_error("[Errno 2] No such file: /tmp/secret") == "request failed"
+    assert summarize_client_error(["ok", "[Errno 13] /home/user/x"]) == ["ok", "request failed"]
+    assert client_error_from_exception(FileNotFoundError("/tmp/hdl_sim_ui_abc/x.v")) == "request failed"
+    assert client_error_from_exception(ValueError("モジュール 'ghost' が見つかりません")) == (
+        "モジュール 'ghost' が見つかりません"
+    )

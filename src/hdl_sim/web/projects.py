@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.path_safety import join_under
+from hdl_sim.web.path_safety import atomic_write_text, join_under, reject_symlink
 from hdl_sim.web.paths import user_data_dir
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -29,10 +29,7 @@ def _validate_name(name: str) -> str:
 
 def _project_path(name: str) -> Path:
     safe = _validate_name(name)
-    path = (projects_dir() / safe).resolve()
-    if projects_dir().resolve() not in path.parents and path != projects_dir().resolve():
-        raise ValueError("invalid project path")
-    return path
+    return join_under(projects_dir(), safe)
 
 
 def list_projects() -> list[dict[str, Any]]:
@@ -40,8 +37,11 @@ def list_projects() -> list[dict[str, Any]]:
     for entry in sorted(projects_dir().iterdir()):
         if not entry.is_dir() or entry.name.startswith("."):
             continue
-        files = list_project_files(entry.name)
-        meta = _read_meta(entry)
+        try:
+            files = list_project_files(entry.name)
+            meta = _read_meta(entry)
+        except ValueError:
+            continue
         rows.append(
             {
                 "name": entry.name,
@@ -53,14 +53,24 @@ def list_projects() -> list[dict[str, Any]]:
     return rows
 
 
-def _read_meta(project_dir: Path) -> dict[str, Any]:
+def _read_meta(project_dir: Path, *, required: bool = False) -> dict[str, Any]:
     meta_path = project_dir / META_FILE
     if not meta_path.is_file():
+        if required:
+            raise ValueError("loadFailed")
         return {}
+    if meta_path.is_symlink():
+        raise ValueError("symlink not allowed")
+    raw = meta_path.read_text(encoding="utf-8")
+    if not raw.strip() or meta_path.stat().st_size == 0:
+        raise ValueError("loadFailed")
     try:
-        return json.loads(meta_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("loadFailed") from exc
+    if not isinstance(data, dict):
+        raise ValueError("loadFailed")
+    return data
 
 
 def create_project(name: str, *, top: str | None = None, label: str | None = None) -> dict[str, Any]:
@@ -69,7 +79,7 @@ def create_project(name: str, *, top: str | None = None, label: str | None = Non
         raise FileExistsError(f"project already exists: {name}")
     path.mkdir(parents=True, exist_ok=False)
     meta = {"label": label or name, "top": top}
-    (path / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    atomic_write_text(path / META_FILE, json.dumps(meta, indent=2), encoding="utf-8")
     return {"name": name, "label": meta["label"], "top": top, "files": []}
 
 
@@ -79,6 +89,8 @@ def list_project_files(name: str) -> list[str]:
         raise FileNotFoundError(name)
     paths: list[str] = []
     for path in sorted(project.rglob("*.v")):
+        if path.is_symlink():
+            continue
         rel = path.relative_to(project).as_posix()
         if rel == META_FILE:
             continue
@@ -94,7 +106,7 @@ def load_project(name: str) -> dict[str, Any]:
     for rel in list_project_files(name):
         content = (project / rel).read_text(encoding="utf-8")
         files.append({"path": rel, "content": content})
-    meta = _read_meta(project)
+    meta = _read_meta(project, required=True) if (project / META_FILE).exists() else {}
     wave = meta.get("wave")
     return {
         "name": name,
@@ -120,14 +132,20 @@ def save_project(
     for item in files:
         dest = join_under(project, item["path"])
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(item["content"], encoding="utf-8")
-        keep.add(dest)
+        reject_symlink(dest)
+        atomic_write_text(dest, item["content"], encoding="utf-8")
+        keep.add(dest.resolve())
 
     for existing in project.rglob("*.v"):
         if existing.resolve() not in keep:
             existing.unlink()
 
-    meta = _read_meta(project)
+    try:
+        meta = _read_meta(project)
+    except ValueError as exc:
+        if str(exc) != "loadFailed":
+            raise
+        meta = {}
     if top is not None:
         meta["top"] = top
     if label is not None:
@@ -135,6 +153,6 @@ def save_project(
     if wave is not None:
         meta["wave"] = wave
     meta.setdefault("label", name)
-    (project / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    atomic_write_text(project / META_FILE, json.dumps(meta, indent=2), encoding="utf-8")
 
     return load_project(name)

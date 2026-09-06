@@ -201,26 +201,24 @@ class Simulator:
             self._tracer.log(f"#{time} $display {message}")
 
     def _on_dumpfile(self, path: str) -> None:
-        raw = str(path).strip().replace("\\", "/")
+        from hdl_sim.path_jail import join_under, nested_unquote, normalize_relpath
+
+        raw = str(path).strip()
         if not raw or "\x00" in raw:
             raise ValueError("invalid dumpfile path")
-        candidate = Path(raw)
         if self._vcd_anchor is None:
+            candidate = Path(raw.replace("\\", "/"))
             self._vcd_path = candidate if candidate.is_absolute() else Path(raw)
             self._ensure_vcd()
             if self._tracer is not None:
                 self._tracer.log(f"$dumpfile {path}")
             return
-        if candidate.is_absolute() or raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":"):
-            raise ValueError("dumpfile path must be relative to the simulation directory")
-        parts = [p for p in raw.split("/") if p and p != "."]
-        if not parts or any(p == ".." for p in parts):
-            raise ValueError("dumpfile path must be relative to the simulation directory")
-        dest = (self._vcd_anchor / "/".join(parts)).resolve()
         try:
-            dest.relative_to(self._vcd_anchor)
+            dest = join_under(self._vcd_anchor, normalize_relpath(nested_unquote(raw)))
         except ValueError as exc:
             raise ValueError("dumpfile path must be relative to the simulation directory") from exc
+        if dest.is_symlink():
+            raise ValueError("dumpfile path must be relative to the simulation directory")
         self._vcd_path = dest
         self._ensure_vcd()
         if self._tracer is not None:

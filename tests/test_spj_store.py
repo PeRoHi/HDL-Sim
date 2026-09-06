@@ -43,6 +43,19 @@ def test_spj_invalid_name() -> None:
         spj_store.save_spj_file("bad name.spj", {"format": "hdl-sim-project", "files": []})
 
 
+def test_spj_load_refuses_empty_and_corrupt(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
+    monkeypatch.setattr(spj_store, "user_data_dir", lambda: tmp_path)
+    empty = tmp_path / "empty.spj"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="loadFailed"):
+        spj_store.load_spj_file("empty.spj")
+    bad = tmp_path / "bad.spj"
+    bad.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(ValueError, match="loadFailed"):
+        spj_store.load_spj_file("bad.spj")
+
+
 def test_spj_refuses_empty_overwrite_of_existing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spj_store, "spj_dir", lambda: tmp_path)
     monkeypatch.setattr(spj_store, "user_data_dir", lambda: tmp_path)

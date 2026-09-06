@@ -93,6 +93,16 @@ def test_pid_looks_like_python_fail_closed_on_proc_error(monkeypatch) -> None:
     assert pid_looks_like_python(99999) is False
 
 
+def test_subprocess_calls_set_shell_false() -> None:
+    import inspect
+
+    from hdl_sim.web import port_util
+
+    source = inspect.getsource(port_util)
+    assert "shell=False" in source
+    assert source.count("shell=False") >= 4
+
+
 def test_pid_looks_like_python_rejects_non_positive() -> None:
     assert pid_looks_like_python(0) is False
     assert pid_looks_like_python(-3) is False
