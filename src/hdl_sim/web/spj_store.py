@@ -7,7 +7,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hdl_sim.web.path_safety import atomic_write_text, join_under, normalize_relpath
+from hdl_sim.web.path_safety import (
+    atomic_write_text,
+    join_under,
+    normalize_relpath,
+    reject_symlink,
+)
 from hdl_sim.web.paths import user_data_dir
 
 SPJ_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.spj$")
@@ -30,9 +35,10 @@ def _validate_filename(name: str) -> str:
 
 def _resolve_spj_path(name: str) -> Path:
     safe = _validate_filename(name)
-    path = (spj_dir() / safe).resolve()
-    if spj_dir().resolve() not in path.parents:
-        raise ValueError("invalid spj path")
+    root = spj_dir()
+    path = join_under(root, safe)
+    if path.exists() or path.is_symlink():
+        reject_symlink(path)
     return path
 
 
@@ -45,11 +51,19 @@ def list_spj_files() -> list[dict[str, Any]]:
 
 def load_spj_file(name: str) -> dict[str, Any]:
     path = _resolve_spj_path(name)
-    if not path.is_file():
+    if not path.is_file() or path.is_symlink():
         raise FileNotFoundError(name)
-    data = json.loads(path.read_text(encoding="utf-8"))
+    if path.stat().st_size == 0:
+        raise ValueError("loadFailed")
+    raw = path.read_text(encoding="utf-8")
+    if not raw.strip():
+        raise ValueError("loadFailed")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("loadFailed") from exc
     if not isinstance(data, dict):
-        raise ValueError("invalid spj content")
+        raise ValueError("loadFailed")
     return {"filename": path.name, "data": data}
 
 
@@ -83,4 +97,4 @@ def save_spj_file(name: str, payload: dict[str, Any]) -> dict[str, Any]:
             shown = rel
         updated_sources.append({"name": rel, "path": shown})
 
-    return {"filename": path.name, "path": str(path.resolve()), "updated_sources": updated_sources}
+    return {"filename": path.name, "path": path.name, "updated_sources": updated_sources}

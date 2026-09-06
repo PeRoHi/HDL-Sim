@@ -260,6 +260,67 @@ def test_static_rejects_dotdot_and_does_not_follow_symlink(tmp_path, monkeypatch
     assert "stolen" not in linked.text
 
 
+def test_static_rejects_non_loopback_host(tmp_path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+    from hdl_sim.web import app as app_module
+
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "ok.js").write_text("console.log(1)\n", encoding="utf-8")
+    monkeypatch.setattr(app_module, "UI_DIR", ui)
+    app = create_app()
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    denied = client.get("/assets/ok.js", headers={"Host": "evil.example:8765"})
+    assert denied.status_code == 403
+
+
+def test_dumpfile_percent_encoded_dotdot_rejected(tmp_path: Path) -> None:
+    vcd = tmp_path / "wave.vcd"
+    sim = Simulator.from_source(
+        """
+        module t;
+          initial begin
+            $dumpfile("%2e%2e/escape.vcd");
+            $dumpvars;
+            $finish;
+          end
+        endmodule
+        """,
+        vcd_path=vcd,
+        vcd_anchor=tmp_path,
+    )
+    with pytest.raises(ValueError, match="dumpfile"):
+        sim.run(until=1, max_events=20)
+    assert not (tmp_path.parent / "escape.vcd").exists()
+
+
+def test_include_percent_encoded_dotdot_rejected(tmp_path: Path) -> None:
+    secret = tmp_path / "secret.v"
+    secret.write_text("module stolen; endmodule\n", encoding="utf-8")
+    src_dir = tmp_path / "rtl"
+    src_dir.mkdir()
+    top = src_dir / "top.v"
+    top.write_text(
+        """
+        module top;
+          `include "%2e%2e/secret.v"
+        endmodule
+        """,
+        encoding="utf-8",
+    )
+    with pytest.raises(FileNotFoundError, match="unable to find include file"):
+        load_design_with_meta([top], include_paths=[src_dir])
+
+
+def test_error_payload_does_not_echo_os_path() -> None:
+    from hdl_sim.web.app import design_error_payload
+
+    payload = design_error_payload(FileNotFoundError("[Errno 2] No such file: /tmp/hdl_sim_ui_xyz/a.v"))
+    assert payload["ok"] is False
+    assert "/tmp/" not in payload["error"]
+    assert "Errno" not in payload["error"]
+
+
 def test_index_rejects_symlink_file(tmp_path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
     from hdl_sim.web import app as app_module

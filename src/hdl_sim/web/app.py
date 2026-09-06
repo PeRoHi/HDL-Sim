@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
@@ -28,10 +29,12 @@ from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 from hdl_sim.web.local_http import local_api_rejection, loopback_origins
 from hdl_sim.web.path_safety import (
     atomic_write_text,
+    client_error_from_exception,
     jailed_regular_file,
     join_under,
     normalize_project_stem,
     normalize_relpath,
+    summarize_client_error,
 )
 from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
 from hdl_sim.web import projects as project_store
@@ -362,6 +365,31 @@ def hierarchy_tree(design: Design, *, top: str | None) -> dict[str, Any]:
     return build(top_name, None)
 
 
+def design_error_payload(exc: Exception) -> dict[str, Any]:
+    """設計側の誤りは原因メッセージのみ返す。内部例外本文はエコーしない。"""
+
+    from hdl_sim.engine.evaluator import EvaluationError
+    from hdl_sim.parser.loader import VerilogSyntaxError
+
+    user_error = isinstance(
+        exc, (VerilogSyntaxError, ValueError, FileNotFoundError, EvaluationError, KeyError)
+    )
+    if isinstance(exc, VerilogSyntaxError):
+        return {
+            "ok": False,
+            "error": client_error_from_exception(exc),
+            "error_kind": "syntax",
+            "error_file": Path(exc.file).name if exc.file else "",
+            "error_line": exc.line,
+            "error_column": exc.column,
+        }
+    if isinstance(exc, KeyError):
+        return {"ok": False, "error": "不明な参照", "error_kind": "design"}
+    if user_error:
+        return {"ok": False, "error": client_error_from_exception(exc), "error_kind": "design"}
+    return {"ok": False, "error": "internal simulation error", "error_kind": "internal"}
+
+
 def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile.TemporaryDirectory[str]]:
     """Write virtual sources to a temp directory and load them."""
 
@@ -532,14 +560,29 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def require_loopback_api(request: Request, call_next):
-        if request.url.path.startswith("/api/"):
-            rejected = local_api_rejection(
-                request.headers.get("host"),
-                request.headers.get("origin"),
-            )
-            if rejected is not None:
-                return JSONResponse({"ok": False, "error": rejected}, status_code=403)
+        rejected = local_api_rejection(
+            request.headers.get("host"),
+            request.headers.get("origin"),
+        )
+        if rejected is not None:
+            return JSONResponse({"ok": False, "error": rejected}, status_code=403)
         return await call_next(request)
+
+    @app.exception_handler(HTTPException)
+    async def _safe_http_exception(_request: Request, exc: HTTPException):
+        safe = summarize_client_error(exc.detail)
+        return JSONResponse(
+            {"ok": False, "error": safe, "detail": safe},
+            status_code=exc.status_code,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _safe_validation_exception(_request: Request, exc: RequestValidationError):
+        safe = summarize_client_error(exc.errors())
+        return JSONResponse(
+            {"ok": False, "error": "invalid request", "detail": safe},
+            status_code=422,
+        )
 
     @app.post("/api/waveform_sync")
     async def sync_waveform_state(req: WaveformSyncRequest):
@@ -583,9 +626,9 @@ def create_app() -> FastAPI:
             "version": __version__,
             "version_label": f"Ver {__version__}",
             "build": UI_BUILD,
-            "ui_dir": str(UI_DIR.resolve()),
-            "spj_dir": str(spj_store.spj_dir().resolve()),
-            "data_dir": str(spj_store.spj_dir().resolve().parent),
+            "ui_dir": "ui",
+            "spj_dir": "spj",
+            "data_dir": ".",
             "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
             "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
@@ -667,19 +710,19 @@ def create_app() -> FastAPI:
     def api_create_project(req: ProjectCreateRequest) -> dict[str, Any]:
         try:
             return project_store.create_project(req.name, top=req.top, label=req.label)
-        except FileExistsError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileExistsError:
+            raise HTTPException(status_code=409, detail="project already exists") from None
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
 
     @app.get("/api/projects/{project_name}")
     def api_load_project(project_name: str) -> dict[str, Any]:
         try:
             return project_store.load_project(project_name)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="project not found") from exc
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="project not found") from None
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
 
     @app.put("/api/projects/{project_name}")
     def api_save_project(project_name: str, req: ProjectSaveRequest) -> dict[str, Any]:
@@ -695,13 +738,13 @@ def create_app() -> FastAPI:
                 wave=req.wave,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
 
     @app.get("/api/spj/info")
     def api_spj_info() -> dict[str, Any]:
         try:
             return {
-                "path": str(spj_store.spj_dir().resolve()),
+                "path": "spj",
                 "files": spj_store.list_spj_files(),
             }
         except OSError:
@@ -716,9 +759,11 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="spj file not found") from exc
         except (ValueError, json.JSONDecodeError) as exc:
+            if str(exc) == "loadFailed":
+                raise HTTPException(status_code=400, detail="loadFailed") from None
             if isinstance(exc, json.JSONDecodeError):
-                raise HTTPException(status_code=400, detail="invalid spj content") from exc
-            raise HTTPException(status_code=400, detail="invalid spj") from exc
+                raise HTTPException(status_code=400, detail="loadFailed") from None
+            raise HTTPException(status_code=400, detail="invalid spj") from None
 
     @app.put("/api/spj/{filename}")
     def api_save_spj(filename: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -764,29 +809,13 @@ def create_app() -> FastAPI:
         return {"ok": True, "path": shown}
 
     def _error_payload(exc: Exception) -> dict[str, Any]:
-        """設計側の誤りは原因メッセージのみ返す。内部例外本文はエコーしない。"""
+        if not isinstance(exc, (ValueError, FileNotFoundError, KeyError)):
+            from hdl_sim.engine.evaluator import EvaluationError
+            from hdl_sim.parser.loader import VerilogSyntaxError
 
-        from hdl_sim.engine.evaluator import EvaluationError
-        from hdl_sim.parser.loader import VerilogSyntaxError
-
-        user_error = isinstance(
-            exc, (VerilogSyntaxError, ValueError, FileNotFoundError, EvaluationError, KeyError)
-        )
-        if isinstance(exc, VerilogSyntaxError):
-            return {
-                "ok": False,
-                "error": str(exc),
-                "error_kind": "syntax",
-                "error_file": exc.file,
-                "error_line": exc.line,
-                "error_column": exc.column,
-            }
-        if isinstance(exc, KeyError):
-            return {"ok": False, "error": "不明な参照", "error_kind": "design"}
-        if user_error:
-            return {"ok": False, "error": str(exc), "error_kind": "design"}
-        print(traceback.format_exc(), file=sys.stderr)
-        return {"ok": False, "error": "internal simulation error", "error_kind": "internal"}
+            if not isinstance(exc, (VerilogSyntaxError, EvaluationError)):
+                print(traceback.format_exc(), file=sys.stderr)
+        return design_error_payload(exc)
 
     @app.post("/api/elaborate")
     def api_elaborate(req: ElaborateRequest) -> dict[str, Any]:

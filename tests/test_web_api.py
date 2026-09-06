@@ -146,7 +146,10 @@ def test_ui_info_reports_ide_layout() -> None:
     assert data["version"] == __version__
     assert data["version_label"] == f"Ver {__version__}"
     assert "release_url" in data
-    assert "spj_dir" in data
+    assert data["spj_dir"] == "spj"
+    assert data["ui_dir"] == "ui"
+    assert "/" not in data["spj_dir"]
+    assert "\\" not in data["data_dir"]
 
 
 def test_update_check_endpoint(monkeypatch) -> None:

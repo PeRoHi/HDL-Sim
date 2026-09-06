@@ -104,6 +104,7 @@ def install_dependencies(*, on_line: Callable[[str], None] | None = None) -> tup
             capture_output=True,
             text=True,
             check=False,
+            shell=False,
         )
     except OSError as exc:
         return False, str(exc)

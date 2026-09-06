@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from hdl_sim.path_jail import join_under, nested_unquote, normalize_relpath
+
 _COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
 _COMMENT_LINE = re.compile(r"//.*?$", re.MULTILINE)
 _DEFINE = re.compile(r"`define\s+(\w+)\s+([^\n]+)")
@@ -83,14 +85,17 @@ def expand_includes(
 
     def replace(match: re.Match[str]) -> str:
         include_name = match.group(1)
+        try:
+            safe_name = normalize_relpath(nested_unquote(include_name))
+        except ValueError:
+            raise FileNotFoundError("unable to find include file") from None
         for directory in search_paths:
-            root = Path(directory).resolve()
-            candidate = (root / include_name).resolve()
+            root = Path(directory)
             try:
-                candidate.relative_to(root)
+                candidate = join_under(root, safe_name)
             except ValueError:
                 continue
-            if not candidate.is_file():
+            if not candidate.is_file() or candidate.is_symlink():
                 continue
             if candidate in seen:
                 return ""
@@ -105,8 +110,7 @@ def expand_includes(
                 _seen=seen,
             )
             return nested + "\n"
-        msg = f"unable to find include file: {include_name}"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError("unable to find include file")
 
     return _INCLUDE.sub(replace, source)
 

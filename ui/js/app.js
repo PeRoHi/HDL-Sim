@@ -2217,6 +2217,27 @@ function setWaveZoom(nextZoom) {
 
 /* ── API ── */
 
+function formatClientError(detail, status) {
+  if (typeof detail === "string") {
+    const text = detail.trim();
+    if (!text) return `HTTP ${status}`;
+    if (/errno|traceback|[/\\](?:home|tmp|var|etc|usr|Users|workspace)[/\\]|[A-Za-z]:[\\/]/i.test(text)) {
+      return "request failed";
+    }
+    return text;
+  }
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => formatClientError(item, status)).filter((p) => p && p !== "request failed");
+    return parts[0] || "invalid request";
+  }
+  if (detail && typeof detail === "object") {
+    if (typeof detail.msg === "string") return formatClientError(detail.msg, status);
+    if (typeof detail.error === "string") return formatClientError(detail.error, status);
+    return "invalid request";
+  }
+  return `HTTP ${status}`;
+}
+
 async function api(path, body, signal, method) {
   const init = { signal };
   if (body !== undefined && body !== null) {
@@ -2235,7 +2256,7 @@ async function api(path, body, signal, method) {
   }
   if (!res.ok) {
     const detail = data?.detail ?? data?.error ?? `HTTP ${res.status}`;
-    const message = typeof detail === "string" ? detail : JSON.stringify(detail);
+    const message = formatClientError(detail, res.status);
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
