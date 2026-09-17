@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import mimetypes
 import tempfile
 import traceback
 from contextlib import asynccontextmanager
@@ -14,9 +15,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from starlette.staticfiles import StaticFiles
-from starlette.types import Scope
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from hdl_sim import __version__
@@ -26,14 +25,17 @@ from hdl_sim.parser.ast import Design, Module, PortDirection
 from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
-from hdl_sim.web.local_http import local_api_rejection, loopback_origins
+from hdl_sim.web.local_http import listen_port_from_scope, local_api_rejection, loopback_origins
 from hdl_sim.web.path_safety import (
     atomic_write_text,
     client_error_from_exception,
+    iter_regular_files,
     jailed_regular_file,
     join_under,
     normalize_project_stem,
     normalize_relpath,
+    read_bytes_nofollow,
+    read_text_nofollow,
     summarize_client_error,
 )
 from hdl_sim.web.paths import examples_dir, ui_dir, user_data_dir
@@ -79,35 +81,22 @@ class WaveformSyncRequest(BaseModel):
     order: list[str] = Field(default_factory=list)
 
 
-class NoCacheStaticFiles(StaticFiles):
-    """Serve UI assets without aggressive browser caching (dev-friendly).
+def _no_cache_headers(path: str) -> dict[str, str]:
+    if path.endswith(_NO_CACHE_SUFFIXES):
+        return {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        }
+    return {}
 
-    Paths stay inside the UI directory. Symlinks are not followed.
-    """
 
-    def __init__(self, directory, **kwargs):
-        kwargs.setdefault("html", False)
-        try:
-            super().__init__(directory=directory, follow_symlink=False, **kwargs)
-        except TypeError:
-            super().__init__(directory=directory, **kwargs)
+def _jailed_file_response(root: Path, rel: str) -> Response:
+    """Return in-jail file bytes without following a leaf symlink."""
 
-    async def get_response(self, path: str, scope: Scope):
-        from starlette.responses import PlainTextResponse
-
-        try:
-            if path and path not in {".", "./"}:
-                safe = normalize_relpath(path)
-                lexical = Path(self.directory) / Path(safe)
-                if lexical.is_symlink():
-                    return PlainTextResponse("Not Found", status_code=404)
-        except ValueError:
-            return PlainTextResponse("Not Found", status_code=404)
-        response = await super().get_response(path, scope)
-        if path.endswith(_NO_CACHE_SUFFIXES):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-        return response
+    dest = jailed_regular_file(root, rel)
+    data = read_bytes_nofollow(dest)
+    media = mimetypes.guess_type(dest.name)[0] or "application/octet-stream"
+    return Response(content=data, media_type=media, headers=_no_cache_headers(rel))
 
 
 UI_DIR = ui_dir()
@@ -412,7 +401,7 @@ def load_design_from_files(files: list[SourceFile]) -> tuple[Any, Path, tempfile
 def _examples_by_basename() -> dict[str, list[Path]]:
     table: dict[str, list[Path]] = {}
     if EXAMPLES_DIR.is_dir():
-        for path in EXAMPLES_DIR.rglob("*.v"):
+        for path in iter_regular_files(EXAMPLES_DIR, suffix=".v"):
             table.setdefault(path.name, []).append(path)
     return table
 
@@ -563,6 +552,7 @@ def create_app() -> FastAPI:
         rejected = local_api_rejection(
             request.headers.get("host"),
             request.headers.get("origin"),
+            port=listen_port_from_scope(request.scope.get("server")),
         )
         if rejected is not None:
             return JSONResponse({"ok": False, "error": rejected}, status_code=403)
@@ -620,8 +610,13 @@ def create_app() -> FastAPI:
 
     @app.get("/api/ui-info")
     def ui_info() -> dict[str, Any]:
-        index_path = UI_DIR / "index.html"
-        index_text = index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
+        try:
+            index_path = jailed_regular_file(UI_DIR, "index.html")
+            index_text = read_text_nofollow(index_path)
+            index_mtime = index_path.stat().st_mtime
+        except (ValueError, OSError):
+            index_text = ""
+            index_mtime = None
         return {
             "version": __version__,
             "version_label": f"Ver {__version__}",
@@ -631,7 +626,7 @@ def create_app() -> FastAPI:
             "data_dir": ".",
             "release_url": "https://github.com/PeRoHi/HDL-Sim/releases/latest",
             "ide_layout": "pane-explorer" in index_text and "tb-btn" in index_text,
-            "index_mtime": index_path.stat().st_mtime if index_path.is_file() else None,
+            "index_mtime": index_mtime,
         }
 
     @app.get("/api/update-check")
@@ -667,7 +662,7 @@ def create_app() -> FastAPI:
             )
 
         bundled = _project_member_paths()
-        for path in sorted(EXAMPLES_DIR.rglob("*.v")):
+        for path in sorted(iter_regular_files(EXAMPLES_DIR, suffix=".v")):
             rel = path.relative_to(EXAMPLES_DIR).as_posix()
             if rel in bundled:
                 continue
@@ -703,6 +698,8 @@ def create_app() -> FastAPI:
     def api_list_projects() -> list[dict[str, Any]]:
         try:
             return project_store.list_projects()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
         except OSError:
             raise HTTPException(status_code=500, detail="storage error") from None
 
@@ -773,8 +770,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="files required")
         try:
             saved = spj_store.save_spj_file(filename, payload)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid file path") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
         updated_sources: list[Any] = saved.get("updated_sources", [])
         source_errors: list[str] = []
         return {
@@ -914,21 +911,19 @@ def create_app() -> FastAPI:
             return {**_error_payload(exc), "console": ""}
 
     if UI_DIR.is_dir():
-        app.mount("/assets", NoCacheStaticFiles(directory=UI_DIR), name="assets")
-
-        @app.get("/")
-        def index() -> FileResponse:
+        @app.get("/assets/{asset_path:path}")
+        def assets(asset_path: str) -> Response:
             try:
-                dest = jailed_regular_file(UI_DIR, "index.html")
+                return _jailed_file_response(UI_DIR, asset_path)
             except ValueError:
                 raise HTTPException(status_code=404, detail="not found") from None
-            return FileResponse(
-                dest,
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                },
-            )
+
+        @app.get("/")
+        def index() -> Response:
+            try:
+                return _jailed_file_response(UI_DIR, "index.html")
+            except ValueError:
+                raise HTTPException(status_code=404, detail="not found") from None
 
     return app
 

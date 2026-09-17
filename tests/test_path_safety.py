@@ -34,6 +34,9 @@ def test_normalize_relpath_allows_nested_verilog() -> None:
         "C:/Windows/secret.v",
         "//server/share",
         "foo\x00.v",
+        "foo%00.v",
+        "foo%0a.v",
+        "foo%7f.v",
         "%2e%2e/secret.v",
         "%252e%252e/secret.v",
         "lib/%2e%2e/secret.v",
@@ -53,6 +56,24 @@ def test_normalize_project_stem() -> None:
         normalize_project_stem("..")
     with pytest.raises(ValueError):
         normalize_project_stem("bad name")
+
+
+def test_iter_regular_files_skips_symlink_dirs(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import iter_regular_files
+
+    root = tmp_path / "ex"
+    outside = tmp_path / "out"
+    root.mkdir()
+    outside.mkdir()
+    (root / "keep.v").write_text("module k; endmodule\n", encoding="utf-8")
+    (outside / "secret.v").write_text("module s; endmodule\n", encoding="utf-8")
+    linked = root / "linked"
+    try:
+        linked.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    names = {p.name for p in iter_regular_files(root, suffix=".v")}
+    assert names == {"keep.v"}
 
 
 def test_join_under_rejects_symlink_escape(tmp_path: Path) -> None:
@@ -95,6 +116,50 @@ def test_jailed_regular_file_rejects_symlink(tmp_path: Path) -> None:
         reject_symlink(link)
     with pytest.raises(ValueError):
         jailed_regular_file(jail, "index.html")
+
+
+def test_atomic_write_replaces_regular_leftover_tmp(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import atomic_write_text
+
+    dest = tmp_path / "proj.spj"
+    leftover = dest.with_name(f".{dest.name}.{__import__('os').getpid()}.tmp")
+    leftover.write_text("stale", encoding="utf-8")
+    atomic_write_text(dest, "fresh")
+    assert dest.read_text(encoding="utf-8") == "fresh"
+    assert not leftover.exists()
+
+
+def test_atomic_write_refuses_symlink_tmp(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import atomic_write_text
+    import os
+
+    dest = tmp_path / "proj.spj"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep", encoding="utf-8")
+    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    try:
+        tmp.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    with pytest.raises(ValueError, match="symlink"):
+        atomic_write_text(dest, "new")
+    assert outside.read_text(encoding="utf-8") == "keep"
+    assert tmp.is_symlink()
+
+
+def test_read_text_nofollow_rejects_symlink(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import read_text_nofollow
+
+    real = tmp_path / "real.txt"
+    real.write_text("ok", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    assert read_text_nofollow(real) == "ok"
+    with pytest.raises(ValueError, match="symlink"):
+        read_text_nofollow(link)
 
 
 def test_atomic_write_text_replaces_and_cleans_tmp(tmp_path: Path) -> None:

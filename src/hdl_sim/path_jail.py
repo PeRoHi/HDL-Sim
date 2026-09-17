@@ -7,20 +7,34 @@ leaves and existing ancestors are refused before ``resolve``.
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from urllib.parse import unquote
 
 _UNQUOTE_ROUNDS = 8
 
 
+def has_c0_del(text: str) -> bool:
+    """True when *text* contains C0 controls or DEL (including CR/LF/NUL/TAB)."""
+
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in text)
+
+
 def nested_unquote(raw: str, *, max_rounds: int = _UNQUOTE_ROUNDS) -> str:
-    """Decode percent-encoding repeatedly (capped) before path-component checks."""
+    """Decode percent-encoding repeatedly (capped) before path-component checks.
+
+    Each decoded stage is checked for C0/DEL so ``%00`` / ``%0a`` cannot pass.
+    """
 
     if raw is None or not isinstance(raw, str):
         raise ValueError("invalid file path")
     text = raw
+    if has_c0_del(text):
+        raise ValueError("invalid file path")
     for _ in range(max_rounds):
         nxt = unquote(text)
+        if has_c0_del(nxt):
+            raise ValueError("invalid file path")
         if nxt == text:
             return text
         text = nxt
@@ -34,9 +48,9 @@ def normalize_relpath(raw: str) -> str:
 
     if raw is None or not isinstance(raw, str):
         raise ValueError("invalid file path")
-    if "\x00" in raw:
-        raise ValueError("invalid file path")
     text = nested_unquote(raw).replace("\\", "/").strip()
+    if has_c0_del(text):
+        raise ValueError("invalid file path")
     if not text or text.startswith("/") or text.startswith("//"):
         raise ValueError("invalid file path")
     if len(text) >= 2 and text[1] == ":":
@@ -116,6 +130,64 @@ def jailed_regular_file(root: Path, rel: str) -> Path:
     return dest
 
 
+def read_bytes_nofollow(path: Path) -> bytes:
+    """Read a regular file without following a leaf symlink (``O_NOFOLLOW``)."""
+
+    dest = Path(path)
+    if dest.is_symlink():
+        raise ValueError("symlink not allowed")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(os.fspath(dest), flags)
+    except OSError as exc:
+        raise ValueError("file not found") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("file not found")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def read_text_nofollow(path: Path, *, encoding: str = "utf-8") -> str:
+    """Read text via ``read_bytes_nofollow``."""
+
+    return read_bytes_nofollow(path).decode(encoding)
+
+
+def iter_regular_files(root: Path, *, suffix: str | None = None) -> list[Path]:
+    """List regular files under *root* without following directory symlinks."""
+
+    base = Path(root)
+    if not base.is_dir() or base.is_symlink():
+        return []
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        current = Path(dirpath)
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not (current / name).is_symlink()
+        ]
+        for name in filenames:
+            path = current / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            if suffix is not None and path.suffix != suffix:
+                continue
+            found.append(path)
+    return found
+
+
 def atomic_write_text(
     path: Path,
     text: str,
@@ -123,12 +195,13 @@ def atomic_write_text(
     encoding: str = "utf-8",
     refuse_empty: bool = False,
 ) -> None:
-    """Write *text* via a same-directory temp file, ``fsync``, and ``os.replace``.
+    """Write *text* via exclusive tmp (``O_EXCL|O_NOFOLLOW``), ``fsync``, replace.
 
     If *refuse_empty* is true, do not replace an existing non-empty file
     with an empty (or whitespace-only) payload.
 
-    Refuse writing through a symlink leaf, parent, or leftover tmp name.
+    Leftover regular ``.tmp`` is unlinked then recreated. A symlink ``.tmp``
+    is refused without unlinking (do not remove the link target).
     """
 
     dest = Path(path)
@@ -144,17 +217,32 @@ def atomic_write_text(
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
     if tmp.is_symlink():
         raise ValueError("symlink not allowed")
+    if tmp.exists():
+        tmp.unlink()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd: int | None = None
+    created = False
     try:
-        with tmp.open("w", encoding=encoding, newline="") as handle:
+        fd = os.open(os.fspath(tmp), flags, 0o644)
+        created = True
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as handle:
+            fd = None
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         if tmp.is_symlink():
             raise ValueError("symlink not allowed")
         os.replace(tmp, dest)
+        created = False
     except Exception:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if created and tmp.exists() and not tmp.is_symlink():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
         raise
+    finally:
+        if fd is not None:
+            os.close(fd)

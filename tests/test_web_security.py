@@ -45,6 +45,9 @@ def test_host_and_origin_gate() -> None:
     assert not host_is_loopback("*.ts.net:8765")
     assert not host_is_loopback("foo.ts.net:8765")
     assert local_api_rejection("0.0.0.0:8765", None) == "invalid host"
+    assert local_api_rejection("127.0.0.1:8765\r", None) == "invalid host"
+    assert local_api_rejection("127.0.0.1:8765\n", None) == "invalid host"
+    assert not origin_is_allowed("http://127.0.0.1:8765\r")
 
 
 def test_cors_is_not_wildcard() -> None:
@@ -95,6 +98,14 @@ def test_http_rejects_non_loopback_host_and_null_origin() -> None:
     )
     assert xff.status_code == 403
     assert xff.json()["error"] == "invalid host"
+    cr_host = client.get("/api/health", headers={"Host": "127.0.0.1:8765\r"})
+    assert cr_host.status_code == 403
+    assert cr_host.json()["error"] == "invalid host"
+    wrong_listen = client.get(
+        "/api/health",
+        headers={"Host": "127.0.0.1:80"},
+    )
+    assert wrong_listen.status_code == 403
 
 
 def test_save_v_file_and_spj_reject_traversal(tmp_path, monkeypatch) -> None:
@@ -258,6 +269,12 @@ def test_static_rejects_dotdot_and_does_not_follow_symlink(tmp_path, monkeypatch
     linked = client.get("/assets/link.js")
     assert linked.status_code == 404
     assert "stolen" not in linked.text
+    nested = ui / "vendor"
+    nested.mkdir()
+    (nested / "ok.css").write_text("body{}\n", encoding="utf-8")
+    nested_ok = client.get("/assets/vendor/ok.css")
+    assert nested_ok.status_code == 200
+    assert "body{}" in nested_ok.text
 
 
 def test_static_rejects_non_loopback_host(tmp_path, monkeypatch) -> None:

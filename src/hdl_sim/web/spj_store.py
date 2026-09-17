@@ -11,6 +11,7 @@ from hdl_sim.web.path_safety import (
     atomic_write_text,
     join_under,
     normalize_relpath,
+    read_text_nofollow,
     reject_symlink,
 )
 from hdl_sim.web.paths import user_data_dir
@@ -45,6 +46,8 @@ def _resolve_spj_path(name: str) -> Path:
 def list_spj_files() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for entry in sorted(spj_dir().glob("*.spj")):
+        if entry.is_symlink() or not entry.is_file():
+            continue
         rows.append({"name": entry.name, "label": entry.stem})
     return rows
 
@@ -55,7 +58,7 @@ def load_spj_file(name: str) -> dict[str, Any]:
         raise FileNotFoundError(name)
     if path.stat().st_size == 0:
         raise ValueError("loadFailed")
-    raw = path.read_text(encoding="utf-8")
+    raw = read_text_nofollow(path)
     if not raw.strip():
         raise ValueError("loadFailed")
     try:
