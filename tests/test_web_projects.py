@@ -54,6 +54,14 @@ def test_save_project_persists_wave_prefs(isolated_projects) -> None:
     assert loaded["wave"] == wave
 
 
+def test_list_projects_corrupt_meta_is_load_failed(isolated_projects) -> None:
+    project_store.create_project("broken", top="tb")
+    meta = isolated_projects / "broken" / project_store.META_FILE
+    meta.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(ValueError, match="loadFailed"):
+        project_store.list_projects()
+
+
 def test_load_project_corrupt_meta_is_load_failed(isolated_projects) -> None:
     project_store.create_project("broken", top="tb")
     meta = isolated_projects / "broken" / project_store.META_FILE

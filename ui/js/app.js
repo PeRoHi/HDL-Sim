@@ -1389,8 +1389,17 @@ function renderEditorTabs() {
     tab.className = "editor-tab" + (path === activeFile ? " active" : "");
     tab.setAttribute("role", "tab");
     tab.dataset.path = path;
-    tab.innerHTML = `<span class="label">${path}</span>` +
-      (fileStore.size > 1 ? `<span class="close" data-close="${path}">×</span>` : "");
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = path;
+    tab.appendChild(label);
+    if (fileStore.size > 1) {
+      const close = document.createElement("span");
+      close.className = "close";
+      close.dataset.close = path;
+      close.textContent = "×";
+      tab.appendChild(close);
+    }
     tab.addEventListener("click", (e) => {
       if (e.target.classList.contains("close")) {
         closeFile(e.target.dataset.close);

@@ -20,7 +20,10 @@ def test_check_for_updates_uses_github_payload(monkeypatch) -> None:
         "html_url": "https://github.com/PeRoHi/HDL-Sim/releases/tag/v0.9.0",
         "published_at": "2026-01-01T00:00:00Z",
         "assets": [
-            {"name": "HDL-Sim-Setup-0.9.0.exe", "browser_download_url": "https://example.com/setup.exe"},
+            {
+                "name": "HDL-Sim-Setup-0.9.0.exe",
+                "browser_download_url": "https://github.com/PeRoHi/HDL-Sim/releases/download/v0.9.0/HDL-Sim-Setup-0.9.0.exe",
+            },
         ],
     }
 
@@ -31,22 +34,32 @@ def test_check_for_updates_uses_github_payload(monkeypatch) -> None:
     assert result["ok"] is True
     assert result["latest_version"] == "0.9.0"
     assert result["update_available"] is True
-    assert result["download_url"] == "https://example.com/setup.exe"
+    assert result["download_url"] == (
+        "https://github.com/PeRoHi/HDL-Sim/releases/download/v0.9.0/HDL-Sim-Setup-0.9.0.exe"
+    )
 
 
 def test_pick_windows_asset_prefers_zip(monkeypatch) -> None:
     payload = {
         "tag_name": "v1.0.0",
         "assets": [
-            {"name": "HDL-Sim-Setup-1.0.0.exe", "browser_download_url": "https://example.com/setup.exe"},
-            {"name": "HDL-Sim-1.0.0-windows-x64.zip", "browser_download_url": "https://example.com/app.zip"},
+            {
+                "name": "HDL-Sim-Setup-1.0.0.exe",
+                "browser_download_url": "https://github.com/PeRoHi/HDL-Sim/releases/download/v1.0.0/HDL-Sim-Setup-1.0.0.exe",
+            },
+            {
+                "name": "HDL-Sim-1.0.0-windows-x64.zip",
+                "browser_download_url": "https://github.com/PeRoHi/HDL-Sim/releases/download/v1.0.0/HDL-Sim-1.0.0-windows-x64.zip",
+            },
         ],
     }
     monkeypatch.setattr("hdl_sim.web.update_checker._fetch_latest_release", lambda *a, **k: payload)
     monkeypatch.setattr("hdl_sim.web.update_checker._cache", {"at": 0.0, "payload": None})
 
     result = check_for_updates("0.5.0", force_refresh=True)
-    assert result["download_url"] == "https://example.com/app.zip"
+    assert result["download_url"] == (
+        "https://github.com/PeRoHi/HDL-Sim/releases/download/v1.0.0/HDL-Sim-1.0.0-windows-x64.zip"
+    )
 
 
 def test_check_for_updates_no_update_when_current(monkeypatch) -> None:

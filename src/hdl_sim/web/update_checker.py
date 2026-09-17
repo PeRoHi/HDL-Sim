@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 from hdl_sim import __version__
 
@@ -55,6 +56,21 @@ def _fetch_latest_release(url: str = DEFAULT_RELEASES_URL, *, timeout: float = 8
         return json.loads(response.read().decode("utf-8"))
 
 
+def _github_hdl_sim_url(url: str, fallback: str) -> str:
+    """Keep only https://github.com/PeRoHi/HDL-Sim... (no extra hosts)."""
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return fallback
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != "github.com":
+        return fallback
+    path = parsed.path or ""
+    if not path.startswith("/PeRoHi/HDL-Sim"):
+        return fallback
+    return url
+
+
 def _pick_windows_asset(release: dict[str, Any]) -> str | None:
     """Prefer ZIP (primary distribution), then signed/unsigned Setup exe."""
     zip_url: str | None = None
@@ -65,10 +81,13 @@ def _pick_windows_asset(release: dict[str, Any]) -> str | None:
         url = str(asset.get("browser_download_url") or "") or None
         if not url or "hdl-sim" not in lower:
             continue
+        safe = _github_hdl_sim_url(url, "")
+        if not safe:
+            continue
         if lower.endswith(".zip"):
-            zip_url = url
+            zip_url = safe
         elif lower.endswith(".exe") and ("setup" in lower or lower.startswith("hdl-sim")):
-            exe_url = url
+            exe_url = safe
     return zip_url or exe_url
 
 
@@ -113,7 +132,10 @@ def check_for_updates(
 
     tag = normalize_version(str(release.get("tag_name") or release.get("name") or current))
     download = _pick_windows_asset(release)
-    html_url = str(release.get("html_url") or base["release_url"])
+    html_url = _github_hdl_sim_url(
+        str(release.get("html_url") or base["release_url"]),
+        base["release_url"],
+    )
 
     result = {
         "ok": True,

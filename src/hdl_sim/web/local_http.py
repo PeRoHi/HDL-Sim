@@ -14,10 +14,24 @@ from __future__ import annotations
 import os
 from urllib.parse import urlparse
 
+from hdl_sim.path_jail import has_c0_del
 from hdl_sim.web.port_util import DEFAULT_UI_PORT
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _UI_PORT_ENV = "HDL_SIM_UI_PORT"
+
+
+def listen_port_from_scope(server: object | None) -> int:
+    """ASGI ``scope['server']`` port, else the configured UI port."""
+
+    if isinstance(server, (tuple, list)) and len(server) >= 2 and server[1] is not None:
+        try:
+            port = int(server[1])
+        except (TypeError, ValueError):
+            port = 0
+        if 1 <= port <= 65535:
+            return port
+    return expected_ui_port()
 
 
 def expected_ui_port() -> int:
@@ -32,7 +46,10 @@ def expected_ui_port() -> int:
 
 
 def split_hostport(host_header: str) -> tuple[str, int | None]:
-    text = (host_header or "").strip()
+    raw = host_header if isinstance(host_header, str) else ""
+    if has_c0_del(raw):
+        raise ValueError("invalid host")
+    text = raw.strip()
     if not text:
         raise ValueError("missing host")
     if text.startswith("["):
@@ -71,6 +88,8 @@ def origin_is_allowed(origin: str | None, *, port: int | None = None) -> bool:
 
     if origin is None:
         return True
+    if has_c0_del(origin):
+        return False
     text = origin.strip()
     if not text:
         return True
