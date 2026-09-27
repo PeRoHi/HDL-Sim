@@ -10,6 +10,7 @@ from hdl_sim.engine.simulator import Simulator
 from hdl_sim.parser.loader import load_design_with_meta
 from hdl_sim.web.app import SourceFile, create_app, load_design_from_files
 from hdl_sim.web.local_http import (
+    expected_ui_port,
     host_is_loopback,
     local_api_rejection,
     loopback_origins,
@@ -23,6 +24,22 @@ def _loopback_headers(origin: str | None = "http://127.0.0.1:8765") -> dict[str,
     if origin is not None:
         headers["Origin"] = origin
     return headers
+
+
+def test_invalid_ui_port_env_fails_create_app(monkeypatch) -> None:
+    monkeypatch.setenv("HDL_SIM_UI_PORT", "08765")
+    with pytest.raises(ValueError, match="invalid listen port"):
+        create_app()
+
+
+def test_expected_ui_port_no_silent_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("HDL_SIM_UI_PORT", raising=False)
+    assert expected_ui_port() == 8765
+    monkeypatch.setenv("HDL_SIM_UI_PORT", "9000")
+    assert expected_ui_port() == 9000
+    monkeypatch.setenv("HDL_SIM_UI_PORT", "notaport")
+    with pytest.raises(ValueError, match="invalid listen port"):
+        expected_ui_port()
 
 
 def test_host_and_origin_gate() -> None:
@@ -48,6 +65,10 @@ def test_host_and_origin_gate() -> None:
     assert local_api_rejection("127.0.0.1:8765\r", None) == "invalid host"
     assert local_api_rejection("127.0.0.1:8765\n", None) == "invalid host"
     assert not origin_is_allowed("http://127.0.0.1:8765\r")
+    assert not host_is_loopback("127.0.0.1:08765")
+    assert not host_is_loopback("127.0.0.1:８７６５")
+    assert not origin_is_allowed("http://127.0.0.1:08765")
+    assert local_api_rejection("127.0.0.1:08765", None) == "invalid host"
 
 
 def test_cors_is_not_wildcard() -> None:
@@ -106,6 +127,12 @@ def test_http_rejects_non_loopback_host_and_null_origin() -> None:
         headers={"Host": "127.0.0.1:80"},
     )
     assert wrong_listen.status_code == 403
+    leading_zero = client.get(
+        "/api/health",
+        headers={"Host": "127.0.0.1:08765"},
+    )
+    assert leading_zero.status_code == 403
+    assert leading_zero.json()["error"] == "invalid host"
 
 
 def test_save_v_file_and_spj_reject_traversal(tmp_path, monkeypatch) -> None:

@@ -15,7 +15,7 @@ import os
 from urllib.parse import urlparse
 
 from hdl_sim.path_jail import has_c0_del
-from hdl_sim.web.port_util import DEFAULT_UI_PORT
+from hdl_sim.web.port_util import DEFAULT_UI_PORT, parse_ascii_port
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _UI_PORT_ENV = "HDL_SIM_UI_PORT"
@@ -31,18 +31,18 @@ def listen_port_from_scope(server: object | None) -> int:
             port = 0
         if 1 <= port <= 65535:
             return port
-    return expected_ui_port()
+    try:
+        return expected_ui_port()
+    except ValueError:
+        return 0
 
 
 def expected_ui_port() -> int:
-    raw = os.environ.get(_UI_PORT_ENV, str(DEFAULT_UI_PORT))
-    try:
-        port = int(raw)
-    except ValueError:
+    """Configured UI port. Unset env uses the default; an invalid value is an error."""
+
+    if _UI_PORT_ENV not in os.environ:
         return DEFAULT_UI_PORT
-    if 1 <= port <= 65535:
-        return port
-    return DEFAULT_UI_PORT
+    return parse_ascii_port(os.environ[_UI_PORT_ENV])
 
 
 def split_hostport(host_header: str) -> tuple[str, int | None]:
@@ -60,13 +60,12 @@ def split_hostport(host_header: str) -> tuple[str, int | None]:
         rest = text[end + 1 :]
         if rest == "":
             return name, None
-        if rest.startswith(":") and rest[1:].isdigit():
-            return name, int(rest[1:])
+        if rest.startswith(":"):
+            return name, parse_ascii_port(rest[1:])
         raise ValueError("invalid host")
     if ":" in text:
         name, port_s = text.rsplit(":", 1)
-        if port_s.isdigit():
-            return name.lower(), int(port_s)
+        return name.lower(), parse_ascii_port(port_s)
     return text.lower(), None
 
 
@@ -77,7 +76,10 @@ def host_is_loopback(host_header: str, *, port: int | None = None) -> bool:
         return False
     if name not in LOOPBACK_HOSTS:
         return False
-    expected = expected_ui_port() if port is None else port
+    try:
+        expected = expected_ui_port() if port is None else port
+    except ValueError:
+        return False
     if parsed_port is None:
         return False
     return parsed_port == expected
@@ -98,11 +100,20 @@ def origin_is_allowed(origin: str | None, *, port: int | None = None) -> bool:
     parsed = urlparse(text)
     if parsed.scheme != "http":
         return False
-    host = (parsed.hostname or "").lower()
+    netloc = parsed.netloc or ""
+    if "@" in netloc:
+        return False
+    try:
+        host, parsed_port = split_hostport(netloc)
+    except ValueError:
+        return False
     if host not in LOOPBACK_HOSTS:
         return False
-    expected = expected_ui_port() if port is None else port
-    origin_port = parsed.port if parsed.port is not None else 80
+    try:
+        expected = expected_ui_port() if port is None else port
+    except ValueError:
+        return False
+    origin_port = parsed_port if parsed_port is not None else 80
     return origin_port == expected
 
 

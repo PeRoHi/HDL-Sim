@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from hdl_sim.web.port_util import (
     command_looks_like_ours,
     ensure_default_port,
     local_listen_port,
+    parse_ascii_port,
     parse_netstat_listening_pids,
     parse_pid,
     pid_looks_like_python,
@@ -56,6 +59,22 @@ def test_local_listen_port_is_exact() -> None:
     assert local_listen_port("[::]:18765") == 18765
     assert local_listen_port("127.0.0.1:8765") != 18765
     assert local_listen_port("not-a-port") is None
+    assert local_listen_port("127.0.0.1:08765") is None
+    assert local_listen_port("127.0.0.1:８７６５") is None
+
+
+def test_parse_ascii_port_rejects_leading_zeros_and_fallback() -> None:
+    assert parse_ascii_port("8765") == 8765
+    with pytest.raises(ValueError, match="invalid listen port"):
+        parse_ascii_port("08765")
+    with pytest.raises(ValueError, match="invalid listen port"):
+        parse_ascii_port("８７６５")
+    with pytest.raises(ValueError, match="invalid listen port"):
+        parse_ascii_port("8765 ")
+    with pytest.raises(ValueError, match="invalid listen port"):
+        parse_ascii_port("notaport")
+    with pytest.raises(ValueError, match="invalid listen port"):
+        parse_ascii_port("0")
 
 
 def test_netstat_does_not_match_suffix_port() -> None:

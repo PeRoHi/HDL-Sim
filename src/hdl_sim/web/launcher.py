@@ -24,6 +24,7 @@ if not getattr(sys, "frozen", False):
 from hdl_sim.web.port_util import (
     DEFAULT_UI_PORT,
     ensure_default_port,
+    parse_ascii_port,
     port_is_free,
     release_port,
     wait_for_server,
@@ -206,6 +207,17 @@ def start_server(
 ) -> RunningServer | int:
     prepare_runtime()
     ensure_src_on_path()
+    raw_env_port = os.environ.get("HDL_SIM_UI_PORT")
+    if raw_env_port is not None:
+        try:
+            parse_ascii_port(raw_env_port)
+        except ValueError:
+            print(
+                "HDL_SIM_UI_PORT must be a strict ASCII decimal port (1-65535), "
+                "without leading zeros.",
+                file=sys.stderr,
+            )
+            return 2
     try:
         port = prepare_ui_port(host, port, on_log=on_log)
     except OSError as exc:
