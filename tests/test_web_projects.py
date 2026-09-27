@@ -70,6 +70,52 @@ def test_load_project_corrupt_meta_is_load_failed(isolated_projects) -> None:
         project_store.load_project("broken")
 
 
+def test_save_project_refuses_overwrite_of_corrupt_meta(isolated_projects) -> None:
+    project_store.create_project("broken", top="tb")
+    meta = isolated_projects / "broken" / project_store.META_FILE
+    original = "{not-json"
+    meta.write_text(original, encoding="utf-8")
+    with pytest.raises(ValueError, match="loadFailed"):
+        project_store.save_project(
+            "broken",
+            [{"path": "tb.v", "content": "module tb; endmodule\n"}],
+            top="tb",
+        )
+    assert meta.read_text(encoding="utf-8") == original
+    assert not (isolated_projects / "broken" / "tb.v").exists()
+
+
+def test_list_projects_whitespace_meta_is_load_failed(isolated_projects) -> None:
+    project_store.create_project("ws", top="tb")
+    meta = isolated_projects / "ws" / project_store.META_FILE
+    meta.write_text(" \n", encoding="utf-8")
+    with pytest.raises(ValueError, match="loadFailed"):
+        project_store.list_projects()
+
+
+def test_project_http_loadfailed_is_503(isolated_projects) -> None:
+    from fastapi.testclient import TestClient
+
+    project_store.create_project("broken", top="tb")
+    meta = isolated_projects / "broken" / project_store.META_FILE
+    meta.write_text("{not-json", encoding="utf-8")
+    client = TestClient(create_app(), base_url="http://127.0.0.1:8765")
+    listed = client.get("/api/projects", headers={"Host": "127.0.0.1:8765"})
+    assert listed.status_code == 503
+    assert listed.json()["error"] == "loadFailed"
+    loaded = client.get("/api/projects/broken", headers={"Host": "127.0.0.1:8765"})
+    assert loaded.status_code == 503
+    assert loaded.json()["error"] == "loadFailed"
+    saved = client.put(
+        "/api/projects/broken",
+        json={"files": [{"path": "tb.v", "content": "module tb; endmodule\n"}], "top": "tb"},
+        headers={"Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:8765"},
+    )
+    assert saved.status_code == 503
+    assert saved.json()["error"] == "loadFailed"
+    assert meta.read_text(encoding="utf-8") == "{not-json"
+
+
 def test_project_api_roundtrip(isolated_projects) -> None:
     app = create_app()
     create = next(r for r in app.routes if getattr(r, "path", None) == "/api/projects" and "POST" in getattr(r, "methods", set())).endpoint

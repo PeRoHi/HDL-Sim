@@ -4,12 +4,12 @@
 
 The browser UI is a same-origin app on loopback. Destructive and file APIs are not a public HTTP service.
 
-- Bind / Host: `127.0.0.1` or `localhost` (or `::1`) plus the UI port (launcher default **8765**, overridable via `--port` / `HDL_SIM_UI_PORT`). Other Host values are rejected.
+- Bind / Host: `127.0.0.1` or `localhost` (or `::1`) plus the UI port (launcher default **8765**, overridable via `--port` / `HDL_SIM_UI_PORT`). The Host (and Origin) port must be ASCII digits matching the listen port exactly (leading zeros and fullwidth digits are rejected). Other Host values are rejected. Invalid `HDL_SIM_UI_PORT` fails startup (no silent fallback).
 - If the request has an `Origin` header, it must be `http://127.0.0.1:<port>` (or localhost / `[::1]`). `Origin: null` is rejected. CORS is limited to those origins and does **not** use `*`. CORS is not authentication.
 - Source paths written under `verilog_sources/` and virtual files sent to elaborate/simulate must stay inside a jail. Nested relatives such as `lib/and2.v` are allowed; `..`, absolute paths, drive letters, percent-encoded `..` / C0-DEL (`%00`, `%0a`), and symlink escapes are not. Static `/` and `/assets` are jailed then read with `O_NOFOLLOW` (no path-open `FileResponse`).
 - `$dumpfile` names a file under the simulation VCD directory (the Web UI temp workspace). Absolute / `..` / percent-encoded dump paths are rejected when an anchor is set.
 - `` `include `` files must resolve under a configured search directory (same jail: no `..`, no symlink leaf).
-- Structured store load of empty or corrupt `.spj` / project meta is `loadFailed` (do not open-as-empty).
+- Structured store load of empty, whitespace-only, or corrupt `.spj` / project meta is `loadFailed` (HTTP 503). Do not open-as-empty and do not overwrite a broken store.
 - Client error payloads do not echo OS paths, errno, or tracebacks. Design / syntax messages stay.
 
 ## Pipeline
