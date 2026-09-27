@@ -137,6 +137,7 @@ def save_project(
 ) -> dict[str, Any]:
     project = _project_path(name)
     project.mkdir(parents=True, exist_ok=True)
+    meta = _read_meta(project)
 
     keep = set()
     for item in files:
@@ -150,12 +151,6 @@ def save_project(
         if existing.resolve() not in keep:
             existing.unlink()
 
-    try:
-        meta = _read_meta(project)
-    except ValueError as exc:
-        if str(exc) != "loadFailed":
-            raise
-        meta = {}
     if top is not None:
         meta["top"] = top
     if label is not None:

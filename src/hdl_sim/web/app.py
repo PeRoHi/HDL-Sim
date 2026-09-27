@@ -25,7 +25,12 @@ from hdl_sim.parser.ast import Design, Module, PortDirection
 from hdl_sim.parser.loader import load_design_with_meta, read_verilog_text
 from hdl_sim.web.vcd_json import parse_vcd_timeline, timeline_to_json
 
-from hdl_sim.web.local_http import listen_port_from_scope, local_api_rejection, loopback_origins
+from hdl_sim.web.local_http import (
+    expected_ui_port,
+    listen_port_from_scope,
+    local_api_rejection,
+    loopback_origins,
+)
 from hdl_sim.web.path_safety import (
     atomic_write_text,
     client_error_from_exception,
@@ -510,11 +515,19 @@ def _project_member_paths() -> set[str]:
     return members
 
 
+def _http_store_value_error(exc: BaseException) -> HTTPException:
+    if str(exc) == "loadFailed" or isinstance(exc, json.JSONDecodeError):
+        return HTTPException(status_code=503, detail="loadFailed")
+    return HTTPException(status_code=400, detail=client_error_from_exception(exc))
+
+
 def create_app() -> FastAPI:
     import os
     import sys
     import time
     import asyncio
+
+    expected_ui_port()
 
     last_ping_time = time.time()
     heartbeat_timeout = 180.0
@@ -699,7 +712,7 @@ def create_app() -> FastAPI:
         try:
             return project_store.list_projects()
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
+            raise _http_store_value_error(exc) from None
         except OSError:
             raise HTTPException(status_code=500, detail="storage error") from None
 
@@ -719,7 +732,7 @@ def create_app() -> FastAPI:
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail="project not found") from None
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
+            raise _http_store_value_error(exc) from None
 
     @app.put("/api/projects/{project_name}")
     def api_save_project(project_name: str, req: ProjectSaveRequest) -> dict[str, Any]:
@@ -735,7 +748,7 @@ def create_app() -> FastAPI:
                 wave=req.wave,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
+            raise _http_store_value_error(exc) from None
 
     @app.get("/api/spj/info")
     def api_spj_info() -> dict[str, Any]:
@@ -756,11 +769,7 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="spj file not found") from exc
         except (ValueError, json.JSONDecodeError) as exc:
-            if str(exc) == "loadFailed":
-                raise HTTPException(status_code=400, detail="loadFailed") from None
-            if isinstance(exc, json.JSONDecodeError):
-                raise HTTPException(status_code=400, detail="loadFailed") from None
-            raise HTTPException(status_code=400, detail="invalid spj") from None
+            raise _http_store_value_error(exc) from None
 
     @app.put("/api/spj/{filename}")
     def api_save_spj(filename: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -771,7 +780,7 @@ def create_app() -> FastAPI:
         try:
             saved = spj_store.save_spj_file(filename, payload)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=client_error_from_exception(exc)) from None
+            raise _http_store_value_error(exc) from None
         updated_sources: list[Any] = saved.get("updated_sources", [])
         source_errors: list[str] = []
         return {

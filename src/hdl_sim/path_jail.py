@@ -130,23 +130,48 @@ def jailed_regular_file(root: Path, rel: str) -> Path:
     return dest
 
 
+def _nofollow_flags(base: int) -> int:
+    flags = base
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    return flags
+
+
+def _lstat_regular(path: Path) -> os.stat_result:
+    try:
+        info = os.lstat(os.fspath(path))
+    except OSError as exc:
+        raise ValueError("file not found") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise ValueError("symlink not allowed")
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("file not found")
+    return info
+
+
+def _require_same_regular(fd: int, before: os.stat_result) -> os.stat_result:
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("file not found")
+    if (info.st_ino, info.st_dev) != (before.st_ino, before.st_dev):
+        raise ValueError("file not found")
+    return info
+
+
 def read_bytes_nofollow(path: Path) -> bytes:
     """Read a regular file without following a leaf symlink (``O_NOFOLLOW``)."""
 
     dest = Path(path)
-    if dest.is_symlink():
-        raise ValueError("symlink not allowed")
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    before = _lstat_regular(dest)
+    flags = _nofollow_flags(os.O_RDONLY)
     try:
         fd = os.open(os.fspath(dest), flags)
     except OSError as exc:
         raise ValueError("file not found") from exc
     try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError("file not found")
+        _require_same_regular(fd, before)
         chunks: list[bytes] = []
         while True:
             chunk = os.read(fd, 1024 * 1024)
@@ -154,6 +179,38 @@ def read_bytes_nofollow(path: Path) -> bytes:
                 break
             chunks.append(chunk)
         return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _fsync_regular_nofollow(path: Path) -> None:
+    dest = Path(path)
+    before = _lstat_regular(dest)
+    flags = _nofollow_flags(os.O_RDONLY)
+    try:
+        fd = os.open(os.fspath(dest), flags)
+    except OSError as exc:
+        raise ValueError("storage error") from exc
+    try:
+        _require_same_regular(fd, before)
+        os.fsync(fd)
+    except ValueError as exc:
+        raise ValueError("storage error") from exc
+    except OSError as exc:
+        raise ValueError("storage error") from exc
+    finally:
+        os.close(fd)
+
+
+def _fsync_dir_best_effort(path: Path) -> None:
+    try:
+        fd = os.open(os.fspath(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
     finally:
         os.close(fd)
 
@@ -200,8 +257,10 @@ def atomic_write_text(
     If *refuse_empty* is true, do not replace an existing non-empty file
     with an empty (or whitespace-only) payload.
 
-    Leftover regular ``.tmp`` is unlinked then recreated. A symlink ``.tmp``
-    is refused without unlinking (do not remove the link target).
+    Leftover regular ``.tmp`` is unlinked then recreated. A leftover that is
+    not a regular file (symlink, FIFO, socket, directory) is refused without
+    unlinking. After replace, the destination is fsynced (failure is an error);
+    directory fsync is best-effort.
     """
 
     dest = Path(path)
@@ -215,10 +274,7 @@ def atomic_write_text(
     if parent.is_symlink():
         raise ValueError("symlink not allowed")
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-    if tmp.is_symlink():
-        raise ValueError("symlink not allowed")
-    if tmp.exists():
-        tmp.unlink()
+    _refuse_or_unlink_leftover_tmp(tmp)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -227,6 +283,12 @@ def atomic_write_text(
     try:
         fd = os.open(os.fspath(tmp), flags, 0o644)
         created = True
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("storage error")
+        after = os.lstat(os.fspath(tmp))
+        if (opened.st_ino, opened.st_dev) != (after.st_ino, after.st_dev):
+            raise ValueError("storage error")
         with os.fdopen(fd, "w", encoding=encoding, newline="") as handle:
             fd = None
             handle.write(text)
@@ -236,8 +298,10 @@ def atomic_write_text(
             raise ValueError("symlink not allowed")
         os.replace(tmp, dest)
         created = False
+        _fsync_regular_nofollow(dest)
+        _fsync_dir_best_effort(parent)
     except Exception:
-        if created and tmp.exists() and not tmp.is_symlink():
+        if created and tmp.exists() and not tmp.is_symlink() and tmp.is_file():
             try:
                 tmp.unlink()
             except OSError:
@@ -246,3 +310,20 @@ def atomic_write_text(
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def _refuse_or_unlink_leftover_tmp(tmp: Path) -> None:
+    try:
+        info = os.lstat(os.fspath(tmp))
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ValueError("storage error") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise ValueError("symlink not allowed")
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("storage error")
+    try:
+        os.unlink(os.fspath(tmp))
+    except OSError as exc:
+        raise ValueError("storage error") from exc

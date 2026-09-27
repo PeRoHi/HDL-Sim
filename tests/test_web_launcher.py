@@ -18,6 +18,13 @@ def test_web_package_create_app_is_lazy_and_works() -> None:
     assert app.title == "HDL-Sim UI"
 
 
+def test_start_server_rejects_invalid_ui_port_env(monkeypatch) -> None:
+    from hdl_sim.web.launcher import start_server
+
+    monkeypatch.setenv("HDL_SIM_UI_PORT", "notaport")
+    assert start_server(open_browser=False, native_window=False, blocking=False) == 2
+
+
 def test_launcher_parser_defaults() -> None:
     args = build_parser().parse_args([])
     assert args.host == "127.0.0.1"

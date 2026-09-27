@@ -13,9 +13,34 @@ from pathlib import Path
 from typing import Callable
 
 DEFAULT_UI_PORT = 8765
+_ASCII_DIGITS = frozenset("0123456789")
 
 # Command-line tokens that identify this app (dev Python or frozen exe).
 _OURS_TOKENS = ("python", "hdl-sim", "hdl_sim", "hdlsim")
+
+
+def parse_ascii_port(raw: str) -> int:
+    """Parse a listen/UI port: ASCII digits only, exact decimal, no leading zeros."""
+
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("invalid listen port")
+    if any(ch not in _ASCII_DIGITS for ch in raw):
+        raise ValueError("invalid listen port")
+    if len(raw) > 1 and raw[0] == "0":
+        raise ValueError("invalid listen port")
+    port = int(raw)
+    if raw != str(port) or not (1 <= port <= 65535):
+        raise ValueError("invalid listen port")
+    return port
+
+
+def ascii_port_digits(raw: str) -> int | None:
+    """Return the port when *raw* is an exact ASCII decimal, else None."""
+
+    try:
+        return parse_ascii_port(raw)
+    except ValueError:
+        return None
 
 
 def port_is_free(host: str, port: int) -> bool:
@@ -55,15 +80,12 @@ def local_listen_port(local: str) -> int | None:
         if end < 0:
             return None
         rest = text[end + 1 :]
-        if rest.startswith(":") and rest[1:].isdigit():
-            return int(rest[1:])
+        if rest.startswith(":"):
+            return ascii_port_digits(rest[1:])
         return None
     if ":" not in text:
         return None
-    port_s = text.rsplit(":", 1)[-1]
-    if not port_s.isdigit():
-        return None
-    return int(port_s)
+    return ascii_port_digits(text.rsplit(":", 1)[-1])
 
 
 def parse_netstat_listening_pids(stdout: str, port: int) -> list[int]:
