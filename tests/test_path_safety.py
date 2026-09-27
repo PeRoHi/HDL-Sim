@@ -129,6 +129,38 @@ def test_atomic_write_replaces_regular_leftover_tmp(tmp_path: Path) -> None:
     assert not leftover.exists()
 
 
+def test_atomic_write_refuses_directory_leftover_tmp(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import atomic_write_text
+    import os
+
+    dest = tmp_path / "proj.spj"
+    leftover = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    leftover.mkdir()
+    (leftover / "inside.txt").write_text("keep", encoding="utf-8")
+    with pytest.raises(ValueError, match="storage error"):
+        atomic_write_text(dest, "new")
+    assert leftover.is_dir()
+    assert (leftover / "inside.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_atomic_write_refuses_fifo_leftover_tmp(tmp_path: Path) -> None:
+    from hdl_sim.web.path_safety import atomic_write_text
+    import os
+    import stat
+
+    dest = tmp_path / "proj.spj"
+    leftover = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    try:
+        os.mkfifo(leftover)
+    except (OSError, AttributeError):
+        pytest.skip("fifo not permitted")
+    assert stat.S_ISFIFO(os.lstat(leftover).st_mode)
+    with pytest.raises(ValueError, match="storage error"):
+        atomic_write_text(dest, "new")
+    assert leftover.exists()
+    assert stat.S_ISFIFO(os.lstat(leftover).st_mode)
+
+
 def test_atomic_write_refuses_symlink_tmp(tmp_path: Path) -> None:
     from hdl_sim.web.path_safety import atomic_write_text
     import os
