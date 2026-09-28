@@ -6,10 +6,13 @@ leaves and existing ancestors are refused before ``resolve``.
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 from pathlib import Path
 from urllib.parse import unquote
+
+_LOG = logging.getLogger(__name__)
 
 _UNQUOTE_ROUNDS = 8
 
@@ -186,18 +189,23 @@ def read_bytes_nofollow(path: Path) -> bytes:
 def _fsync_regular_nofollow(path: Path) -> None:
     dest = Path(path)
     before = _lstat_regular(dest)
-    flags = _nofollow_flags(os.O_RDONLY)
+    # Windows FlushFileBuffers / _commit needs write access; O_RDONLY fsync fails.
+    base = os.O_RDWR if os.name == "nt" else os.O_RDONLY
+    flags = _nofollow_flags(base)
     try:
         fd = os.open(os.fspath(dest), flags)
-    except OSError as exc:
-        raise ValueError("storage error") from exc
+    except OSError:
+        _LOG.warning("dest fsync skipped: open failed after replace")
+        return
     try:
-        _require_same_regular(fd, before)
-        os.fsync(fd)
-    except ValueError as exc:
-        raise ValueError("storage error") from exc
-    except OSError as exc:
-        raise ValueError("storage error") from exc
+        try:
+            _require_same_regular(fd, before)
+        except ValueError as exc:
+            raise ValueError("storage error") from exc
+        try:
+            os.fsync(fd)
+        except OSError:
+            _LOG.warning("dest fsync skipped: fsync failed after replace")
     finally:
         os.close(fd)
 
@@ -259,8 +267,8 @@ def atomic_write_text(
 
     Leftover regular ``.tmp`` is unlinked then recreated. A leftover that is
     not a regular file (symlink, FIFO, socket, directory) is refused without
-    unlinking. After replace, the destination is fsynced (failure is an error);
-    directory fsync is best-effort.
+    unlinking. After replace, dest identity is checked; dest and directory
+    fsync are best-effort (open/fsync OSError is logged, not a failed save).
     """
 
     dest = Path(path)
