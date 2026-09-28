@@ -204,6 +204,38 @@ def test_atomic_write_text_replaces_and_cleans_tmp(tmp_path: Path) -> None:
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
+def test_atomic_write_succeeds_when_dest_fsync_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """os.replace already committed the write; dest/dir fsync OSError must not fail the save."""
+
+    import os
+    import stat
+
+    from hdl_sim.web.path_safety import atomic_write_text
+
+    dest = tmp_path / "proj.spj"
+    dest.write_text("old", encoding="utf-8")
+    real_fsync = os.fsync
+
+    def fsync_dest_raises(fd: int) -> None:
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode):
+            raise OSError(13, "Permission denied")
+        try:
+            dest_info = os.lstat(os.fspath(dest))
+        except OSError:
+            real_fsync(fd)
+            return
+        if (info.st_ino, info.st_dev) == (dest_info.st_ino, dest_info.st_dev):
+            raise OSError(13, "Permission denied")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync_dest_raises)
+    atomic_write_text(dest, "new")
+    assert dest.read_text(encoding="utf-8") == "new"
+
+
 def test_atomic_write_refuses_empty_overwrite(tmp_path: Path) -> None:
     from hdl_sim.web.path_safety import atomic_write_text
 
