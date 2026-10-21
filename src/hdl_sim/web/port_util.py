@@ -54,13 +54,15 @@ def port_is_free(host: str, port: int) -> bool:
 
 
 def parse_pid(raw: str) -> int | None:
-    """Accept only a positive integer written as digits (no sign, no spaces)."""
+    """Accept only a positive PID as exact ASCII decimal (no Unicode digits, no leading zeros)."""
 
     text = str(raw).strip()
-    if not text.isdigit():
+    if not text or any(ch not in _ASCII_DIGITS for ch in text):
+        return None
+    if len(text) > 1 and text[0] == "0":
         return None
     pid = int(text)
-    if pid <= 0:
+    if text != str(pid) or pid <= 0:
         return None
     return pid
 
@@ -264,12 +266,28 @@ def ensure_default_port(
     )
 
 
+def _no_redirect_opener() -> urllib.request.OpenerDirector:
+    """Opener without HTTPRedirectHandler (local health must not follow 3xx)."""
+
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    )
+
+
 def probe_hdl_sim_url(host: str, port: int, *, timeout: float = 0.8) -> dict | None:
+    """Probe loopback UI health. Only HTTP 200 counts; redirects are not followed."""
+
     url = f"http://{host}:{port}/api/ui-info"
+    request = urllib.request.Request(url, method="GET")
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with _no_redirect_opener().open(request, timeout=timeout) as resp:
+            if resp.getcode() != 200:
+                return None
             return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return None
 
 

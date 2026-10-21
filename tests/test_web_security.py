@@ -15,6 +15,7 @@ from hdl_sim.web.local_http import (
     local_api_rejection,
     loopback_origins,
     origin_is_allowed,
+    referer_is_loopback_ui,
 )
 from hdl_sim.web import spj_store
 
@@ -53,7 +54,21 @@ def test_host_and_origin_gate() -> None:
     assert origin_is_allowed("http://127.0.0.1:8765")
     assert not origin_is_allowed("null")
     assert not origin_is_allowed("http://evil.example:8765")
+    assert referer_is_loopback_ui("http://127.0.0.1:8765/")
+    assert referer_is_loopback_ui("http://127.0.0.1:8765/assets/app.js")
+    assert not referer_is_loopback_ui(None)
+    assert not referer_is_loopback_ui("http://evil.example:8765/")
     assert local_api_rejection("127.0.0.1:8765", None) is None
+    assert local_api_rejection("127.0.0.1:8765", None, method="POST") == "invalid origin"
+    assert (
+        local_api_rejection(
+            "127.0.0.1:8765",
+            None,
+            method="POST",
+            referer="http://127.0.0.1:8765/",
+        )
+        is None
+    )
     assert local_api_rejection("127.0.0.1:8765", "null") == "invalid origin"
     assert local_api_rejection("evil.example:8765", None) == "invalid host"
     # Bind address / wildcards are not allowlist entries.
@@ -107,6 +122,13 @@ def test_http_rejects_non_loopback_host_and_null_origin() -> None:
         headers=_loopback_headers("null"),
     )
     assert null_origin.status_code == 403
+    missing_both = client.post(
+        "/api/save_v_file",
+        json={"project_name": "demo", "file_name": "a.v", "source": "module a; endmodule\n"},
+        headers={"Host": "127.0.0.1:8765"},
+    )
+    assert missing_both.status_code == 403
+    assert missing_both.json()["error"] == "invalid origin"
     health = client.get("/api/health", headers={"Host": "127.0.0.1:8765"})
     assert health.status_code == 200
     xff = client.get(
@@ -164,6 +186,24 @@ def test_save_v_file_and_spj_reject_traversal(tmp_path, monkeypatch) -> None:
             "demo.spj",
             {"files": [{"path": "../escape.v", "content": "module x; endmodule\n"}]},
         )
+
+
+def test_mutating_missing_origin_accepts_loopback_referer(tmp_path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr("hdl_sim.web.paths.user_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("hdl_sim.web.app.user_data_dir", lambda: tmp_path)
+    client = TestClient(create_app(), base_url="http://127.0.0.1:8765")
+    referer_ok = client.post(
+        "/api/save_v_file",
+        json={"project_name": "demo", "file_name": "a.v", "source": "module a; endmodule\n"},
+        headers={
+            "Host": "127.0.0.1:8765",
+            "Referer": "http://127.0.0.1:8765/",
+        },
+    )
+    assert referer_ok.status_code == 200
+    assert referer_ok.json()["ok"] is True
 
 
 def test_legacy_spj_rejects_dotdot(tmp_path, monkeypatch) -> None:
@@ -316,6 +356,42 @@ def test_static_rejects_non_loopback_host(tmp_path, monkeypatch) -> None:
     client = TestClient(app, base_url="http://127.0.0.1:8765")
     denied = client.get("/assets/ok.js", headers={"Host": "evil.example:8765"})
     assert denied.status_code == 403
+
+
+def test_dumpfile_rejects_c0_before_strip(tmp_path: Path) -> None:
+    vcd = tmp_path / "wave.vcd"
+    # Real TAB before the filename must not be stripped into a jail-relative path.
+    tabbed = "\twave.vcd"
+    sim = Simulator.from_source(
+        f"""
+        module t;
+          initial begin
+            $dumpfile("{tabbed}");
+            $dumpvars;
+            $finish;
+          end
+        endmodule
+        """,
+        vcd_path=vcd,
+        vcd_anchor=tmp_path,
+    )
+    with pytest.raises(ValueError, match="dumpfile"):
+        sim.run(until=1, max_events=20)
+
+
+def test_read_verilog_text_rejects_symlink(tmp_path: Path) -> None:
+    from hdl_sim.parser.loader import read_verilog_text
+
+    real = tmp_path / "real.v"
+    real.write_text("module real; endmodule\n", encoding="utf-8")
+    link = tmp_path / "link.v"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    assert "module real" in read_verilog_text(real)
+    with pytest.raises(ValueError, match="symlink"):
+        read_verilog_text(link)
 
 
 def test_dumpfile_percent_encoded_dotdot_rejected(tmp_path: Path) -> None:

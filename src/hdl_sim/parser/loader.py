@@ -107,7 +107,11 @@ def format_syntax_error(exc: UnexpectedInput, source: str, file_label: str) -> V
 
 
 def read_verilog_text(path: Path) -> str:
-    data = path.read_bytes()
+    """Read a Verilog source without following a leaf symlink."""
+
+    from hdl_sim.path_jail import read_bytes_nofollow
+
+    data = read_bytes_nofollow(Path(path))
     for encoding in ("utf-8", "utf-8-sig", "cp932", "shift_jis"):
         try:
             return data.decode(encoding)

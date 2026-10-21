@@ -2,7 +2,7 @@
 
 CORS is not authentication. Destructive and file APIs must see:
 - ``Host`` of loopback plus the UI port (default 8765)
-- ``Origin`` absent (non-browser) or the same loopback origin
+- ``Origin`` of the same loopback origin, or (mutating only) a loopback ``Referer``
 - ``Origin: null`` rejected
 
 Assume: the UI is served at ``http://127.0.0.1:<port>/`` (launcher default
@@ -18,6 +18,7 @@ from hdl_sim.path_jail import has_c0_del
 from hdl_sim.web.port_util import DEFAULT_UI_PORT, parse_ascii_port
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_MUTATING_METHODS = frozenset({"POST", "PUT", "DELETE", "PATCH"})
 _UI_PORT_ENV = "HDL_SIM_UI_PORT"
 
 
@@ -85,17 +86,13 @@ def host_is_loopback(host_header: str, *, port: int | None = None) -> bool:
     return parsed_port == expected
 
 
-def origin_is_allowed(origin: str | None, *, port: int | None = None) -> bool:
-    """Return True when Origin is absent (non-browser) or a loopback UI origin."""
+def _loopback_http_authority(url: str, *, port: int | None = None) -> bool:
+    """True when *url* is ``http`` to a loopback host with the UI port (path ignored)."""
 
-    if origin is None:
-        return True
-    if has_c0_del(origin):
+    if has_c0_del(url):
         return False
-    text = origin.strip()
-    if not text:
-        return True
-    if text.lower() == "null":
+    text = url.strip()
+    if not text or text.lower() == "null":
         return False
     parsed = urlparse(text)
     if parsed.scheme != "http":
@@ -113,8 +110,29 @@ def origin_is_allowed(origin: str | None, *, port: int | None = None) -> bool:
         expected = expected_ui_port() if port is None else port
     except ValueError:
         return False
-    origin_port = parsed_port if parsed_port is not None else 80
-    return origin_port == expected
+    url_port = parsed_port if parsed_port is not None else 80
+    return url_port == expected
+
+
+def origin_is_allowed(origin: str | None, *, port: int | None = None) -> bool:
+    """Return True when Origin is absent (non-browser) or a loopback UI origin."""
+
+    if origin is None:
+        return True
+    if has_c0_del(origin):
+        return False
+    text = origin.strip()
+    if not text:
+        return True
+    return _loopback_http_authority(text, port=port)
+
+
+def referer_is_loopback_ui(referer: str | None, *, port: int | None = None) -> bool:
+    """Return True when Referer is a loopback UI URL (path may be present)."""
+
+    if referer is None:
+        return False
+    return _loopback_http_authority(referer, port=port)
 
 
 def loopback_origins(*, port: int | None = None) -> list[str]:
@@ -126,11 +144,26 @@ def loopback_origins(*, port: int | None = None) -> list[str]:
     ]
 
 
-def local_api_rejection(host_header: str | None, origin: str | None, *, port: int | None = None) -> str | None:
-    """Return an error code if the request must be rejected, else None."""
+def local_api_rejection(
+    host_header: str | None,
+    origin: str | None,
+    *,
+    port: int | None = None,
+    method: str = "GET",
+    referer: str | None = None,
+) -> str | None:
+    """Return an error code if the request must be rejected, else None.
+
+    Mutating methods with a missing Origin require a loopback Referer
+    (same-origin browser navigations that omit Origin).
+    """
 
     if not host_is_loopback(host_header or "", port=port):
         return "invalid host"
     if not origin_is_allowed(origin, port=port):
         return "invalid origin"
+    origin_absent = origin is None or not str(origin).strip()
+    if origin_absent and (method or "GET").upper() in _MUTATING_METHODS:
+        if not referer_is_loopback_ui(referer, port=port):
+            return "invalid origin"
     return None

@@ -566,6 +566,8 @@ def create_app() -> FastAPI:
             request.headers.get("host"),
             request.headers.get("origin"),
             port=listen_port_from_scope(request.scope.get("server")),
+            method=request.method,
+            referer=request.headers.get("referer"),
         )
         if rejected is not None:
             return JSONResponse({"ok": False, "error": rejected}, status_code=403)
