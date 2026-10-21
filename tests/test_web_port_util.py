@@ -50,6 +50,9 @@ def test_parse_pid_digits_only() -> None:
     assert parse_pid("+12") is None
     assert parse_pid("12a") is None
     assert parse_pid("") is None
+    assert parse_pid("01234") is None
+    assert parse_pid("１２３４") is None
+    assert parse_pid("\u0661\u0662\u0663") is None
 
 
 def test_local_listen_port_is_exact() -> None:
@@ -125,3 +128,54 @@ def test_subprocess_calls_set_shell_false() -> None:
 def test_pid_looks_like_python_rejects_non_positive() -> None:
     assert pid_looks_like_python(0) is False
     assert pid_looks_like_python(-3) is False
+
+
+def test_probe_hdl_sim_url_does_not_follow_redirect(monkeypatch) -> None:
+    """A 302 on the listen port must not count as a healthy HDL-Sim UI."""
+
+    import io
+    import json
+    from email.message import Message
+
+    import urllib.error
+    import urllib.request
+
+    from hdl_sim.web.port_util import probe_hdl_sim_url
+
+    class _FakeResp:
+        def __init__(self, code: int, body: bytes = b""):
+            self._code = code
+            self._body = body
+            self.headers = Message()
+
+        def getcode(self) -> int:
+            return self._code
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    class _RedirectOpener:
+        def open(self, _req, timeout=None):  # noqa: ANN001
+            raise urllib.error.HTTPError(
+                "http://127.0.0.1:8765/api/ui-info",
+                302,
+                "Found",
+                Message(),
+                io.BytesIO(b""),
+            )
+
+    monkeypatch.setattr("hdl_sim.web.port_util._no_redirect_opener", lambda: _RedirectOpener())
+    assert probe_hdl_sim_url("127.0.0.1", 8765) is None
+
+    class _OkOpener:
+        def open(self, _req, timeout=None):  # noqa: ANN001
+            return _FakeResp(200, json.dumps({"version": "1.1.0"}).encode("utf-8"))
+
+    monkeypatch.setattr("hdl_sim.web.port_util._no_redirect_opener", lambda: _OkOpener())
+    assert probe_hdl_sim_url("127.0.0.1", 8765) == {"version": "1.1.0"}

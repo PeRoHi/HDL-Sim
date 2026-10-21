@@ -260,15 +260,16 @@ def atomic_write_text(
     encoding: str = "utf-8",
     refuse_empty: bool = False,
 ) -> None:
-    """Write *text* via exclusive tmp (``O_EXCL|O_NOFOLLOW``), ``fsync``, replace.
+    """Write *text* via exclusive stable tmp (``<name>.tmp``), ``fsync``, replace.
 
     If *refuse_empty* is true, do not replace an existing non-empty file
     with an empty (or whitespace-only) payload.
 
-    Leftover regular ``.tmp`` is unlinked then recreated. A leftover that is
-    not a regular file (symlink, FIFO, socket, directory) is refused without
-    unlinking. After replace, dest identity is checked; dest and directory
-    fsync are best-effort (open/fsync OSError is logged, not a failed save).
+    Leftover regular ``.tmp`` is unlinked then recreated with ``O_EXCL|O_NOFOLLOW``.
+    A leftover that is not a regular file (symlink, FIFO, socket, directory) is
+    refused without unlinking. Non-regular destinations (FIFO/dir/symlink) are
+    refused before replace. After replace, dest and directory fsync are
+    best-effort (open/fsync OSError is logged, not a failed save).
     """
 
     dest = Path(path)
@@ -276,12 +277,14 @@ def atomic_write_text(
     if dest.is_symlink() or parent.is_symlink():
         raise ValueError("symlink not allowed")
     reject_symlink_chain(dest, stop_at=parent)
+    _refuse_nonregular_dest(dest)
     if refuse_empty and dest.is_file() and dest.stat().st_size > 0 and not (text or "").strip():
         raise ValueError("refusing to overwrite existing file with empty content")
     parent.mkdir(parents=True, exist_ok=True)
     if parent.is_symlink():
         raise ValueError("symlink not allowed")
-    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    # Stable name so orphaned temps do not accumulate across crashes.
+    tmp = dest.with_name(f"{dest.name}.tmp")
     _refuse_or_unlink_leftover_tmp(tmp)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
@@ -304,6 +307,7 @@ def atomic_write_text(
             os.fsync(handle.fileno())
         if tmp.is_symlink():
             raise ValueError("symlink not allowed")
+        _refuse_nonregular_dest(dest)
         os.replace(tmp, dest)
         created = False
         _fsync_regular_nofollow(dest)
@@ -318,6 +322,21 @@ def atomic_write_text(
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def _refuse_nonregular_dest(dest: Path) -> None:
+    """Refuse to replace a non-regular destination (FIFO/dir/symlink). Missing is OK."""
+
+    try:
+        info = os.lstat(os.fspath(dest))
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ValueError("storage error") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise ValueError("symlink not allowed")
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("storage error")
 
 
 def _refuse_or_unlink_leftover_tmp(tmp: Path) -> None:

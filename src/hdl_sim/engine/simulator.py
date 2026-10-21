@@ -201,11 +201,13 @@ class Simulator:
             self._tracer.log(f"#{time} $display {message}")
 
     def _on_dumpfile(self, path: str) -> None:
-        from hdl_sim.path_jail import join_under, nested_unquote, normalize_relpath
+        from hdl_sim.path_jail import has_c0_del, join_under, nested_unquote, normalize_relpath
 
-        raw = str(path).strip()
-        if not raw or "\x00" in raw:
+        raw = str(path)
+        # C0/DEL before strip so TAB/LF cannot be trimmed away into a jail path.
+        if has_c0_del(raw) or not raw.strip():
             raise ValueError("invalid dumpfile path")
+        raw = raw.strip()
         if self._vcd_anchor is None:
             candidate = Path(raw.replace("\\", "/"))
             self._vcd_path = candidate if candidate.is_absolute() else Path(raw)
